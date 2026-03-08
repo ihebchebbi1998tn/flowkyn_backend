@@ -110,7 +110,20 @@ export class AuthService {
       );
     });
 
-    return { access_token: accessToken, refresh_token: refreshToken };
+    return {
+      access_token: accessToken,
+      refresh_token: refreshToken,
+      user: {
+        id: user.id,
+        email: user.email,
+        name: user.name,
+        avatar_url: user.avatar_url,
+        language: user.language,
+        status: user.status,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+      },
+    };
   }
 
   async refresh(refreshToken: string) {

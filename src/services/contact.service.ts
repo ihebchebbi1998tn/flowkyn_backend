@@ -5,7 +5,7 @@ import { AppError } from '../middleware/errorHandler';
 import { sanitizeText } from '../utils/sanitize';
 
 // BUG FIX: Whitelist allowed status values to prevent arbitrary status injection
-const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'resolved', 'closed']);
+const ALLOWED_STATUSES = new Set(['new', 'read', 'replied', 'archived']);
 
 export class ContactService {
   async create(data: { name: string; email: string; subject?: string; message: string; ipAddress?: string }) {
