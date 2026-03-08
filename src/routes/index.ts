@@ -11,6 +11,7 @@ import { analyticsRoutes } from './analytics.routes';
 import { auditLogsRoutes } from './auditLogs.routes';
 import { adminRoutes } from './admin.routes';
 import { contactRoutes } from './contact.routes';
+import { smtpTestRoutes } from './smtpTest.routes';
 
 const router = Router();
 
@@ -27,5 +28,6 @@ router.use('/analytics', analyticsRoutes);
 router.use('/audit-logs', auditLogsRoutes);
 router.use('/admin', adminRoutes);
 router.use('/contact', contactRoutes);
+router.use('/smtp-test', smtpTestRoutes);
 
 export { router as routes };
