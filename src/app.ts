@@ -10,6 +10,8 @@ import { requestId } from './middleware/requestId';
 import { routes } from './routes';
 import { env } from './config/env';
 import { monitorMiddleware, monitorRoutes } from './monitor';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swagger';
 
 const app = express();
 
@@ -46,6 +48,14 @@ app.use(monitorMiddleware);
 
 // ─── Monitor dashboard ───
 app.use('/monitor', monitorRoutes);
+
+// ─── Swagger API Documentation ───
+app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'Flowkyn API Documentation',
+  customfavIcon: '/favicon.ico',
+}));
+app.get('/docs.json', (_req, res) => res.json(swaggerSpec));
 
 // ─── Serve uploaded files statically with caching ───
 app.use('/uploads', express.static(env.uploadsDir, {
