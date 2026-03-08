@@ -86,7 +86,7 @@ export class OrganizationsService {
     await sendEmail({
       to: email,
       type: 'organization_invitation',
-      data: { orgName: org.name, link: `${env.frontendUrl}/invitations/accept?token=${token}` },
+      data: { orgName: org.name, link: `${env.frontendUrl}/invite/${token}?type=org` },
       lang: emailLang,
     });
 
