@@ -1,8 +1,10 @@
 import { Request, Response, NextFunction } from 'express';
 import { AdminService } from '../services/admin.service';
+import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
 
 const adminService = new AdminService();
+const auditLogsService = new AuditLogsService();
 
 export class AdminController {
   async getStats(_req: Request, res: Response, next: NextFunction) {
@@ -27,30 +29,43 @@ export class AdminController {
     } catch (err) { next(err); }
   }
 
-  async updateUser(req: Request, res: Response, next: NextFunction) {
+  async updateUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = await adminService.updateUser(req.params.id, req.body);
+      await auditLogsService.create('', req.user!.userId, 'ADMIN_UPDATE_USER', {
+        targetUserId: req.params.id,
+        changes: req.body,
+      });
       res.json(user);
     } catch (err) { next(err); }
   }
 
-  async suspendUser(req: Request, res: Response, next: NextFunction) {
+  async suspendUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.suspendUser(req.params.id);
+      await auditLogsService.create('', req.user!.userId, 'ADMIN_SUSPEND_USER', {
+        targetUserId: req.params.id,
+      });
       res.json({ message: 'User suspended' });
     } catch (err) { next(err); }
   }
 
-  async unsuspendUser(req: Request, res: Response, next: NextFunction) {
+  async unsuspendUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.unsuspendUser(req.params.id);
+      await auditLogsService.create('', req.user!.userId, 'ADMIN_UNSUSPEND_USER', {
+        targetUserId: req.params.id,
+      });
       res.json({ message: 'User unsuspended' });
     } catch (err) { next(err); }
   }
 
-  async deleteUser(req: Request, res: Response, next: NextFunction) {
+  async deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.deleteUser(req.params.id);
+      await auditLogsService.create('', req.user!.userId, 'ADMIN_DELETE_USER', {
+        targetUserId: req.params.id,
+      });
       res.status(204).end();
     } catch (err) { next(err); }
   }
@@ -63,9 +78,12 @@ export class AdminController {
     } catch (err) { next(err); }
   }
 
-  async deleteOrganization(req: Request, res: Response, next: NextFunction) {
+  async deleteOrganization(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.deleteOrganization(req.params.id);
+      await auditLogsService.create('', req.user!.userId, 'ADMIN_DELETE_ORG', {
+        targetOrgId: req.params.id,
+      });
       res.status(204).end();
     } catch (err) { next(err); }
   }

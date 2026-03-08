@@ -1,13 +1,14 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller';
 import { authenticate } from '../middleware/auth';
+import { requireSuperAdmin } from '../config/superAdmin';
 
 const router = Router();
 const ctrl = new AdminController();
 
-// All admin routes require authentication
-// TODO: Add super-admin role check middleware
+// All admin routes require authentication + super-admin role
 router.use(authenticate);
+router.use(requireSuperAdmin);
 
 // Dashboard
 router.get('/stats', ctrl.getStats);

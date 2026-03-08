@@ -2,11 +2,11 @@ import { v4 as uuid } from 'uuid';
 import { query } from '../config/database';
 
 export class AuditLogsService {
-  async create(orgId: string, userId: string, action: string, metadata: any) {
+  async create(orgId: string | null, userId: string, action: string, metadata: any) {
     const [log] = await query(
       `INSERT INTO audit_logs (id, organization_id, user_id, action, metadata, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-      [uuid(), orgId, userId, action, JSON.stringify(metadata)]
+      [uuid(), orgId || null, userId, action, JSON.stringify(metadata)]
     );
     return log;
   }
