@@ -57,16 +57,21 @@ function requireAdminRole(member: { role_name: string }, action: string) {
 
 /**
  * Verify the authenticated user owns a given participant_id.
+ * Supports both org-member participants and guest participants.
  * Prevents impersonation in message/post/action endpoints.
  */
 async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
-  const row = await queryOne(
+  // Check org-member participant
+  const memberRow = await queryOne(
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [participantId, userId]
   );
-  if (!row) throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
+  if (memberRow) return;
+
+  // No match — user doesn't own this participant
+  throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
 // ─── Controller ───────────────────────────────────────────────────────────────

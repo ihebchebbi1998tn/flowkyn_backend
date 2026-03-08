@@ -9,7 +9,7 @@ import { queryOne } from '../config/database';
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
 
-/** Verify the authenticated user owns the given participant_id */
+/** Verify the authenticated user owns the given participant_id (org members only — guests can't play) */
 async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
   const row = await queryOne(
     `SELECT p.id FROM participants p

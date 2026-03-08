@@ -36,7 +36,7 @@ export class UsersController {
       if (!isAllowedImageType(file.mimetype)) throw new AppError('Only image files (JPEG, PNG, GIF, WebP) are allowed', 400, 'FILE_TYPE_NOT_ALLOWED');
 
       const { url } = saveFile(file.buffer, file.originalname, 'avatars');
-      await filesService.create(req.user!.userId, url, file.mimetype, file.size);
+      await filesService.create(req.user!.userId, url, file.mimetype, file.originalname, file.size);
       const user = await usersService.updateAvatar(req.user!.userId, url);
 
       await audit.create(null, req.user!.userId, 'USER_UPLOAD_AVATAR', { mimetype: file.mimetype });
