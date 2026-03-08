@@ -4,6 +4,7 @@ import { env } from './config/env';
 import { initializeSocket } from './socket';
 import { pool, checkConnection } from './config/database';
 import { runMigrations } from './config/migrate';
+import { startCleanupCron, stopCleanupCron } from './services/cleanup.service';
 
 async function bootstrap() {
   // 1. Verify database connectivity
@@ -21,7 +22,10 @@ async function bootstrap() {
   const server = createServer(app);
   initializeSocket(server);
 
-  // 4. Start listening
+  // 4. Start cleanup cron (every 30 min)
+  startCleanupCron();
+
+  // 5. Start listening
   server.listen(env.port, () => {
     console.log(`🚀 Flowkyn API running on port ${env.port} [${env.nodeEnv}]`);
     console.log(`   Health: http://localhost:${env.port}/health`);
@@ -31,6 +35,9 @@ async function bootstrap() {
   // Graceful shutdown
   const shutdown = async (signal: string) => {
     console.log(`\n⏳ ${signal} received — shutting down gracefully...`);
+
+    stopCleanupCron();
+    console.log('  ✅ Cleanup cron stopped');
 
     server.close(() => {
       console.log('  ✅ HTTP server closed');

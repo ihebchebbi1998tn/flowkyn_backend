@@ -5,6 +5,7 @@ import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/
 import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
 import { UserRow, UserSessionRow } from '../types';
+import { env } from '../config/env';
 import crypto from 'crypto';
 
 /** Hash a refresh token before storing in DB */
@@ -45,7 +46,7 @@ export class AuthService {
     await sendEmail({
       to: email,
       type: 'verify_account',
-      data: { link: `https://app.flowkyn.com/verify?token=${token}`, name },
+      data: { link: `${env.frontendUrl}/verify?token=${token}`, name },
       lang,
     });
 
@@ -143,7 +144,7 @@ export class AuthService {
     await sendEmail({
       to: email,
       type: 'reset_password',
-      data: { link: `https://app.flowkyn.com/reset-password?token=${token}`, name: user.name },
+      data: { link: `${env.frontendUrl}/reset-password?token=${token}`, name: user.name },
       lang: lang || user.language || 'en',
     });
 
