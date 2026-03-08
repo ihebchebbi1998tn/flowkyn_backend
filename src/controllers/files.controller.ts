@@ -1,10 +1,12 @@
 import { Response, NextFunction } from 'express';
 import { FilesService } from '../services/files.service';
+import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
 import { saveFile, isAllowedFileType } from '../utils/upload';
 import { AppError } from '../middleware/errorHandler';
 
 const filesService = new FilesService();
+const audit = new AuditLogsService();
 
 export class FilesController {
   async upload(req: AuthRequest, res: Response, next: NextFunction) {
@@ -13,12 +15,10 @@ export class FilesController {
       if (!file) throw new AppError('No file provided', 400);
       if (!isAllowedFileType(file.mimetype)) throw new AppError('File type not allowed', 400);
 
-      // Save to flowkyn_uploads/files/
       const { url } = saveFile(file.buffer, file.originalname, 'files');
-
-      // Store metadata in DB
       const result = await filesService.create(req.user!.userId, url, file.mimetype, file.size);
 
+      await audit.create(null, req.user!.userId, 'FILE_UPLOAD', { mimetype: file.mimetype, size: file.size });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
