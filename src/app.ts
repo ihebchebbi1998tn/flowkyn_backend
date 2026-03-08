@@ -49,13 +49,28 @@ app.use(monitorMiddleware);
 // ─── Monitor dashboard ───
 app.use('/monitor', monitorRoutes);
 
-// ─── Swagger API Documentation ───
-app.use('/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+// ─── Swagger API Documentation (HTTP Basic Auth in production) ───
+const docsAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  if (env.nodeEnv !== 'production') return next();
+  const authHeader = req.headers.authorization;
+  if (authHeader) {
+    const [scheme, encoded] = authHeader.split(' ');
+    if (scheme === 'Basic' && encoded) {
+      const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
+      const expectedUser = process.env.DOCS_USER || 'admin';
+      const expectedPass = process.env.DOCS_PASSWORD || 'Flowkyn2026';
+      if (user === expectedUser && pass === expectedPass) return next();
+    }
+  }
+  res.set('WWW-Authenticate', 'Basic realm="Flowkyn API Docs"');
+  res.status(401).send('Authentication required');
+};
+app.use('/docs', docsAuth, swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
   customCss: '.swagger-ui .topbar { display: none }',
   customSiteTitle: 'Flowkyn API Documentation',
   customfavIcon: '/favicon.ico',
 }));
-app.get('/docs.json', (_req, res) => res.json(swaggerSpec));
+app.get('/docs.json', docsAuth, (_req, res) => res.json(swaggerSpec));
 
 // ─── Serve uploaded files statically with caching ───
 app.use('/uploads', express.static(env.uploadsDir, {
