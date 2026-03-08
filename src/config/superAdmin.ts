@@ -5,10 +5,19 @@ import { AuthRequest } from '../types';
  * Super-admin access control.
  * Only env-configured emails can access admin endpoints.
  */
-const SUPER_ADMIN_EMAILS = (process.env.SUPER_ADMIN_EMAILS || '')
-  .split(',')
-  .map(e => e.trim().toLowerCase())
-  .filter(Boolean);
+/**
+ * Super admin emails. Defaults include support@flowkyn.com.
+ * Add more via SUPER_ADMIN_EMAILS env var (comma-separated).
+ */
+const DEFAULT_SUPER_ADMINS = ['support@flowkyn.com'];
+
+const SUPER_ADMIN_EMAILS = [
+  ...DEFAULT_SUPER_ADMINS,
+  ...(process.env.SUPER_ADMIN_EMAILS || '')
+    .split(',')
+    .map(e => e.trim().toLowerCase())
+    .filter(Boolean),
+];
 
 export async function requireSuperAdmin(req: AuthRequest, res: Response, next: NextFunction): Promise<void> {
   const requestId = (req.headers['x-request-id'] as string) || 'unknown';

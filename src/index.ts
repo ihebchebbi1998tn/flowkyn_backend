@@ -5,6 +5,7 @@ import { initializeSocket } from './socket';
 import { pool, checkConnection } from './config/database';
 import { runMigrations } from './config/migrate';
 import { startCleanupCron, stopCleanupCron } from './services/cleanup.service';
+import { seedSuperAdmin } from './config/seedAdmin';
 
 async function bootstrap() {
   // 1. Verify database connectivity
@@ -18,19 +19,22 @@ async function bootstrap() {
   // 2. Run auto-migrations (creates tables if not exists)
   await runMigrations();
 
-  // 3. Create HTTP server & attach Socket.io
+  // 3. Seed super admin (support@flowkyn.com) — no-op if already exists
+  await seedSuperAdmin();
+
+  // 4. Create HTTP server & attach Socket.io
   const server = createServer(app);
   initializeSocket(server);
 
-  // 4. Configure server for high concurrency
+  // 5. Configure server for high concurrency
   server.maxConnections = 10000;
   server.keepAliveTimeout = 65000; // Slightly above ALB/Nginx default (60s)
   server.headersTimeout = 66000;
 
-  // 5. Start cleanup cron (every 30 min)
+  // 6. Start cleanup cron (every 30 min)
   startCleanupCron();
 
-  // 6. Start listening
+  // 7. Start listening
   server.listen(env.port, () => {
     console.log(`🚀 Flowkyn API running on port ${env.port} [${env.nodeEnv}]`);
     console.log(`   Health:  http://localhost:${env.port}/health`);
