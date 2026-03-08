@@ -5,62 +5,203 @@ const options: swaggerJsdoc.Options = {
     openapi: '3.0.3',
     info: {
       title: 'Flowkyn API',
-      version: '1.0.0',
+      version: '1.2.0',
       description: `
 # Flowkyn API Documentation
 
-Flowkyn is an event management and gamification platform that allows organizations to create interactive events with real-time games, leaderboards, and team collaboration.
+Flowkyn is a **team engagement and gamification platform** for modern distributed organizations. It enables companies to create interactive events, run real-time games, track engagement analytics, and manage team building activities — all from one platform.
 
-## Authentication
+---
 
-All authenticated endpoints require a **Bearer token** in the \`Authorization\` header.
+## 🔑 Authentication
+
+All authenticated endpoints require a **Bearer token** in the \`Authorization\` header:
 
 \`\`\`
 Authorization: Bearer <access_token>
 \`\`\`
 
-### Token Flow
-1. **Register** → receive verification email
-2. **Verify email** → account activated
-3. **Login** → receive \`access_token\` + \`refresh_token\`
-4. **Use access token** for API requests (expires in 15 min)
-5. **Refresh** when expired using \`refresh_token\`
+### Token Lifecycle
+| Step | Action | Result |
+|------|--------|--------|
+| 1 | \`POST /auth/register\` | Account created → verification email sent |
+| 2 | \`POST /auth/verify-email\` | Account activated (\`pending\` → \`active\`) |
+| 3 | \`POST /auth/login\` | Returns \`access_token\` (15 min) + \`refresh_token\` (7 days) |
+| 4 | Use \`access_token\` in headers | Authenticate API requests |
+| 5 | \`POST /auth/refresh\` | Get new \`access_token\` when expired |
+| 6 | \`POST /auth/logout\` | Invalidate current session |
 
-## Rate Limiting
+### Session Management
+- Maximum **10 concurrent sessions** per user (oldest evicted automatically)
+- Refresh tokens use **rotation** — each refresh invalidates the previous token
+- Sessions track IP address and user agent for security auditing
 
-| Endpoint Type | Window | Max Requests |
-|---|---|---|
-| General API | 15 min | 200 |
-| Auth (login/register) | 15 min | 10 |
-| File uploads | 15 min | 20 |
-| Contact form | 15 min | 5 |
+---
 
-## WebSocket Events
+## 🚀 Onboarding Flow
 
-Real-time features use Socket.IO at the same server URL. Events include:
-- \`event:updated\` — Event data changed
-- \`participant:joined\` / \`participant:left\`
-- \`game:session_created\` / \`game:round_started\` / \`game:action\` / \`game:ended\`
-- \`notification:new\`
+New users go through a 4-step onboarding wizard after registration:
 
-## Error Format
+1. **Organization Name & Description** — Create the workspace
+2. **Industry & Company Size** — Personalize the experience
+3. **Goals** — Select objectives (team bonding, icebreakers, engagement, etc.)
+4. **Language & Branding** — Set preferred language and upload logo
 
-All errors follow this format:
+After completion, call \`POST /users/complete-onboarding\` to mark the flag.
+
+---
+
+## 🎮 Event & Game Flow
+
+### Creating and Running Events
+1. Create an organization → \`POST /organizations\`
+2. Create an event → \`POST /events\`
+3. Invite participants → \`POST /events/:id/invitations\`
+4. Participants join → \`POST /events/:id/join\` (members) or \`POST /events/:id/join-guest\` (guests)
+5. Start a game → \`POST /events/:id/game-sessions\`
+6. Play rounds → \`POST /game-sessions/:id/rounds\`
+7. Submit actions → \`POST /game-actions\`
+8. Finish → \`POST /game-sessions/:id/finish\`
+
+### Guest Access (No Auth Required)
+Guests can join public events without an account:
+- \`GET /events/:id/public\` — View event info on lobby screen
+- \`GET /events/:id/validate-token\` — Check invitation token validity
+- \`POST /events/:id/join-guest\` — Join with a display name and avatar
+- \`GET /events/:id/participants\` — See who's in the event
+
+---
+
+## 🛡️ Rate Limiting
+
+All endpoints are rate-limited per IP address:
+
+| Endpoint Type | Window | Max Requests | HTTP Status |
+|---|---|---|---|
+| General API | 15 min | 200 | 429 |
+| Auth (login/register) | 15 min | 10 | 429 |
+| File uploads | 15 min | 20 | 429 |
+| Contact form | 15 min | 5 | 429 |
+
+Exceeding the limit returns a \`429 Too Many Requests\` response with a \`Retry-After\` header.
+
+---
+
+## 🔌 WebSocket Events (Socket.IO)
+
+Real-time features use **Socket.IO** at the same server URL. Authenticate with the access token.
+
+### Event Lifecycle
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| \`event:created\` | Server → Client | New event created in your org |
+| \`event:updated\` | Server → Client | Event data changed |
+| \`event:deleted\` | Server → Client | Event removed |
+
+### Participant Flow
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| \`participant:joined\` | Server → Client | Someone joined the event |
+| \`participant:left\` | Server → Client | Someone left the event |
+
+### Game Play
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| \`game:session_created\` | Server → Client | New game started |
+| \`game:round_started\` | Server → Client | Round began with prompt data |
+| \`game:action\` | Bidirectional | Player submitted an action |
+| \`game:ended\` | Server → Client | Game finished with results |
+
+### Notifications
+| Event | Direction | Description |
+|-------|-----------|-------------|
+| \`notification:new\` | Server → Client | New in-app notification |
+
+---
+
+## ❌ Error Handling
+
+All errors return a consistent JSON format:
+
 \`\`\`json
 {
   "error": "Human-readable error message"
 }
 \`\`\`
 
-Validation errors include field details:
+**Validation errors** include field-level details:
 \`\`\`json
 {
   "error": "Validation failed",
   "details": [
-    { "field": "email", "message": "Invalid email" }
+    { "field": "email", "message": "Invalid email format" },
+    { "field": "password", "message": "Must be at least 8 characters" }
   ]
 }
 \`\`\`
+
+### Common HTTP Status Codes
+| Code | Meaning | When |
+|------|---------|------|
+| 200 | OK | Successful read/update |
+| 201 | Created | Resource created successfully |
+| 204 | No Content | Successful deletion |
+| 400 | Bad Request | Invalid input or business rule violation |
+| 401 | Unauthorized | Missing or expired token |
+| 403 | Forbidden | Insufficient permissions |
+| 404 | Not Found | Resource doesn't exist |
+| 409 | Conflict | Duplicate resource (e.g. email taken) |
+| 422 | Unprocessable | Validation failed |
+| 429 | Rate Limited | Too many requests |
+| 500 | Server Error | Unexpected internal error |
+
+---
+
+## 📊 Pagination
+
+All list endpoints support pagination with query parameters:
+
+| Parameter | Type | Default | Max | Description |
+|-----------|------|---------|-----|-------------|
+| \`page\` | integer | 1 | — | Page number (1-indexed) |
+| \`limit\` | integer | 20 | 100 | Items per page |
+
+Response format:
+\`\`\`json
+{
+  "data": [...],
+  "pagination": {
+    "page": 1,
+    "limit": 20,
+    "total": 150,
+    "totalPages": 8
+  }
+}
+\`\`\`
+
+---
+
+## 🔐 Role-Based Access Control (RBAC)
+
+Organizations use a hierarchical role system:
+
+| Role | Permissions |
+|------|-------------|
+| **Owner** | Full access, can delete org, manage all members including admins |
+| **Admin** | Manage events, members (except owner/admins), settings |
+| **Moderator** | Create/manage events, moderate content |
+| **Member** | Join events, participate in games |
+
+---
+
+## 🧹 Data Retention
+
+| Data Type | Retention Period | Action |
+|-----------|-----------------|--------|
+| Analytics logs | 90 days | Auto-purged |
+| Audit logs | 180 days | Auto-purged |
+| User sessions | 7 days (refresh token expiry) | Auto-expired |
+| Invitation tokens | 7 days | Auto-expired |
       `,
       contact: {
         name: 'Flowkyn Team',
@@ -69,15 +210,17 @@ Validation errors include field details:
       },
       license: {
         name: 'Proprietary',
+        url: 'https://flowkyn.com/terms',
       },
     },
     externalDocs: {
-      description: 'Flowkyn Website',
-      url: 'https://flowkyn.com',
+      description: 'Flowkyn Platform Documentation',
+      url: 'https://docs.flowkyn.com',
     },
     servers: [
-      { url: 'https://api.flowkyn.com/v1', description: 'Production' },
-      { url: 'http://localhost:3000/v1', description: 'Local Development' },
+      { url: 'https://api.flowkyn.com/v1', description: '🟢 Production' },
+      { url: 'https://staging-api.flowkyn.com/v1', description: '🟡 Staging' },
+      { url: 'http://localhost:3000/v1', description: '🔵 Local Development' },
     ],
     components: {
       securitySchemes: {
