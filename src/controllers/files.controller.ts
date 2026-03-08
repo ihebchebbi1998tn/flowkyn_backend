@@ -12,8 +12,8 @@ export class FilesController {
   async upload(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const file = req.file;
-      if (!file) throw new AppError('No file provided', 400);
-      if (!isAllowedFileType(file.mimetype)) throw new AppError('File type not allowed', 400);
+      if (!file) throw new AppError('No file provided', 400, 'FILE_MISSING');
+      if (!isAllowedFileType(file.mimetype)) throw new AppError(`File type "${file.mimetype}" is not allowed`, 400, 'FILE_TYPE_NOT_ALLOWED');
 
       const { url } = saveFile(file.buffer, file.originalname, 'files');
       const result = await filesService.create(req.user!.userId, url, file.mimetype, file.size);

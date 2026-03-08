@@ -48,19 +48,14 @@ export class EventsService {
        WHERE e.id = $1`,
       [eventId]
     );
-    if (!event) throw new AppError('Event not found', 404);
+    if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
     return event;
   }
 
-  /**
-   * List events — BUG FIX: When no orgId is provided, only return events
-   * from organizations the user is a member of (prevents data leakage).
-   */
   async list(pagination: { page?: number; limit?: number }, orgId?: string, userId?: string) {
     const { page, limit, offset } = parsePagination(pagination);
 
     if (orgId) {
-      // Filter by specific org
       const [data, [{ count }]] = await Promise.all([
         query<EventRow>(
           `SELECT * FROM events WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
@@ -72,7 +67,6 @@ export class EventsService {
     }
 
     if (userId) {
-      // BUG FIX: Only return events from orgs the user belongs to
       const [data, [{ count }]] = await Promise.all([
         query<EventRow>(
           `SELECT e.* FROM events e
@@ -91,13 +85,9 @@ export class EventsService {
       return buildPaginatedResponse(data, parseInt(count), page, limit);
     }
 
-    // Fallback: return empty (should not happen with proper controller logic)
     return buildPaginatedResponse([], 0, page, limit);
   }
 
-  /**
-   * Update an event — caller must verify ownership before calling.
-   */
   async update(eventId: string, data: Partial<{
     title: string; description: string; event_mode: string; visibility: string;
     max_participants: number; start_time: string; end_time: string; status: string;
@@ -112,7 +102,7 @@ export class EventsService {
         values.push(val);
       }
     }
-    if (fields.length === 0) throw new AppError('No valid fields to update', 400);
+    if (fields.length === 0) throw new AppError('No valid fields to update', 400, 'VALIDATION_FAILED');
 
     fields.push('updated_at = NOW()');
     values.push(eventId);
@@ -121,26 +111,25 @@ export class EventsService {
       `UPDATE events SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
       values
     );
-    if (!event) throw new AppError('Event not found', 404);
+    if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
     return event;
   }
 
   async delete(eventId: string) {
     const result = await query('DELETE FROM events WHERE id = $1 RETURNING id', [eventId]);
-    if (result.length === 0) throw new AppError('Event not found', 404);
+    if (result.length === 0) throw new AppError('Event not found', 404, 'NOT_FOUND');
     return { message: 'Event deleted' };
   }
 
   async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, lang?: string) {
     const event = await this.getById(eventId);
 
-    // Check max participants
     const [{ count }] = await query<{ count: string }>(
       'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
       [eventId]
     );
     if (parseInt(count) >= event.max_participants) {
-      throw new AppError('Event has reached maximum participants', 400);
+      throw new AppError(`Event has reached its maximum of ${event.max_participants} participants`, 400, 'EVENT_FULL');
     }
 
     const token = crypto.randomBytes(32).toString('hex');
@@ -151,7 +140,6 @@ export class EventsService {
       [uuid(), eventId, email, invitedByMemberId, token]
     );
 
-    // BUG FIX: Use env.frontendUrl instead of hardcoded domain
     await sendEmail({
       to: email,
       type: 'event_invitation',
@@ -163,14 +151,12 @@ export class EventsService {
   }
 
   async join(eventId: string, memberId: string) {
-    // Check if already a participant (prevent duplicates)
     const existing = await queryOne(
       'SELECT id FROM participants WHERE event_id = $1 AND organization_member_id = $2 AND left_at IS NULL',
       [eventId, memberId]
     );
-    if (existing) throw new AppError('Already a participant in this event', 409);
+    if (existing) throw new AppError('You are already a participant in this event', 409, 'ALREADY_PARTICIPANT');
 
-    // Check max participants using transaction to prevent race condition
     const participantId = uuid();
     await transaction(async (client) => {
       const { rows: [{ count }] } = await client.query(
@@ -179,7 +165,7 @@ export class EventsService {
       );
       const event = await this.getById(eventId);
       if (parseInt(count) >= event.max_participants) {
-        throw new AppError('Event has reached maximum participants', 400);
+        throw new AppError(`Event has reached its maximum of ${event.max_participants} participants`, 400, 'EVENT_FULL');
       }
 
       await client.query(
@@ -197,21 +183,19 @@ export class EventsService {
       `UPDATE participants SET left_at = NOW() WHERE event_id = $1 AND organization_member_id = $2 AND left_at IS NULL RETURNING id`,
       [eventId, memberId]
     );
-    if (result.length === 0) throw new AppError('Not a participant in this event', 404);
+    if (result.length === 0) throw new AppError('You are not a participant in this event', 404, 'NOT_PARTICIPANT');
     return { message: 'Left event' };
   }
 
   async sendMessage(eventId: string, participantId: string, message: string, messageType: string = 'text') {
-    // Verify participant belongs to this event
     const participant = await queryOne(
       'SELECT id FROM participants WHERE id = $1 AND event_id = $2 AND left_at IS NULL',
       [participantId, eventId]
     );
-    if (!participant) throw new AppError('Invalid participant for this event', 403);
+    if (!participant) throw new AppError('Invalid participant for this event', 403, 'NOT_PARTICIPANT');
 
-    // Sanitize message content
     const sanitizedMessage = sanitizeText(message, 2000);
-    if (sanitizedMessage.length === 0) throw new AppError('Message cannot be empty', 400);
+    if (sanitizedMessage.length === 0) throw new AppError('Message cannot be empty', 400, 'VALIDATION_FAILED');
 
     const [msg] = await query(
       `INSERT INTO event_messages (id, event_id, participant_id, message, message_type, created_at)
@@ -239,16 +223,14 @@ export class EventsService {
   }
 
   async createPost(eventId: string, participantId: string, content: string) {
-    // Verify participant belongs to this event
     const participant = await queryOne(
       'SELECT id FROM participants WHERE id = $1 AND event_id = $2 AND left_at IS NULL',
       [participantId, eventId]
     );
-    if (!participant) throw new AppError('Invalid participant for this event', 403);
+    if (!participant) throw new AppError('Invalid participant for this event', 403, 'NOT_PARTICIPANT');
 
-    // Sanitize content
     const sanitizedContent = sanitizeText(content, 5000);
-    if (sanitizedContent.length === 0) throw new AppError('Content cannot be empty', 400);
+    if (sanitizedContent.length === 0) throw new AppError('Post content cannot be empty', 400, 'VALIDATION_FAILED');
 
     const [post] = await query(
       `INSERT INTO activity_posts (id, event_id, author_participant_id, content, created_at)

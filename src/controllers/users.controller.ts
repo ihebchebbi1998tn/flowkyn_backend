@@ -31,8 +31,8 @@ export class UsersController {
   async uploadAvatar(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const file = req.file;
-      if (!file) throw new AppError('No file provided', 400);
-      if (!isAllowedImageType(file.mimetype)) throw new AppError('Only image files are allowed', 400);
+      if (!file) throw new AppError('No file provided', 400, 'FILE_MISSING');
+      if (!isAllowedImageType(file.mimetype)) throw new AppError('Only image files (JPEG, PNG, GIF, WebP) are allowed', 400, 'FILE_TYPE_NOT_ALLOWED');
 
       const { url } = saveFile(file.buffer, file.originalname, 'avatars');
       await filesService.create(req.user!.userId, url, file.mimetype, file.size);
@@ -63,7 +63,7 @@ export class UsersController {
         'SELECT id, name, email, avatar_url, language, status, created_at FROM users WHERE id = $1',
         [req.params.id]
       );
-      if (!user) throw new AppError('User not found', 404);
+      if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
       res.json(user);
     } catch (err) { next(err); }
   }

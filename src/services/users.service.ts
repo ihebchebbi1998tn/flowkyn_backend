@@ -8,7 +8,7 @@ export class UsersService {
       `SELECT id, email, name, avatar_url, language, status, created_at, updated_at FROM users WHERE id = $1`,
       [userId]
     );
-    if (!user) throw new AppError('User not found', 404);
+    if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
     return user;
   }
 
@@ -26,7 +26,7 @@ export class UsersService {
       values.push(data.language);
     }
 
-    if (fields.length === 0) throw new AppError('No fields to update', 400);
+    if (fields.length === 0) throw new AppError('No fields to update — provide name or language', 400, 'VALIDATION_FAILED');
 
     fields.push(`updated_at = NOW()`);
     values.push(userId);

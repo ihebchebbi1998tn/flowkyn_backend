@@ -20,7 +20,7 @@ async function requireOrgAdminForEvent(orgId: string, userId: string): Promise<{
      WHERE om.organization_id = $1 AND om.user_id = $2 AND om.status = 'active'`,
     [orgId, userId]
   );
-  if (!member) throw new AppError('Not a member of this organization', 403);
+  if (!member) throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
   return member;
 }
 
@@ -32,16 +32,15 @@ async function verifyParticipantOwnership(participantId: string, userId: string)
      WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [participantId, userId]
   );
-  if (!row) throw new AppError('You do not own this participant', 403);
+  if (!row) throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
 export class EventsController {
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const member = await requireOrgAdminForEvent(req.body.organization_id, req.user!.userId);
-      // Only owner/admin/moderator can create events
       if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
-        res.status(403).json({ error: 'Insufficient permissions to create events' }); return;
+        throw new AppError('You need owner, admin, or moderator role to create events', 403, 'INSUFFICIENT_PERMISSIONS');
       }
       const event = await eventsService.create(member.id, req.body);
       await audit.create(req.body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: req.body.title });
@@ -52,12 +51,10 @@ export class EventsController {
   async list(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const orgId = req.query.organization_id as string | undefined;
-      // If filtering by org, verify membership
       if (orgId) {
         const member = await orgsService.getMemberByUserId(orgId, req.user!.userId);
-        if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
+        if (!member) throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
       }
-      // BUG FIX: Pass userId so events.list scopes results to user's orgs
       const result = await eventsService.list(req.query as any, orgId, req.user!.userId);
       res.json(result);
     } catch (err) { next(err); }
@@ -66,10 +63,9 @@ export class EventsController {
   async getById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const event = await eventsService.getById(req.params.eventId);
-      // Public events can be viewed by anyone, private require membership
       if (event.visibility === 'private') {
         const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
-        if (!member) { res.status(403).json({ error: 'Not authorized' }); return; }
+        if (!member) throw new AppError('This is a private event — you need to be an organization member', 403, 'FORBIDDEN');
       }
       res.json(event);
     } catch (err) { next(err); }
@@ -79,9 +75,8 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgAdminForEvent(event.organization_id, req.user!.userId);
-      // Only owner/admin/moderator or the event creator can update
       if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
-        res.status(403).json({ error: 'Insufficient permissions to update this event' }); return;
+        throw new AppError('You need owner, admin, or moderator role to update this event', 403, 'INSUFFICIENT_PERMISSIONS');
       }
       const updated = await eventsService.update(req.params.eventId, req.body);
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_UPDATE', { eventId: req.params.eventId, changes: Object.keys(req.body) });
@@ -94,9 +89,8 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgAdminForEvent(event.organization_id, req.user!.userId);
-      // Only owner/admin can delete events
       if (!['owner', 'admin'].includes(member.role_name)) {
-        res.status(403).json({ error: 'Insufficient permissions to delete events' }); return;
+        throw new AppError('Only organization owners and admins can delete events', 403, 'INSUFFICIENT_PERMISSIONS');
       }
       emitEventNotification(req.params.eventId, 'event:deleted', { eventId: req.params.eventId, title: event.title });
       const result = await eventsService.delete(req.params.eventId);
@@ -110,7 +104,7 @@ export class EventsController {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgAdminForEvent(event.organization_id, req.user!.userId);
       if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
-        res.status(403).json({ error: 'Insufficient permissions' }); return;
+        throw new AppError('You need owner, admin, or moderator role to invite participants', 403, 'INSUFFICIENT_PERMISSIONS');
       }
       const result = await eventsService.inviteParticipant(req.params.eventId, member.id, req.body.email, req.body.lang);
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_INVITE', { eventId: req.params.eventId, invitedEmail: req.body.email });
@@ -122,7 +116,7 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
-      if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
+      if (!member) throw new AppError('You must be an organization member to join this event', 403, 'NOT_A_MEMBER');
       const result = await eventsService.join(req.params.eventId, member.id);
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_JOIN', { eventId: req.params.eventId });
       emitEventNotification(req.params.eventId, 'participant:joined', {
@@ -137,7 +131,7 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
-      if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
+      if (!member) throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
       const result = await eventsService.leave(req.params.eventId, member.id);
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_LEAVE', { eventId: req.params.eventId });
       emitEventNotification(req.params.eventId, 'participant:left', { userId: req.user!.userId });
@@ -147,7 +141,6 @@ export class EventsController {
 
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Verify the user owns the participant_id they claim
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
       res.status(201).json(result);
@@ -156,10 +149,9 @@ export class EventsController {
 
   async getMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Verify user is a member of the event's org
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
-      if (!member) { res.status(403).json({ error: 'Not authorized' }); return; }
+      if (!member) throw new AppError('You must be an organization member to view messages', 403, 'NOT_A_MEMBER');
       const result = await eventsService.getMessages(req.params.eventId, req.query as any);
       res.json(result);
     } catch (err) { next(err); }
@@ -167,7 +159,6 @@ export class EventsController {
 
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Verify the user owns the participant_id
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
       emitEventNotification(req.params.eventId, 'post:created', {
@@ -180,7 +171,6 @@ export class EventsController {
 
   async reactToPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Verify the user owns the participant_id
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
       res.status(201).json(result);

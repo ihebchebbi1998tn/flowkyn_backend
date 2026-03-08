@@ -31,7 +31,7 @@ export class AuthService {
            ON CONFLICT (email) DO NOTHING`,
           [userId, email, passwordHash, name, language]
         );
-        if (rowCount === 0) throw new AppError('Email already in use', 409);
+        if (rowCount === 0) throw new AppError('Email already in use', 409, 'AUTH_EMAIL_IN_USE');
 
         await client.query(
           `INSERT INTO email_verifications (id, user_id, token, expires_at, created_at)
@@ -40,8 +40,9 @@ export class AuthService {
         );
       });
     } catch (err: any) {
+      if (err instanceof AppError) throw err;
       if (err.code === '23505' && err.constraint?.includes('email')) {
-        throw new AppError('Email already in use', 409);
+        throw new AppError('Email already in use', 409, 'AUTH_EMAIL_IN_USE');
       }
       throw err;
     }
@@ -61,7 +62,7 @@ export class AuthService {
       `SELECT user_id FROM email_verifications WHERE token = $1 AND expires_at > NOW()`,
       [token]
     );
-    if (!row) throw new AppError('Invalid or expired verification token', 400);
+    if (!row) throw new AppError('Invalid or expired verification token', 400, 'AUTH_VERIFICATION_EXPIRED');
 
     await transaction(async (client) => {
       await client.query('UPDATE users SET status = $1, updated_at = NOW() WHERE id = $2', ['active', row.user_id]);
@@ -73,12 +74,12 @@ export class AuthService {
 
   async login(email: string, password: string, ip: string, userAgent: string) {
     const user = await queryOne<UserRow>('SELECT * FROM users WHERE email = $1', [email]);
-    if (!user) throw new AppError('Invalid credentials', 401);
-    if (user.status === 'suspended') throw new AppError('Account suspended', 403);
-    if (user.status !== 'active') throw new AppError('Account not verified', 403);
+    if (!user) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
+    if (user.status === 'suspended') throw new AppError('Your account has been suspended — contact support', 403, 'AUTH_ACCOUNT_SUSPENDED');
+    if (user.status !== 'active') throw new AppError('Please verify your email before logging in', 403, 'AUTH_ACCOUNT_NOT_VERIFIED');
 
     const valid = await comparePassword(password, user.password_hash);
-    if (!valid) throw new AppError('Invalid credentials', 401);
+    if (!valid) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
 
     const payload = { userId: user.id, email: user.email };
     const accessToken = signAccessToken(payload);
@@ -90,7 +91,7 @@ export class AuthService {
       // Clean expired sessions
       await client.query('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < NOW()', [user.id]);
 
-      // SECURITY: Enforce session limit — delete oldest if at max
+      // Enforce session limit — delete oldest if at max
       const { rows: sessions } = await client.query(
         'SELECT id FROM user_sessions WHERE user_id = $1 ORDER BY created_at ASC',
         [user.id]
@@ -127,16 +128,22 @@ export class AuthService {
   }
 
   async refresh(refreshToken: string) {
-    const payload = verifyRefreshToken(refreshToken);
+    let payload;
+    try {
+      payload = verifyRefreshToken(refreshToken);
+    } catch {
+      throw new AppError('Refresh token is invalid or expired', 401, 'AUTH_TOKEN_EXPIRED');
+    }
+
     const hashedToken = hashToken(refreshToken);
 
     const session = await queryOne<UserSessionRow>(
       `SELECT * FROM user_sessions WHERE refresh_token = $1 AND expires_at > NOW()`,
       [hashedToken]
     );
-    if (!session) throw new AppError('Invalid or expired refresh token', 401);
+    if (!session) throw new AppError('Refresh token not found or expired — please log in again', 401, 'AUTH_TOKEN_EXPIRED');
 
-    // SECURITY: Rotate refresh token on every refresh to limit stolen token impact
+    // Rotate refresh token
     const newAccessToken = signAccessToken({ userId: payload.userId, email: payload.email });
     const newRefreshToken = signRefreshToken({ userId: payload.userId, email: payload.email });
     const newHashedRefresh = hashToken(newRefreshToken);
@@ -164,13 +171,13 @@ export class AuthService {
       `SELECT id, email, name, avatar_url, language, status, created_at, updated_at FROM users WHERE id = $1`,
       [userId]
     );
-    if (!user) throw new AppError('User not found', 404);
+    if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
     return user;
   }
 
   async forgotPassword(email: string, lang?: string) {
     const user = await queryOne<UserRow>('SELECT id, name, language FROM users WHERE email = $1', [email]);
-    // SECURITY: Always return same message to prevent email enumeration
+    // Always return same message to prevent email enumeration
     if (!user) return { message: 'If the email exists, a reset link has been sent' };
 
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
@@ -197,13 +204,13 @@ export class AuthService {
       `SELECT email FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
       [token]
     );
-    if (!row) throw new AppError('Invalid or expired reset token', 400);
+    if (!row) throw new AppError('Reset link is invalid or has expired — request a new one', 400, 'AUTH_RESET_TOKEN_EXPIRED');
 
     const hash = await hashPassword(newPassword);
     await transaction(async (client) => {
       await client.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE email = $2', [hash, row.email]);
       await client.query('DELETE FROM password_resets WHERE email = $1', [row.email]);
-      // SECURITY: Invalidate ALL sessions on password reset (force re-login everywhere)
+      // Invalidate ALL sessions on password reset
       await client.query(
         'DELETE FROM user_sessions WHERE user_id = (SELECT id FROM users WHERE email = $1)',
         [row.email]

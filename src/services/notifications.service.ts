@@ -23,8 +23,7 @@ export class NotificationsService {
       `UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *`,
       [notificationId, userId]
     );
-    // BUG FIX: Return proper error when notification not found
-    if (!result) throw new AppError('Notification not found', 404);
+    if (!result) throw new AppError('Notification not found or does not belong to you', 404, 'NOT_FOUND');
     return result;
   }
 
@@ -44,7 +43,6 @@ export class NotificationsService {
       [id, userId, type, JSON.stringify(data)]
     );
 
-    // Push real-time notification via socket
     emitNotification(userId, {
       id: notification.id,
       type: notification.type,

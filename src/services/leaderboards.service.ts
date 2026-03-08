@@ -4,11 +4,13 @@ import { AppError } from '../middleware/errorHandler';
 export class LeaderboardsService {
   async getById(leaderboardId: string) {
     const lb = await queryOne('SELECT * FROM leaderboards WHERE id = $1', [leaderboardId]);
-    if (!lb) throw new AppError('Leaderboard not found', 404);
+    if (!lb) throw new AppError('Leaderboard not found', 404, 'NOT_FOUND');
     return lb;
   }
 
   async getEntries(leaderboardId: string) {
+    // Verify leaderboard exists first
+    await this.getById(leaderboardId);
     return query(
       `SELECT le.*, u.name as user_name, u.avatar_url
        FROM leaderboard_entries le

@@ -21,7 +21,7 @@ export class OrganizationsService {
     const memberId = uuid();
 
     const ownerRole = await queryOne<{ id: string }>(`SELECT id FROM roles WHERE name = 'owner'`);
-    if (!ownerRole) throw new AppError('Owner role not found. Seed roles first.', 500);
+    if (!ownerRole) throw new AppError('System error: owner role not found — run database migrations', 500, 'INTERNAL_ERROR');
 
     const org = await transaction(async (client) => {
       const { rows: [org] } = await client.query(
@@ -50,7 +50,7 @@ export class OrganizationsService {
 
   async getById(orgId: string) {
     const org = await queryOne<OrganizationRow>('SELECT * FROM organizations WHERE id = $1', [orgId]);
-    if (!org) throw new AppError('Organization not found', 404);
+    if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
     return org;
   }
 
@@ -70,7 +70,6 @@ export class OrganizationsService {
     const token = crypto.randomBytes(32).toString('hex');
     const org = await this.getById(orgId);
 
-    // Try to get invitee's stored language preference
     const invitee = await queryOne<{ language: string }>('SELECT language FROM users WHERE email = $1', [email]);
     const emailLang = invitee?.language || lang || 'en';
 
@@ -80,7 +79,6 @@ export class OrganizationsService {
       [uuid(), orgId, email, roleId, invitedByMemberId, token]
     );
 
-    // BUG FIX: Use env.frontendUrl instead of hardcoded domain
     await sendEmail({
       to: email,
       type: 'organization_invitation',
@@ -96,15 +94,13 @@ export class OrganizationsService {
       `SELECT * FROM organization_invitations WHERE token = $1 AND status = 'pending' AND expires_at > NOW()`,
       [token]
     );
-    if (!invitation) throw new AppError('Invalid or expired invitation', 400);
+    if (!invitation) throw new AppError('Invitation is invalid or has expired', 400, 'AUTH_VERIFICATION_EXPIRED');
 
-    // BUG FIX: Check if user is already a member (prevent duplicate memberships)
     const existingMember = await queryOne(
       `SELECT id FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
       [invitation.organization_id, userId]
     );
     if (existingMember) {
-      // Mark invitation as accepted even if already a member
       await query(`UPDATE organization_invitations SET status = 'accepted' WHERE id = $1`, [invitation.id]);
       return { message: 'Already a member of this organization' };
     }
@@ -133,7 +129,7 @@ export class OrganizationsService {
 
   async uploadLogo(orgId: string, file: { buffer: Buffer; originalname: string; mimetype: string }) {
     if (!isAllowedImageType(file.mimetype)) {
-      throw new AppError('Only image files are allowed', 400);
+      throw new AppError('Only image files (JPEG, PNG, GIF, WebP) are allowed', 400, 'FILE_TYPE_NOT_ALLOWED');
     }
     const { url } = saveFile(file.buffer, file.originalname, 'org-logos');
     const org = await queryOne<OrganizationRow>(
@@ -148,7 +144,7 @@ export class OrganizationsService {
     const values: any[] = [];
     let idx = 1;
     if (data.name) { fields.push(`name = $${idx++}`); values.push(data.name); }
-    if (fields.length === 0) throw new AppError('No fields to update', 400);
+    if (fields.length === 0) throw new AppError('No fields to update', 400, 'VALIDATION_FAILED');
     fields.push('updated_at = NOW()');
     values.push(orgId);
     return queryOne<OrganizationRow>(

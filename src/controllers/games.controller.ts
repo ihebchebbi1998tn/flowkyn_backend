@@ -17,7 +17,7 @@ async function verifyParticipantOwnership(participantId: string, userId: string)
      WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [participantId, userId]
   );
-  if (!row) throw new AppError('You do not own this participant', 403);
+  if (!row) throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
 export class GamesController {
@@ -63,7 +63,6 @@ export class GamesController {
     try {
       const { game_session_id, round_id, participant_id, action_type, payload } = req.body;
 
-      // SECURITY: Verify the user owns the participant_id they claim
       await verifyParticipantOwnership(participant_id, req.user!.userId);
 
       const action = await gamesService.submitAction(game_session_id, round_id, participant_id, action_type, payload);

@@ -4,7 +4,6 @@ import { buildPaginatedResponse } from '../utils/pagination';
 
 export class AdminService {
   async getStats() {
-    // Single query with subqueries — much faster than 7 separate queries
     const stats = await queryOne<{
       total_users: string; total_organizations: string;
       total_events: string; total_game_sessions: string;
@@ -65,14 +64,16 @@ export class AdminService {
       'SELECT id, name, email, status, language, avatar_url, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
-    if (!user) throw new AppError('User not found', 404);
+    if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
     return user;
   }
 
   async updateUser(id: string, data: Record<string, unknown>) {
     const allowedFields = ['name', 'status', 'language'];
     const fields = Object.keys(data).filter(k => allowedFields.includes(k));
-    if (fields.length === 0) throw new AppError('No valid fields to update', 400);
+    if (fields.length === 0) {
+      throw new AppError(`No valid fields to update — allowed: ${allowedFields.join(', ')}`, 400, 'VALIDATION_FAILED');
+    }
 
     const setClauses = fields.map((f, i) => `${f} = $${i + 2}`);
     const values = fields.map(f => data[f]);
@@ -81,7 +82,7 @@ export class AdminService {
       `UPDATE users SET ${setClauses.join(', ')}, updated_at = NOW() WHERE id = $1 RETURNING id, name, email, status, language, avatar_url, created_at, updated_at`,
       [id, ...values]
     );
-    if (!user) throw new AppError('User not found', 404);
+    if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
     return user;
   }
 
@@ -90,7 +91,7 @@ export class AdminService {
       "UPDATE users SET status = 'suspended', updated_at = NOW() WHERE id = $1 RETURNING id",
       [id]
     );
-    if (!result) throw new AppError('User not found', 404);
+    if (!result) throw new AppError('User not found', 404, 'NOT_FOUND');
   }
 
   async unsuspendUser(id: string) {
@@ -98,12 +99,12 @@ export class AdminService {
       "UPDATE users SET status = 'active', updated_at = NOW() WHERE id = $1 RETURNING id",
       [id]
     );
-    if (!result) throw new AppError('User not found', 404);
+    if (!result) throw new AppError('User not found', 404, 'NOT_FOUND');
   }
 
   async deleteUser(id: string) {
     const result = await queryOne('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-    if (!result) throw new AppError('User not found', 404);
+    if (!result) throw new AppError('User not found', 404, 'NOT_FOUND');
   }
 
   async listOrganizations(page: number, limit: number, search?: string) {
@@ -125,7 +126,6 @@ export class AdminService {
     const offsetParam = params.length + 1;
     const limitParam = params.length + 2;
 
-    // Use LEFT JOIN with aggregation instead of correlated subqueries
     const rows = await query(
       `SELECT o.id, o.name, o.slug, o.logo_url, o.owner_user_id, o.created_at, o.updated_at,
               u.name as owner_name,
@@ -148,7 +148,7 @@ export class AdminService {
 
   async deleteOrganization(id: string) {
     const result = await queryOne('DELETE FROM organizations WHERE id = $1 RETURNING id', [id]);
-    if (!result) throw new AppError('Organization not found', 404);
+    if (!result) throw new AppError('Organization not found', 404, 'NOT_FOUND');
   }
 
   async listGameSessions(page: number, limit: number) {
@@ -156,7 +156,6 @@ export class AdminService {
     const countResult = await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM game_sessions');
     const total = Number(countResult?.count || 0);
 
-    // Use LEFT JOIN LATERAL instead of correlated subquery for action_count
     const rows = await query(
       `SELECT gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at,
               gt.name as game_type_name, gt.key as game_type_key,

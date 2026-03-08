@@ -4,18 +4,16 @@ import { buildPaginatedResponse } from '../utils/pagination';
 import { AppError } from '../middleware/errorHandler';
 import { sanitizeText } from '../utils/sanitize';
 
-// BUG FIX: Whitelist allowed status values to prevent arbitrary status injection
 const ALLOWED_STATUSES = new Set(['new', 'read', 'replied', 'archived']);
 
 export class ContactService {
   async create(data: { name: string; email: string; subject?: string; message: string; ipAddress?: string }) {
-    // Sanitize user input
     const sanitizedName = sanitizeText(data.name, 100);
     const sanitizedSubject = sanitizeText(data.subject || '', 200);
     const sanitizedMessage = sanitizeText(data.message, 5000);
 
-    if (sanitizedName.length === 0) throw new AppError('Name is required', 400);
-    if (sanitizedMessage.length === 0) throw new AppError('Message is required', 400);
+    if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED', [{ field: 'name', message: 'Name cannot be empty' }]);
+    if (sanitizedMessage.length === 0) throw new AppError('Message is required', 400, 'VALIDATION_FAILED', [{ field: 'message', message: 'Message cannot be empty' }]);
 
     const [submission] = await query(
       `INSERT INTO contact_submissions (id, name, email, subject, message, ip_address, status, created_at)
@@ -31,9 +29,8 @@ export class ContactService {
     const params: unknown[] = [];
 
     if (status) {
-      // BUG FIX: Validate status value
       if (!ALLOWED_STATUSES.has(status)) {
-        throw new AppError(`Invalid status: ${status}`, 400);
+        throw new AppError(`Invalid status "${status}" — allowed values: ${[...ALLOWED_STATUSES].join(', ')}`, 400, 'VALIDATION_FAILED');
       }
       whereClause = 'WHERE status = $1';
       params.push(status);
@@ -59,26 +56,25 @@ export class ContactService {
 
   async getById(id: string) {
     const submission = await queryOne('SELECT * FROM contact_submissions WHERE id = $1', [id]);
-    if (!submission) throw new AppError('Contact submission not found', 404);
+    if (!submission) throw new AppError('Contact submission not found', 404, 'NOT_FOUND');
     return submission;
   }
 
   async updateStatus(id: string, status: string) {
-    // BUG FIX: Validate status value
     if (!ALLOWED_STATUSES.has(status)) {
-      throw new AppError(`Invalid status: ${status}`, 400);
+      throw new AppError(`Invalid status "${status}" — allowed values: ${[...ALLOWED_STATUSES].join(', ')}`, 400, 'VALIDATION_FAILED');
     }
     const row = await queryOne(
       `UPDATE contact_submissions SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
       [status, id]
     );
-    if (!row) throw new AppError('Contact submission not found', 404);
+    if (!row) throw new AppError('Contact submission not found', 404, 'NOT_FOUND');
     return row;
   }
 
   async delete(id: string) {
     const result = await queryOne('DELETE FROM contact_submissions WHERE id = $1 RETURNING id', [id]);
-    if (!result) throw new AppError('Contact submission not found', 404);
+    if (!result) throw new AppError('Contact submission not found', 404, 'NOT_FOUND');
     return result;
   }
 }
