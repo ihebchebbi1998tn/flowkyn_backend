@@ -32,7 +32,7 @@ export class AdminController {
   async updateUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = await adminService.updateUser(req.params.id, req.body);
-      await auditLogsService.create('', req.user!.userId, 'ADMIN_UPDATE_USER', {
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_UPDATE_USER', {
         targetUserId: req.params.id,
         changes: req.body,
       });
@@ -43,7 +43,7 @@ export class AdminController {
   async suspendUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.suspendUser(req.params.id);
-      await auditLogsService.create('', req.user!.userId, 'ADMIN_SUSPEND_USER', {
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_SUSPEND_USER', {
         targetUserId: req.params.id,
       });
       res.json({ message: 'User suspended' });
@@ -53,7 +53,7 @@ export class AdminController {
   async unsuspendUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.unsuspendUser(req.params.id);
-      await auditLogsService.create('', req.user!.userId, 'ADMIN_UNSUSPEND_USER', {
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_UNSUSPEND_USER', {
         targetUserId: req.params.id,
       });
       res.json({ message: 'User unsuspended' });
@@ -63,7 +63,7 @@ export class AdminController {
   async deleteUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.deleteUser(req.params.id);
-      await auditLogsService.create('', req.user!.userId, 'ADMIN_DELETE_USER', {
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_DELETE_USER', {
         targetUserId: req.params.id,
       });
       res.status(204).end();
@@ -81,7 +81,7 @@ export class AdminController {
   async deleteOrganization(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       await adminService.deleteOrganization(req.params.id);
-      await auditLogsService.create('', req.user!.userId, 'ADMIN_DELETE_ORG', {
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_DELETE_ORG', {
         targetOrgId: req.params.id,
       });
       res.status(204).end();
