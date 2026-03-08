@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { EventsService } from '../services/events.service';
 import { OrganizationsService } from '../services/organizations.service';
 import { AuditLogsService } from '../services/auditLogs.service';
@@ -68,6 +68,62 @@ export class EventsController {
         if (!member) throw new AppError('This is a private event — you need to be an organization member', 403, 'FORBIDDEN');
       }
       res.json(event);
+    } catch (err) { next(err); }
+  }
+
+  /** Public event info — no auth required */
+  async getPublicInfo(req: Request, res: Response, next: NextFunction) {
+    try {
+      const info = await eventsService.getPublicInfo(req.params.eventId);
+      res.json(info);
+    } catch (err) { next(err); }
+  }
+
+  /** Validate an invitation token — no auth required */
+  async validateToken(req: Request, res: Response, next: NextFunction) {
+    try {
+      const token = req.query.token as string;
+      if (!token) throw new AppError('Token is required', 400, 'VALIDATION_FAILED');
+      const invitation = await eventsService.validateInvitationToken(req.params.eventId, token);
+      res.json(invitation);
+    } catch (err) { next(err); }
+  }
+
+  /** Accept invitation (logged-in user) */
+  async acceptInvitation(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { token } = req.body;
+      if (!token) throw new AppError('Token is required', 400, 'VALIDATION_FAILED');
+      const result = await eventsService.acceptInvitation(req.params.eventId, token, req.user!.userId);
+
+      emitEventNotification(req.params.eventId, 'participant:joined', {
+        userId: req.user!.userId,
+        participantId: result.participant_id,
+      });
+
+      res.json(result);
+    } catch (err) { next(err); }
+  }
+
+  /** Guest join — no auth required */
+  async joinAsGuest(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await eventsService.joinAsGuest(req.params.eventId, req.body);
+
+      emitEventNotification(req.params.eventId, 'participant:joined', {
+        guestName: result.guest_name,
+        participantId: result.participant_id,
+      });
+
+      res.status(201).json(result);
+    } catch (err) { next(err); }
+  }
+
+  /** List participants — no auth required (for lobby) */
+  async getParticipants(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await eventsService.getParticipants(req.params.eventId, req.query as any);
+      res.json(result);
     } catch (err) { next(err); }
   }
 

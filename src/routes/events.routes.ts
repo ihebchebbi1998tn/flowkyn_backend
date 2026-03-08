@@ -2,17 +2,28 @@ import { Router } from 'express';
 import { EventsController } from '../controllers/events.controller';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { createEventSchema, updateEventSchema, inviteParticipantSchema, sendMessageSchema, createPostSchema, reactToPostSchema } from '../validators/events.validator';
+import {
+  createEventSchema, updateEventSchema, inviteParticipantSchema,
+  sendMessageSchema, createPostSchema, reactToPostSchema, guestJoinSchema,
+} from '../validators/events.validator';
 
 const router = Router();
 const ctrl = new EventsController();
 
+// ─── Public routes (no auth) — for lobby & guest access ───
+router.get('/:eventId/public', ctrl.getPublicInfo);
+router.get('/:eventId/validate-token', ctrl.validateToken);
+router.post('/:eventId/join-guest', validate(guestJoinSchema), ctrl.joinAsGuest);
+router.get('/:eventId/participants', ctrl.getParticipants);
+
+// ─── Authenticated routes ───
 router.get('/', authenticate, ctrl.list);
 router.post('/', authenticate, validate(createEventSchema), ctrl.create);
 router.get('/:eventId', authenticate, ctrl.getById);
 router.put('/:eventId', authenticate, validate(updateEventSchema), ctrl.update);
 router.delete('/:eventId', authenticate, ctrl.delete);
 router.post('/:eventId/invitations', authenticate, validate(inviteParticipantSchema), ctrl.invite);
+router.post('/:eventId/accept-invitation', authenticate, ctrl.acceptInvitation);
 router.post('/:eventId/join', authenticate, ctrl.join);
 router.post('/:eventId/leave', authenticate, ctrl.leave);
 router.post('/:eventId/messages', authenticate, validate(sendMessageSchema), ctrl.sendMessage);

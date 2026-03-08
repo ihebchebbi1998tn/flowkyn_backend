@@ -43,3 +43,10 @@ export const reactToPostSchema = z.object({
   reaction_type: z.string().trim().min(1).max(50).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid reaction type'),
   participant_id: z.string().uuid(),
 });
+
+export const guestJoinSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required').max(100),
+  email: z.string().trim().email().max(255).optional(),
+  avatar_url: z.string().url().max(500).optional(),
+  token: z.string().max(255).optional(),
+});
