@@ -2,6 +2,7 @@ import { v4 as uuid } from 'uuid';
 import { query, queryOne } from '../config/database';
 import { NotificationRow } from '../types';
 import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
+import { emitNotification } from '../socket/emitter';
 
 export class NotificationsService {
   async list(userId: string, pagination: { page?: number; limit?: number }) {
@@ -25,11 +26,21 @@ export class NotificationsService {
   }
 
   async create(userId: string, type: string, data: any) {
+    const id = uuid();
     const [notification] = await query(
       `INSERT INTO notifications (id, user_id, type, data, created_at)
        VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-      [uuid(), userId, type, JSON.stringify(data)]
+      [id, userId, type, JSON.stringify(data)]
     );
+
+    // Push real-time notification via socket
+    emitNotification(userId, {
+      id: notification.id,
+      type: notification.type,
+      data: notification.data,
+      created_at: notification.created_at,
+    });
+
     return notification;
   }
 }

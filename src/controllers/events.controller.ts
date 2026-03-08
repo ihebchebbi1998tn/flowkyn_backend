@@ -2,7 +2,7 @@ import { Response, NextFunction } from 'express';
 import { EventsService } from '../services/events.service';
 import { OrganizationsService } from '../services/organizations.service';
 import { AuthRequest } from '../types';
-import { AppError } from '../middleware/errorHandler';
+import { emitEventUpdate, emitEventNotification } from '../socket/emitter';
 
 const eventsService = new EventsService();
 const orgsService = new OrganizationsService();
@@ -32,27 +32,29 @@ export class EventsController {
     } catch (err) { next(err); }
   }
 
-  /**
-   * Update event — requires org membership check.
-   */
   async update(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not authorized to update this event' }); return; }
       const updated = await eventsService.update(req.params.eventId, req.body);
+
+      // Push real-time update to all connected participants
+      emitEventUpdate(req.params.eventId, req.body);
+
       res.json(updated);
     } catch (err) { next(err); }
   }
 
-  /**
-   * Delete event — requires org membership check.
-   */
   async delete(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not authorized to delete this event' }); return; }
+
+      // Notify participants before deletion
+      emitEventNotification(req.params.eventId, 'event:deleted', { eventId: req.params.eventId, title: event.title });
+
       const result = await eventsService.delete(req.params.eventId);
       res.json(result);
     } catch (err) { next(err); }
@@ -74,6 +76,12 @@ export class EventsController {
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
       const result = await eventsService.join(req.params.eventId, member.id);
+
+      emitEventNotification(req.params.eventId, 'participant:joined', {
+        userId: req.user!.userId,
+        participantId: result.participant_id,
+      });
+
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -84,6 +92,9 @@ export class EventsController {
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
       const result = await eventsService.leave(req.params.eventId, member.id);
+
+      emitEventNotification(req.params.eventId, 'participant:left', { userId: req.user!.userId });
+
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -105,6 +116,12 @@ export class EventsController {
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const result = await eventsService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
+
+      emitEventNotification(req.params.eventId, 'post:created', {
+        postId: result.id,
+        authorId: req.user!.userId,
+      });
+
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
