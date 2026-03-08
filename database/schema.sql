@@ -39,10 +39,12 @@ CREATE TABLE email_verifications (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   token VARCHAR(255) NOT NULL UNIQUE,
+  otp_code VARCHAR(6),
   expires_at TIMESTAMP NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_email_verifications_token ON email_verifications(token);
+CREATE INDEX idx_email_verifications_otp ON email_verifications(otp_code) WHERE otp_code IS NOT NULL;
 
 -- ─── Password Resets ───
 CREATE TABLE password_resets (

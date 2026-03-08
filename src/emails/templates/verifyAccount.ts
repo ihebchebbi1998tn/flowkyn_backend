@@ -8,6 +8,7 @@ import { escapeHtml } from '../utils';
 interface VerifyAccountData {
   link: string;
   name?: string;
+  otpCode?: string;
   lang?: string;
 }
 
@@ -20,6 +21,14 @@ export function verifyAccountTemplate(data: VerifyAccountData): { subject: strin
     <h1>${t.greeting(safeName)}</h1>
     <p>${t.body.intro}</p>
     <p>${t.body.instruction}</p>
+    ${data.otpCode ? `
+    <div style="margin:24px 0;text-align:center;">
+      <p style="font-size:14px;color:#666;margin-bottom:8px;">Your verification code:</p>
+      <div style="display:inline-block;padding:16px 32px;background:#f4f4f5;border-radius:12px;letter-spacing:8px;font-size:32px;font-weight:700;font-family:monospace;color:#18181b;">
+        ${data.otpCode}
+      </div>
+    </div>
+    ` : ''}
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
       <tr>
         <td>

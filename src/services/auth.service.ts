@@ -41,6 +41,8 @@ export class AuthService {
     const passwordHash = await hashPassword(password);
     const userId = uuid();
     const token = crypto.randomBytes(32).toString('hex');
+    // Generate a 6-digit OTP code for manual entry (maps to the same verification record)
+    const otpCode = String(Math.floor(100000 + Math.random() * 900000));
     const language = lang || 'en';
 
     try {
@@ -54,9 +56,9 @@ export class AuthService {
         if (rowCount === 0) throw new AppError('Email already in use', 409, 'AUTH_EMAIL_IN_USE');
 
         await client.query(
-          `INSERT INTO email_verifications (id, user_id, token, expires_at, created_at)
-           VALUES ($1, $2, $3, NOW() + INTERVAL '24 hours', NOW())`,
-          [uuid(), userId, token]
+          `INSERT INTO email_verifications (id, user_id, token, otp_code, expires_at, created_at)
+           VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW())`,
+          [uuid(), userId, token, otpCode]
         );
       });
     } catch (err: any) {
@@ -70,7 +72,7 @@ export class AuthService {
     await sendEmail({
       to: email,
       type: 'verify_account',
-      data: { link: `${env.frontendUrl}/verify?token=${token}`, name },
+      data: { link: `${env.frontendUrl}/verify?token=${token}`, name, otpCode },
       lang,
     });
 
@@ -82,8 +84,12 @@ export class AuthService {
    * @throws {AppError} 400 if token is invalid or expired
    */
   async verifyEmail(token: string) {
+    // Support both full token (from email link) and 6-digit OTP code (from manual entry)
+    const isOtp = /^\d{6}$/.test(token);
     const row = await queryOne<{ user_id: string }>(
-      `SELECT user_id FROM email_verifications WHERE token = $1 AND expires_at > NOW()`,
+      isOtp
+        ? `SELECT user_id FROM email_verifications WHERE otp_code = $1 AND expires_at > NOW()`
+        : `SELECT user_id FROM email_verifications WHERE token = $1 AND expires_at > NOW()`,
       [token]
     );
     if (!row) throw new AppError('Invalid or expired verification token', 400, 'AUTH_VERIFICATION_EXPIRED');

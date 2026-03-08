@@ -514,6 +514,15 @@ const migrations: { version: number; name: string; sql: string }[] = [
       ALTER TABLE files ADD COLUMN IF NOT EXISTS original_name VARCHAR(255);
     `,
   },
+  {
+    version: 6,
+    name: 'email_verifications_otp_code',
+    sql: `
+      -- Add OTP code column for 6-digit verification codes
+      ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS otp_code VARCHAR(6);
+      CREATE INDEX IF NOT EXISTS idx_email_verifications_otp ON email_verifications(otp_code) WHERE otp_code IS NOT NULL;
+    `,
+  },
 ];
 
 /**
