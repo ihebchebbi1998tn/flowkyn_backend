@@ -16,7 +16,7 @@ export class FilesController {
       if (!isAllowedFileType(file.mimetype)) throw new AppError(`File type "${file.mimetype}" is not allowed`, 400, 'FILE_TYPE_NOT_ALLOWED');
 
       const { url } = saveFile(file.buffer, file.originalname, 'files');
-      const result = await filesService.create(req.user!.userId, url, file.mimetype, file.size);
+      const result = await filesService.create(req.user!.userId, url, file.mimetype, file.originalname, file.size);
 
       await audit.create(null, req.user!.userId, 'FILE_UPLOAD', { mimetype: file.mimetype, size: file.size });
       res.status(201).json(result);
@@ -25,8 +25,8 @@ export class FilesController {
 
   async listMyFiles(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const files = await filesService.listByUser(req.user!.userId);
-      res.json(files);
+      const result = await filesService.listByUser(req.user!.userId, req.query as any);
+      res.json(result);
     } catch (err) { next(err); }
   }
 }

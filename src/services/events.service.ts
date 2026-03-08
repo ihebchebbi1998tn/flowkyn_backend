@@ -275,7 +275,6 @@ export class EventsService {
         'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
         [eventId]
       );
-      const event = await this.getById(eventId);
       if (parseInt(count) >= event.max_participants) {
         throw new AppError(`Event has reached its maximum of ${event.max_participants} participants`, 400, 'EVENT_FULL');
       }

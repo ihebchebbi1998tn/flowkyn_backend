@@ -506,6 +506,14 @@ const migrations: { version: number; name: string; sql: string }[] = [
         FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
     `,
   },
+  {
+    version: 5,
+    name: 'files_original_name',
+    sql: `
+      -- Add original_name column to files for display purposes
+      ALTER TABLE files ADD COLUMN IF NOT EXISTS original_name VARCHAR(255);
+    `,
+  },
 ];
 
 /**

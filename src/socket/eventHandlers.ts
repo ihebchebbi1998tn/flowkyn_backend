@@ -17,17 +17,14 @@ function validateFields(data: any, fields: string[]): boolean {
 }
 
 /** Verify a user is an active participant in an event and return their participant ID + display name */
-async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string; displayName: string } | null> {
-  const row = await queryOne<{ id: string; member_id: string; display_name: string }>(
+async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string | null; displayName: string } | null> {
+  const row = await queryOne<{ id: string; member_id: string | null; display_name: string }>(
     `SELECT p.id, p.organization_member_id as member_id,
             COALESCE(u.name, p.guest_name, 'Unknown') as display_name
      FROM participants p
      LEFT JOIN organization_members om ON om.id = p.organization_member_id
      LEFT JOIN users u ON u.id = om.user_id
-     WHERE p.event_id = $1 AND (om.user_id = $2 OR (p.participant_type = 'guest' AND p.id IN (
-       SELECT p2.id FROM participants p2 WHERE p2.event_id = $1
-     ))) AND p.left_at IS NULL
-     AND om.user_id = $2`,
+     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [eventId, userId]
   );
   return row ? { participantId: row.id, memberId: row.member_id, displayName: row.display_name } : null;

@@ -331,6 +331,7 @@ CREATE TABLE files (
   owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   url TEXT NOT NULL,
   file_type VARCHAR(100),
+  original_name VARCHAR(255),
   size INT,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );

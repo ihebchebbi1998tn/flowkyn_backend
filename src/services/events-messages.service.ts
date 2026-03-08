@@ -57,7 +57,8 @@ export class EventMessagesService {
     const { page, limit, offset } = parsePagination(pagination);
     const [data, [{ count }]] = await Promise.all([
       query(
-        `SELECT em.*, p.guest_name, u.name as user_name
+        `SELECT em.*, p.guest_name, p.participant_type,
+                u.name as user_name, u.id as user_id, u.avatar_url as user_avatar
          FROM event_messages em
          LEFT JOIN participants p ON p.id = em.participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
@@ -109,7 +110,7 @@ export class EventMessagesService {
     const [reaction] = await query(
       `INSERT INTO post_reactions (id, post_id, participant_id, reaction_type, created_at)
        VALUES ($1, $2, $3, $4, NOW())
-       ON CONFLICT DO NOTHING RETURNING *`,
+       ON CONFLICT (post_id, participant_id, reaction_type) DO NOTHING RETURNING *`,
       [uuid(), postId, participantId, reactionType]
     );
     return reaction || { message: 'Reaction already exists' };
