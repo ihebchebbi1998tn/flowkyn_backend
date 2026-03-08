@@ -11,6 +11,7 @@ CREATE TABLE users (
   password_hash VARCHAR(255) NOT NULL,
   name VARCHAR(100) NOT NULL,
   avatar_url TEXT,
+  language VARCHAR(10) NOT NULL DEFAULT 'en', -- en, fr, de
   status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, active, suspended
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()

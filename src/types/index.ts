@@ -33,6 +33,7 @@ export interface UserRow {
   name: string;
   avatar_url: string | null;
   status: string;
+  language: string;
   created_at: Date;
   updated_at: Date;
 }

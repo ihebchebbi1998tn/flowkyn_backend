@@ -17,14 +17,15 @@ export class AuthService {
     const passwordHash = await hashPassword(password);
     const userId = uuid();
     const token = crypto.randomBytes(32).toString('hex');
+    const language = lang || 'en';
 
     try {
       await transaction(async (client) => {
         const { rowCount } = await client.query(
-          `INSERT INTO users (id, email, password_hash, name, status, created_at, updated_at)
-           VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW())
+          `INSERT INTO users (id, email, password_hash, name, language, status, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, $5, 'pending', NOW(), NOW())
            ON CONFLICT (email) DO NOTHING`,
-          [userId, email, passwordHash, name]
+          [userId, email, passwordHash, name, language]
         );
         if (rowCount === 0) throw new AppError('Email already in use', 409);
 
@@ -119,7 +120,7 @@ export class AuthService {
 
   async getMe(userId: string) {
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
-      `SELECT id, email, name, avatar_url, status, created_at, updated_at FROM users WHERE id = $1`,
+      `SELECT id, email, name, avatar_url, language, status, created_at, updated_at FROM users WHERE id = $1`,
       [userId]
     );
     if (!user) throw new AppError('User not found', 404);
@@ -127,7 +128,7 @@ export class AuthService {
   }
 
   async forgotPassword(email: string, lang?: string) {
-    const user = await queryOne<UserRow>('SELECT id, name FROM users WHERE email = $1', [email]);
+    const user = await queryOne<UserRow>('SELECT id, name, language FROM users WHERE email = $1', [email]);
     if (!user) return { message: 'If the email exists, a reset link has been sent' };
 
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
@@ -143,7 +144,7 @@ export class AuthService {
       to: email,
       type: 'reset_password',
       data: { link: `https://app.flowkyn.com/reset-password?token=${token}`, name: user.name },
-      lang,
+      lang: lang || user.language || 'en',
     });
 
     return { message: 'If the email exists, a reset link has been sent' };

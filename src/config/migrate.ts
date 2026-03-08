@@ -401,6 +401,16 @@ export async function runMigrations(): Promise<void> {
       );
     `);
 
+  },
+  {
+    version: 2,
+    name: 'add_user_language',
+    sql: `
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
+    `,
+  },
+];
+
     // Get already-applied versions
     const { rows: applied } = await client.query('SELECT version FROM _migrations ORDER BY version');
     const appliedSet = new Set(applied.map((r: any) => r.version));

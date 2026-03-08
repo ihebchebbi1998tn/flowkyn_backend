@@ -68,6 +68,10 @@ export class OrganizationsService {
     const token = crypto.randomBytes(32).toString('hex');
     const org = await this.getById(orgId);
 
+    // Try to get invitee's stored language preference
+    const invitee = await queryOne<{ language: string }>('SELECT language FROM users WHERE email = $1', [email]);
+    const emailLang = invitee?.language || lang || 'en';
+
     await query(
       `INSERT INTO organization_invitations (id, organization_id, email, role_id, invited_by_member_id, token, status, expires_at, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW() + INTERVAL '7 days', NOW())`,
@@ -78,7 +82,7 @@ export class OrganizationsService {
       to: email,
       type: 'organization_invitation',
       data: { orgName: org.name, link: `https://app.flowkyn.com/invitations/accept?token=${token}` },
-      lang,
+      lang: emailLang,
     });
 
     return { message: 'Invitation sent' };
