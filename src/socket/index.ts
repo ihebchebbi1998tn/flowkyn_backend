@@ -4,7 +4,6 @@
 import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { verifyAccessToken } from '../utils/jwt';
-import { env } from '../config/env';
 import { setupEventHandlers } from './eventHandlers';
 import { setupGameHandlers } from './gameHandlers';
 import { setupNotificationHandlers } from './notificationHandlers';
@@ -80,19 +79,9 @@ export function checkRateLimit(socket: any, eventName: string): boolean {
 
 // ─── Initialize ───
 export function initializeSocket(server: HttpServer) {
-  // Parse CORS origins (reuse env config)
-  const allowedOrigins = env.cors.origin.split(',').map(o => o.trim());
-
   io = new Server(server, {
     cors: {
-      origin: (origin, callback) => {
-        if (!origin) return callback(null, true);
-        if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
-          callback(null, true);
-        } else {
-          callback(new Error('Not allowed by CORS'));
-        }
-      },
+      origin: true, // Allow all origins (matches HTTP CORS config)
       methods: ['GET', 'POST'],
       credentials: true,
     },
