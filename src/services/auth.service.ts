@@ -1,22 +1,42 @@
+/**
+ * @fileoverview Auth Service — orchestrates authentication operations.
+ * 
+ * Delegates to specialized sub-services:
+ * - AuthSessionService: Token creation, refresh, logout
+ * - AuthPasswordService: Forgot/reset password flows
+ * 
+ * This service handles:
+ * - User registration + email verification
+ * - Login (credential validation + session creation)
+ * - Get current user profile
+ */
+
 import { v4 as uuid } from 'uuid';
 import { query, queryOne, transaction } from '../config/database';
 import { hashPassword, comparePassword } from '../utils/hash';
-import { signAccessToken, signRefreshToken, verifyRefreshToken } from '../utils/jwt';
 import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
-import { UserRow, UserSessionRow } from '../types';
+import { UserRow } from '../types';
 import { env } from '../config/env';
 import crypto from 'crypto';
+import { AuthSessionService } from './auth-session.service';
+import { AuthPasswordService } from './auth-password.service';
 
-/** Hash a refresh token before storing in DB */
-function hashToken(token: string): string {
-  return crypto.createHash('sha256').update(token).digest('hex');
-}
-
-/** Maximum concurrent sessions per user */
-const MAX_SESSIONS_PER_USER = 10;
+// Re-export sub-services for convenience
+export { AuthSessionService } from './auth-session.service';
+export { AuthPasswordService } from './auth-password.service';
 
 export class AuthService {
+  private sessions = new AuthSessionService();
+  private passwords = new AuthPasswordService();
+
+  /**
+   * Register a new user account.
+   * Creates user with 'pending' status, generates email verification token,
+   * and sends verification email.
+   * 
+   * @throws {AppError} 409 if email is already in use
+   */
   async register(email: string, password: string, name: string, lang?: string) {
     const passwordHash = await hashPassword(password);
     const userId = uuid();
@@ -57,6 +77,10 @@ export class AuthService {
     return { message: 'Verification email sent' };
   }
 
+  /**
+   * Verify email with token. Sets user status to 'active'.
+   * @throws {AppError} 400 if token is invalid or expired
+   */
   async verifyEmail(token: string) {
     const row = await queryOne<{ user_id: string }>(
       `SELECT user_id FROM email_verifications WHERE token = $1 AND expires_at > NOW()`,
@@ -72,6 +96,14 @@ export class AuthService {
     return { message: 'Email verified successfully' };
   }
 
+  /**
+   * Login with email and password.
+   * Validates credentials, checks account status, then delegates
+   * to AuthSessionService for token creation.
+   * 
+   * @throws {AppError} 401 if credentials are invalid
+   * @throws {AppError} 403 if account is suspended or unverified
+   */
   async login(email: string, password: string, ip: string, userAgent: string) {
     const user = await queryOne<UserRow>('SELECT * FROM users WHERE email = $1', [email]);
     if (!user) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
@@ -81,92 +113,20 @@ export class AuthService {
     const valid = await comparePassword(password, user.password_hash);
     if (!valid) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
 
-    const payload = { userId: user.id, email: user.email };
-    const accessToken = signAccessToken(payload);
-    const refreshToken = signRefreshToken(payload);
-
-    const hashedRefreshToken = hashToken(refreshToken);
-
-    await transaction(async (client) => {
-      // Clean expired sessions
-      await client.query('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < NOW()', [user.id]);
-
-      // Enforce session limit — delete oldest if at max
-      const { rows: sessions } = await client.query(
-        'SELECT id FROM user_sessions WHERE user_id = $1 ORDER BY created_at ASC',
-        [user.id]
-      );
-      if (sessions.length >= MAX_SESSIONS_PER_USER) {
-        const toDelete = sessions.slice(0, sessions.length - MAX_SESSIONS_PER_USER + 1);
-        await client.query(
-          `DELETE FROM user_sessions WHERE id = ANY($1)`,
-          [toDelete.map((s: any) => s.id)]
-        );
-      }
-
-      await client.query(
-        `INSERT INTO user_sessions (id, user_id, refresh_token, ip_address, user_agent, expires_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days', NOW())`,
-        [uuid(), user.id, hashedRefreshToken, ip, userAgent]
-      );
-    });
-
-    return {
-      access_token: accessToken,
-      refresh_token: refreshToken,
-      user: {
-        id: user.id,
-        email: user.email,
-        name: user.name,
-        avatar_url: user.avatar_url,
-        language: user.language,
-        status: user.status,
-        onboarding_completed: user.onboarding_completed,
-        created_at: user.created_at,
-        updated_at: user.updated_at,
-      },
-    };
+    return this.sessions.createSession(user, ip, userAgent);
   }
 
+  /** Refresh access token — delegates to AuthSessionService */
   async refresh(refreshToken: string) {
-    let payload;
-    try {
-      payload = verifyRefreshToken(refreshToken);
-    } catch {
-      throw new AppError('Refresh token is invalid or expired', 401, 'AUTH_TOKEN_EXPIRED');
-    }
-
-    const hashedToken = hashToken(refreshToken);
-
-    const session = await queryOne<UserSessionRow>(
-      `SELECT * FROM user_sessions WHERE refresh_token = $1 AND expires_at > NOW()`,
-      [hashedToken]
-    );
-    if (!session) throw new AppError('Refresh token not found or expired — please log in again', 401, 'AUTH_TOKEN_EXPIRED');
-
-    // Rotate refresh token
-    const newAccessToken = signAccessToken({ userId: payload.userId, email: payload.email });
-    const newRefreshToken = signRefreshToken({ userId: payload.userId, email: payload.email });
-    const newHashedRefresh = hashToken(newRefreshToken);
-
-    await query(
-      `UPDATE user_sessions SET refresh_token = $1, expires_at = NOW() + INTERVAL '7 days' WHERE id = $2`,
-      [newHashedRefresh, session.id]
-    );
-
-    return { access_token: newAccessToken, refresh_token: newRefreshToken };
+    return this.sessions.refresh(refreshToken);
   }
 
+  /** Logout — delegates to AuthSessionService */
   async logout(userId: string, refreshToken?: string) {
-    if (refreshToken) {
-      const hashedToken = hashToken(refreshToken);
-      await query('DELETE FROM user_sessions WHERE user_id = $1 AND refresh_token = $2', [userId, hashedToken]);
-    } else {
-      await query('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
-    }
-    return { message: 'Logged out successfully' };
+    return this.sessions.logout(userId, refreshToken);
   }
 
+  /** Get current user profile (excluding password_hash) */
   async getMe(userId: string) {
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
       `SELECT id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at FROM users WHERE id = $1`,
@@ -176,48 +136,13 @@ export class AuthService {
     return user;
   }
 
+  /** Forgot password — delegates to AuthPasswordService */
   async forgotPassword(email: string, lang?: string) {
-    const user = await queryOne<UserRow>('SELECT id, name, language FROM users WHERE email = $1', [email]);
-    // Always return same message to prevent email enumeration
-    if (!user) return { message: 'If the email exists, a reset link has been sent' };
-
-    await query('DELETE FROM password_resets WHERE email = $1', [email]);
-
-    const token = crypto.randomBytes(32).toString('hex');
-    await query(
-      `INSERT INTO password_resets (id, email, token, expires_at, created_at)
-       VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', NOW())`,
-      [uuid(), email, token]
-    );
-
-    await sendEmail({
-      to: email,
-      type: 'reset_password',
-      data: { link: `${env.frontendUrl}/reset-password?token=${token}`, name: user.name },
-      lang: lang || user.language || 'en',
-    });
-
-    return { message: 'If the email exists, a reset link has been sent' };
+    return this.passwords.forgotPassword(email, lang);
   }
 
+  /** Reset password — delegates to AuthPasswordService */
   async resetPassword(token: string, newPassword: string) {
-    const row = await queryOne<{ email: string }>(
-      `SELECT email FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
-      [token]
-    );
-    if (!row) throw new AppError('Reset link is invalid or has expired — request a new one', 400, 'AUTH_RESET_TOKEN_EXPIRED');
-
-    const hash = await hashPassword(newPassword);
-    await transaction(async (client) => {
-      await client.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE email = $2', [hash, row.email]);
-      await client.query('DELETE FROM password_resets WHERE email = $1', [row.email]);
-      // Invalidate ALL sessions on password reset
-      await client.query(
-        'DELETE FROM user_sessions WHERE user_id = (SELECT id FROM users WHERE email = $1)',
-        [row.email]
-      );
-    });
-
-    return { message: 'Password reset successfully' };
+    return this.passwords.resetPassword(token, newPassword);
   }
 }
