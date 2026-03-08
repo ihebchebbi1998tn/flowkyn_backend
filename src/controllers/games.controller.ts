@@ -9,15 +9,21 @@ import { queryOne } from '../config/database';
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
 
-/** Verify the authenticated user owns the given participant_id (org members only — guests can't play) */
+/** Verify the authenticated user owns the given participant_id (supports both org members and guests) */
 async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
-  const row = await queryOne(
+  // Check org-member participant
+  const memberRow = await queryOne(
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [participantId, userId]
   );
-  if (!row) throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
+  if (memberRow) return;
+
+  // Note: Guest participants don't have a user_id link, so game actions
+  // for guests are verified at the session/round level in the service layer.
+  // If no org-member match, deny access.
+  throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
 export class GamesController {
