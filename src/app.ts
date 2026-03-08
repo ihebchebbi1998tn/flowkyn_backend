@@ -7,23 +7,31 @@ import { errorHandler } from './middleware/errorHandler';
 import { apiRateLimiter } from './middleware/rateLimiter';
 import { routes } from './routes';
 import { env } from './config/env';
+import { monitorMiddleware, monitorRoutes } from './monitor';
 
 const app = express();
 
 // ─── Global middleware ───
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },
+  contentSecurityPolicy: false, // Allow inline scripts for monitor dashboard
 }));
 app.use(cors(corsOptions));
 app.use(morgan(env.nodeEnv === 'production' ? 'combined' : 'short'));
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// ─── Monitor middleware (captures all requests) ───
+app.use(monitorMiddleware);
+
+// ─── Monitor dashboard ───
+app.use('/monitor', monitorRoutes);
+
 // ─── Serve uploaded files statically ───
 app.use('/uploads', express.static(env.uploadsDir, {
   maxAge: '1d',
   etag: true,
-  dotfiles: 'deny', // Block access to dotfiles (.env, .tmp, etc.)
+  dotfiles: 'deny',
 }));
 
 // ─── Rate limiting ───

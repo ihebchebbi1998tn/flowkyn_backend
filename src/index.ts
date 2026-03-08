@@ -28,8 +28,9 @@ async function bootstrap() {
   // 5. Start listening
   server.listen(env.port, () => {
     console.log(`🚀 Flowkyn API running on port ${env.port} [${env.nodeEnv}]`);
-    console.log(`   Health: http://localhost:${env.port}/health`);
-    console.log(`   API:    http://localhost:${env.port}/v1`);
+    console.log(`   Health:  http://localhost:${env.port}/health`);
+    console.log(`   API:     http://localhost:${env.port}/v1`);
+    console.log(`   Monitor: http://localhost:${env.port}/monitor`);
   });
 
   // Graceful shutdown
