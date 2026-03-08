@@ -473,6 +473,39 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_users_onboarding ON users(onboarding_completed) WHERE onboarding_completed = false;
     `,
   },
+  {
+    version: 4,
+    name: 'fix_participant_fk_cascades',
+    sql: `
+      -- Fix missing ON DELETE CASCADE on all foreign keys referencing participants(id).
+      -- Without CASCADE, deleting an event (which cascades to participants) fails
+      -- when child rows exist in these tables.
+
+      ALTER TABLE event_messages DROP CONSTRAINT IF EXISTS event_messages_participant_id_fkey;
+      ALTER TABLE event_messages ADD CONSTRAINT event_messages_participant_id_fkey
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+
+      ALTER TABLE game_actions DROP CONSTRAINT IF EXISTS game_actions_participant_id_fkey;
+      ALTER TABLE game_actions ADD CONSTRAINT game_actions_participant_id_fkey
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+
+      ALTER TABLE game_results DROP CONSTRAINT IF EXISTS game_results_participant_id_fkey;
+      ALTER TABLE game_results ADD CONSTRAINT game_results_participant_id_fkey
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+
+      ALTER TABLE leaderboard_entries DROP CONSTRAINT IF EXISTS leaderboard_entries_participant_id_fkey;
+      ALTER TABLE leaderboard_entries ADD CONSTRAINT leaderboard_entries_participant_id_fkey
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+
+      ALTER TABLE activity_posts DROP CONSTRAINT IF EXISTS activity_posts_author_participant_id_fkey;
+      ALTER TABLE activity_posts ADD CONSTRAINT activity_posts_author_participant_id_fkey
+        FOREIGN KEY (author_participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+
+      ALTER TABLE post_reactions DROP CONSTRAINT IF EXISTS post_reactions_participant_id_fkey;
+      ALTER TABLE post_reactions ADD CONSTRAINT post_reactions_participant_id_fkey
+        FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE;
+    `,
+  },
 ];
 
 /**

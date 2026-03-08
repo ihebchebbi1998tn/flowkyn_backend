@@ -335,7 +335,28 @@ export class EventsService {
   }
 
   async delete(eventId: string) {
-    const result = await query('DELETE FROM events WHERE id = $1 RETURNING id', [eventId]);
+    const result = await transaction(async (client) => {
+      // Manually delete rows that reference participants (missing ON DELETE CASCADE in some deployments)
+      await client.query(
+        `DELETE FROM post_reactions WHERE post_id IN (SELECT id FROM activity_posts WHERE event_id = $1)`, [eventId]
+      );
+      await client.query(`DELETE FROM activity_posts WHERE event_id = $1`, [eventId]);
+      await client.query(
+        `DELETE FROM game_actions WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]
+      );
+      await client.query(
+        `DELETE FROM game_results WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]
+      );
+      await client.query(
+        `DELETE FROM leaderboard_entries WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]
+      );
+      await client.query(
+        `DELETE FROM event_messages WHERE event_id = $1`, [eventId]
+      );
+      // Now safe to delete the event (cascades to participants, game_sessions, etc.)
+      const { rows } = await client.query('DELETE FROM events WHERE id = $1 RETURNING id', [eventId]);
+      return rows;
+    });
     if (result.length === 0) throw new AppError('Event not found', 404, 'NOT_FOUND');
     return { message: 'Event deleted' };
   }

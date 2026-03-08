@@ -195,7 +195,7 @@ CREATE UNIQUE INDEX idx_participants_active ON participants(event_id, organizati
 CREATE TABLE event_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  participant_id UUID NOT NULL REFERENCES participants(id),
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   message TEXT NOT NULL,
   message_type VARCHAR(20) DEFAULT 'text',
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -259,7 +259,7 @@ CREATE TABLE game_actions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
   round_id UUID NOT NULL REFERENCES game_rounds(id),
-  participant_id UUID NOT NULL REFERENCES participants(id),
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   action_type VARCHAR(50) NOT NULL,
   payload JSONB,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -279,7 +279,7 @@ CREATE TABLE game_state_snapshots (
 CREATE TABLE game_results (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
-  participant_id UUID NOT NULL REFERENCES participants(id),
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   score INT DEFAULT 0,
   rank INT,
   metadata JSONB,
@@ -299,7 +299,7 @@ CREATE TABLE leaderboards (
 CREATE TABLE leaderboard_entries (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   leaderboard_id UUID NOT NULL REFERENCES leaderboards(id) ON DELETE CASCADE,
-  participant_id UUID NOT NULL REFERENCES participants(id),
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   score INT DEFAULT 0,
   rank INT,
   updated_at TIMESTAMP
@@ -310,7 +310,7 @@ CREATE UNIQUE INDEX idx_leaderboard_entries_unique ON leaderboard_entries(leader
 CREATE TABLE activity_posts (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-  author_participant_id UUID NOT NULL REFERENCES participants(id),
+  author_participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   content TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -318,7 +318,7 @@ CREATE TABLE activity_posts (
 CREATE TABLE post_reactions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   post_id UUID NOT NULL REFERENCES activity_posts(id) ON DELETE CASCADE,
-  participant_id UUID NOT NULL REFERENCES participants(id),
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
   reaction_type VARCHAR(50) NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
