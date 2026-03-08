@@ -1,9 +1,9 @@
 /**
  * Email template: Event Invitation
  */
-import { emailLayout } from './layout';
-import { getTranslation } from './i18n';
-import { escapeHtml } from './utils';
+import { emailLayout } from '../layout';
+import { getTranslation } from '../i18n';
+import { escapeHtml } from '../utils';
 
 interface EventInvitationData {
   link: string;

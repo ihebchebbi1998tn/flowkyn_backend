@@ -11,7 +11,7 @@ export class AuthController {
     try {
       const { email, password, name, lang } = req.body;
       const result = await authService.register(email, password, name, lang);
-      await audit.create(null, result.user?.id || '', 'AUTH_REGISTER', { email, ip: req.ip });
+      await audit.create(null, '', 'AUTH_REGISTER', { email, ip: req.ip });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
@@ -30,7 +30,7 @@ export class AuthController {
       const ip = req.ip || req.socket.remoteAddress || '';
       const userAgent = req.headers['user-agent'] || '';
       const result = await authService.login(email, password, ip, userAgent);
-      await audit.create(null, result.user?.id || '', 'AUTH_LOGIN', { email, ip, userAgent });
+      await audit.create(null, '', 'AUTH_LOGIN', { email, ip, userAgent });
       res.json(result);
     } catch (err) { next(err); }
   }
