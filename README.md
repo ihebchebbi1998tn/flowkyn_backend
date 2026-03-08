@@ -1,4 +1,4 @@
-# Flowkyn Backend API v1
+# Flowkyn Backend API
 
 ## Quick Start
 
