@@ -10,15 +10,33 @@ import {
   eventInvitationTemplate,
 } from '../emails';
 
-const transporter = nodemailer.createTransport({
+const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
   host: env.smtp.host,
   port: env.smtp.port,
-  secure: env.smtp.secure,
+  secure: env.smtp.secure, // true for 465 (SSL), false for 587 (STARTTLS)
   auth: {
     user: env.smtp.user,
     pass: env.smtp.pass,
   },
-});
+  // For port 587 with STARTTLS
+  ...(!env.smtp.secure && {
+    requireTLS: true,
+    tls: {
+      ciphers: 'SSLv3',
+      rejectUnauthorized: false, // OVH certificates sometimes need this
+    },
+  }),
+  connectionTimeout: 10000,
+  greetingTimeout: 10000,
+  socketTimeout: 15000,
+};
+
+const transporter = nodemailer.createTransport(transportOptions);
+
+// Verify SMTP connection on startup
+transporter.verify()
+  .then(() => console.log('✅ SMTP connection verified successfully'))
+  .catch((err) => console.warn(`⚠️ SMTP verification failed: ${err.message}`));
 
 type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation';
 
