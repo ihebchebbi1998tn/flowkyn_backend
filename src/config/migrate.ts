@@ -23,6 +23,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
         password_hash VARCHAR(255) NOT NULL,
         name VARCHAR(100) NOT NULL,
         avatar_url TEXT,
+        language VARCHAR(10) NOT NULL DEFAULT 'en',
         status VARCHAR(20) NOT NULL DEFAULT 'pending',
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -70,6 +71,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
         id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
         name VARCHAR(100) NOT NULL,
         slug VARCHAR(120) UNIQUE NOT NULL,
+        logo_url TEXT,
         owner_user_id UUID NOT NULL REFERENCES users(id),
         created_at TIMESTAMP NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMP NOT NULL DEFAULT NOW()
@@ -325,6 +327,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
         reaction_type VARCHAR(50) NOT NULL,
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_post_reactions_unique ON post_reactions(post_id, participant_id, reaction_type);
 
       -- Files
       CREATE TABLE IF NOT EXISTS files (
@@ -347,6 +350,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
         created_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
       CREATE INDEX IF NOT EXISTS idx_notifications_user ON notifications(user_id);
+      CREATE INDEX IF NOT EXISTS idx_notifications_unread ON notifications(user_id) WHERE read_at IS NULL;
 
       -- Analytics Events
       CREATE TABLE IF NOT EXISTS analytics_events (
@@ -378,10 +382,18 @@ const migrations: { version: number; name: string; sql: string }[] = [
         (uuid_generate_v4(), 'moderator', 'Can moderate events and content'),
         (uuid_generate_v4(), 'member', 'Standard organization member')
       ON CONFLICT (name) DO NOTHING;
+
+      -- Seed Default Game Types
+      INSERT INTO game_types (id, key, name, category, is_sync, min_players, max_players, description) VALUES
+        (uuid_generate_v4(), 'two-truths', 'Two Truths and a Lie', 'icebreaker', true, 3, 30, 'Classic icebreaker where each person shares two truths and one lie.'),
+        (uuid_generate_v4(), 'coffee-roulette', 'Coffee Roulette', 'connection', true, 2, 2, 'Random 1:1 pairings for virtual coffee chats.'),
+        (uuid_generate_v4(), 'wins-of-week', 'Wins of the Week', 'wellness', false, 2, 999, 'Weekly thread where everyone shares one win from their week.'),
+        (uuid_generate_v4(), 'trivia', 'Icebreaker Trivia', 'icebreaker', true, 2, 50, 'Fun trivia questions to get the team laughing and learning.'),
+        (uuid_generate_v4(), 'scavenger-hunt', 'Team Scavenger Hunt', 'competition', true, 4, 50, 'Teams race to find and share items or complete challenges.'),
+        (uuid_generate_v4(), 'gratitude', 'Gratitude Circle', 'wellness', false, 2, 999, 'Share one thing you appreciate about a colleague this week.')
+      ON CONFLICT (key) DO NOTHING;
     `,
   },
-  // Future migrations go here:
-  // { version: 2, name: 'add_user_locale', sql: `ALTER TABLE users ADD COLUMN IF NOT EXISTS locale VARCHAR(10) DEFAULT 'en';` },
 ];
 
 /**
@@ -400,23 +412,6 @@ export async function runMigrations(): Promise<void> {
         applied_at TIMESTAMP NOT NULL DEFAULT NOW()
       );
     `);
-
-  },
-  {
-    version: 2,
-    name: 'add_user_language',
-    sql: `
-      ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
-    `,
-  },
-  {
-    version: 3,
-    name: 'add_organization_logo',
-    sql: `
-      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_url TEXT;
-    `,
-  },
-];
 
     // Get already-applied versions
     const { rows: applied } = await client.query('SELECT version FROM _migrations ORDER BY version');
