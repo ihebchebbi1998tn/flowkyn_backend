@@ -30,7 +30,7 @@ export class OrganizationsController {
     try {
       const member = await orgsService.getMemberByUserId(req.params.orgId, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not a member of this organization' }); return; }
-      const result = await orgsService.inviteMember(req.params.orgId, member.id, req.body.email, req.body.role_id);
+      const result = await orgsService.inviteMember(req.params.orgId, member.id, req.body.email, req.body.role_id, req.body.lang);
       res.json(result);
     } catch (err) { next(err); }
   }

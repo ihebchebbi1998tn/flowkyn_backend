@@ -65,7 +65,7 @@ export class EventsController {
       const event = await eventsService.getById(req.params.eventId);
       const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
       if (!member) { res.status(403).json({ error: 'Not authorized' }); return; }
-      const result = await eventsService.inviteParticipant(req.params.eventId, member.id, req.body.email);
+      const result = await eventsService.inviteParticipant(req.params.eventId, member.id, req.body.email, req.body.lang);
       res.json(result);
     } catch (err) { next(err); }
   }

@@ -7,8 +7,8 @@ const authService = new AuthService();
 export class AuthController {
   async register(req: Request, res: Response, next: NextFunction) {
     try {
-      const { email, password, name } = req.body;
-      const result = await authService.register(email, password, name);
+      const { email, password, name, lang } = req.body;
+      const result = await authService.register(email, password, name, lang);
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
@@ -53,7 +53,7 @@ export class AuthController {
 
   async forgotPassword(req: Request, res: Response, next: NextFunction) {
     try {
-      const result = await authService.forgotPassword(req.body.email);
+      const result = await authService.forgotPassword(req.body.email, req.body.lang);
       res.json(result);
     } catch (err) { next(err); }
   }

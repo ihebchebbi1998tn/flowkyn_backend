@@ -26,6 +26,7 @@ export const updateEventSchema = z.object({
 
 export const inviteParticipantSchema = z.object({
   email: z.string().email(),
+  lang: z.string().max(10).optional(),
 });
 
 export const sendMessageSchema = z.object({

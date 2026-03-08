@@ -7,6 +7,7 @@ export const createOrgSchema = z.object({
 export const inviteMemberSchema = z.object({
   email: z.string().email('Invalid email'),
   role_id: z.string().uuid('Invalid role ID'),
+  lang: z.string().max(10).optional(),
 });
 
 export const acceptInvitationSchema = z.object({

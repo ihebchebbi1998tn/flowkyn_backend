@@ -13,14 +13,13 @@ function hashToken(token: string): string {
 }
 
 export class AuthService {
-  async register(email: string, password: string, name: string) {
+  async register(email: string, password: string, name: string, lang?: string) {
     const passwordHash = await hashPassword(password);
     const userId = uuid();
     const token = crypto.randomBytes(32).toString('hex');
 
     try {
       await transaction(async (client) => {
-        // Use ON CONFLICT to handle race condition (two simultaneous registrations)
         const { rowCount } = await client.query(
           `INSERT INTO users (id, email, password_hash, name, status, created_at, updated_at)
            VALUES ($1, $2, $3, $4, 'pending', NOW(), NOW())
@@ -36,7 +35,6 @@ export class AuthService {
         );
       });
     } catch (err: any) {
-      // Handle unique constraint violation (backup for race condition)
       if (err.code === '23505' && err.constraint?.includes('email')) {
         throw new AppError('Email already in use', 409);
       }
@@ -46,7 +44,8 @@ export class AuthService {
     await sendEmail({
       to: email,
       type: 'verify_account',
-      data: { link: `https://app.flowkyn.com/verify?token=${token}` },
+      data: { link: `https://app.flowkyn.com/verify?token=${token}`, name },
+      lang,
     });
 
     return { message: 'Verification email sent' };
@@ -80,10 +79,8 @@ export class AuthService {
     const accessToken = signAccessToken(payload);
     const refreshToken = signRefreshToken(payload);
 
-    // Hash refresh token before storing
     const hashedRefreshToken = hashToken(refreshToken);
 
-    // Clean up expired sessions for this user, then insert new one
     await transaction(async (client) => {
       await client.query('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < NOW()', [user.id]);
       await client.query(
@@ -112,11 +109,9 @@ export class AuthService {
 
   async logout(userId: string, refreshToken?: string) {
     if (refreshToken) {
-      // Logout specific session
       const hashedToken = hashToken(refreshToken);
       await query('DELETE FROM user_sessions WHERE user_id = $1 AND refresh_token = $2', [userId, hashedToken]);
     } else {
-      // Logout all sessions
       await query('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
     }
     return { message: 'Logged out successfully' };
@@ -131,12 +126,10 @@ export class AuthService {
     return user;
   }
 
-  async forgotPassword(email: string) {
-    const user = await queryOne<UserRow>('SELECT id FROM users WHERE email = $1', [email]);
-    // Always return same message to prevent email enumeration
+  async forgotPassword(email: string, lang?: string) {
+    const user = await queryOne<UserRow>('SELECT id, name FROM users WHERE email = $1', [email]);
     if (!user) return { message: 'If the email exists, a reset link has been sent' };
 
-    // Delete any existing reset tokens for this email
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
 
     const token = crypto.randomBytes(32).toString('hex');
@@ -149,7 +142,8 @@ export class AuthService {
     await sendEmail({
       to: email,
       type: 'reset_password',
-      data: { link: `https://app.flowkyn.com/reset-password?token=${token}` },
+      data: { link: `https://app.flowkyn.com/reset-password?token=${token}`, name: user.name },
+      lang,
     });
 
     return { message: 'If the email exists, a reset link has been sent' };
@@ -165,9 +159,7 @@ export class AuthService {
     const hash = await hashPassword(newPassword);
     await transaction(async (client) => {
       await client.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE email = $2', [hash, row.email]);
-      // Delete ALL reset tokens for this email (not just this one)
       await client.query('DELETE FROM password_resets WHERE email = $1', [row.email]);
-      // Invalidate all sessions on password reset
       await client.query(
         'DELETE FROM user_sessions WHERE user_id = (SELECT id FROM users WHERE email = $1)',
         [row.email]

@@ -9,6 +9,7 @@ export const registerSchema = z.object({
     .regex(/[A-Z]/, 'Password must contain an uppercase letter')
     .regex(/[0-9]/, 'Password must contain a number'),
   name: z.string().trim().min(1, 'Name is required').max(100),
+  lang: z.string().max(10).optional(),
 });
 
 export const loginSchema = z.object({
@@ -26,6 +27,7 @@ export const refreshSchema = z.object({
 
 export const forgotPasswordSchema = z.object({
   email: z.string().trim().email('Invalid email').max(255),
+  lang: z.string().max(10).optional(),
 });
 
 export const resetPasswordSchema = z.object({

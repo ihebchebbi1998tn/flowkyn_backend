@@ -10,7 +10,6 @@ export class OrganizationsService {
   async create(userId: string, name: string) {
     let slug = generateSlug(name);
 
-    // Ensure slug uniqueness
     const existingSlug = await queryOne<{ id: string }>('SELECT id FROM organizations WHERE slug = $1', [slug]);
     if (existingSlug) {
       slug = `${slug}-${crypto.randomBytes(3).toString('hex')}`;
@@ -19,7 +18,6 @@ export class OrganizationsService {
     const orgId = uuid();
     const memberId = uuid();
 
-    // Get or create 'owner' role
     const ownerRole = await queryOne<{ id: string }>(`SELECT id FROM roles WHERE name = 'owner'`);
     if (!ownerRole) throw new AppError('Owner role not found. Seed roles first.', 500);
 
@@ -66,7 +64,7 @@ export class OrganizationsService {
     );
   }
 
-  async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleId: string) {
+  async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleId: string, lang?: string) {
     const token = crypto.randomBytes(32).toString('hex');
     const org = await this.getById(orgId);
 
@@ -80,6 +78,7 @@ export class OrganizationsService {
       to: email,
       type: 'organization_invitation',
       data: { orgName: org.name, link: `https://app.flowkyn.com/invitations/accept?token=${token}` },
+      lang,
     });
 
     return { message: 'Invitation sent' };

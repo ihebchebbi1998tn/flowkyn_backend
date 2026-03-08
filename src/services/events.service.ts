@@ -101,7 +101,7 @@ export class EventsService {
     return { message: 'Event deleted' };
   }
 
-  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string) {
+  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, lang?: string) {
     const event = await this.getById(eventId);
 
     // Check max participants
@@ -125,6 +125,7 @@ export class EventsService {
       to: email,
       type: 'event_invitation',
       data: { eventTitle: event.title, link: `https://app.flowkyn.com/events/${eventId}/join?token=${token}` },
+      lang,
     });
 
     return { message: 'Invitation sent' };
