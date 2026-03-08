@@ -22,8 +22,8 @@ export interface EventsClientToServer {
 export interface EventsServerToClient {
   'event:user_joined': (data: { userId: string; timestamp: string }) => void;
   'event:user_left': (data: { userId: string; timestamp: string }) => void;
-  'chat:message': (data: { id: string; participantId: string; message: string; userId: string; timestamp: string }) => void;
-  'chat:typing': (data: { userId: string; isTyping: boolean }) => void;
+  'chat:message': (data: { id: string; participantId: string; senderName: string; message: string; userId: string; timestamp: string }) => void;
+  'chat:typing': (data: { userId: string; userName: string; isTyping: boolean }) => void;
   'event:presence': (data: { eventId: string; onlineUserIds: string[] }) => void;
   'event:updated': (data: { eventId: string; changes: Record<string, any> }) => void;
   'event:notification': (data: { type: string; payload: any }) => void;

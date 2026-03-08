@@ -30,6 +30,19 @@ export class GamesController {
 
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      // Authorization: only admins/moderators can start game sessions
+      const member = await queryOne<{ id: string; role_name: string }>(
+        `SELECT om.id, r.name as role_name FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+        [req.params.eventId, req.user!.userId]
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
       const session = await gamesService.startSession(req.params.eventId, req.body.game_type_id);
 
       const { emitEventNotification } = await import('../socket/emitter');

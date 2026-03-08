@@ -221,12 +221,31 @@ export class EventsService {
    */
   async delete(eventId: string) {
     const result = await transaction(async (client) => {
+      // 1. Delete post reactions → activity posts
       await client.query(`DELETE FROM post_reactions WHERE post_id IN (SELECT id FROM activity_posts WHERE event_id = $1)`, [eventId]);
       await client.query(`DELETE FROM activity_posts WHERE event_id = $1`, [eventId]);
-      await client.query(`DELETE FROM game_actions WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]);
-      await client.query(`DELETE FROM game_results WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]);
+
+      // 2. Delete game data: actions → results → state snapshots → rounds → sessions
+      await client.query(`DELETE FROM game_actions WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = $1)`, [eventId]);
+      await client.query(`DELETE FROM game_results WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = $1)`, [eventId]);
+      await client.query(`DELETE FROM game_state_snapshots WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = $1)`, [eventId]);
+      await client.query(`DELETE FROM game_rounds WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = $1)`, [eventId]);
+      await client.query(`DELETE FROM game_sessions WHERE event_id = $1`, [eventId]);
+
+      // 3. Delete leaderboard entries (via participants)
       await client.query(`DELETE FROM leaderboard_entries WHERE participant_id IN (SELECT id FROM participants WHERE event_id = $1)`, [eventId]);
+
+      // 4. Delete messages & invitations
       await client.query(`DELETE FROM event_messages WHERE event_id = $1`, [eventId]);
+      await client.query(`DELETE FROM event_invitations WHERE event_id = $1`, [eventId]);
+
+      // 5. Delete participants
+      await client.query(`DELETE FROM participants WHERE event_id = $1`, [eventId]);
+
+      // 6. Delete event settings
+      await client.query(`DELETE FROM event_settings WHERE event_id = $1`, [eventId]);
+
+      // 7. Delete the event itself
       const { rows } = await client.query('DELETE FROM events WHERE id = $1 RETURNING id', [eventId]);
       return rows;
     });

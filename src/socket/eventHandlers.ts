@@ -16,16 +16,21 @@ function validateFields(data: any, fields: string[]): boolean {
   return fields.every(f => typeof data[f] === 'string' && data[f].length > 0);
 }
 
-/** Verify a user is an active participant in an event and return their participant ID */
-async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string } | null> {
-  const row = await queryOne<{ id: string; member_id: string }>(
-    `SELECT p.id, p.organization_member_id as member_id
+/** Verify a user is an active participant in an event and return their participant ID + display name */
+async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string; displayName: string } | null> {
+  const row = await queryOne<{ id: string; member_id: string; display_name: string }>(
+    `SELECT p.id, p.organization_member_id as member_id,
+            COALESCE(u.name, p.guest_name, 'Unknown') as display_name
      FROM participants p
-     JOIN organization_members om ON om.id = p.organization_member_id
-     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+     LEFT JOIN organization_members om ON om.id = p.organization_member_id
+     LEFT JOIN users u ON u.id = om.user_id
+     WHERE p.event_id = $1 AND (om.user_id = $2 OR (p.participant_type = 'guest' AND p.id IN (
+       SELECT p2.id FROM participants p2 WHERE p2.event_id = $1
+     ))) AND p.left_at IS NULL
+     AND om.user_id = $2`,
     [eventId, userId]
   );
-  return row ? { participantId: row.id, memberId: row.member_id } : null;
+  return row ? { participantId: row.id, memberId: row.member_id, displayName: row.display_name } : null;
 }
 
 export function setupEventHandlers(eventsNs: Namespace) {
@@ -121,9 +126,11 @@ export function setupEventHandlers(eventsNs: Namespace) {
         const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
 
         // Broadcast to all in room (including sender for confirmation)
+        // IMPORTANT: Include senderName so frontend can display it without extra lookups
         eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
           id: saved.id,
           participantId: participant.participantId,
+          senderName: participant.displayName,
           message,
           userId: user.userId,
           timestamp: saved.created_at,
@@ -135,13 +142,22 @@ export function setupEventHandlers(eventsNs: Namespace) {
     });
 
     // ─── Typing indicator (not persisted) ───
-    socket.on('chat:typing', (data: { eventId: string; isTyping: boolean }) => {
+    // Cache user display name for typing events to avoid DB lookups
+    let cachedDisplayName: string | null = null;
+
+    socket.on('chat:typing', async (data: { eventId: string; isTyping: boolean }) => {
       if (!validateFields(data, ['eventId'])) return;
       if (!checkRateLimit(socket, 'chat:typing')) return;
 
-      // BUG FIX: Use userId instead of client-supplied participantId
+      // Resolve display name once per connection
+      if (!cachedDisplayName) {
+        const participant = await verifyParticipant(data.eventId, user.userId);
+        cachedDisplayName = participant?.displayName || 'Someone';
+      }
+
       socket.to(`event:${data.eventId}`).emit('chat:typing', {
         userId: user.userId,
+        userName: cachedDisplayName,
         isTyping: !!data.isTyping,
       });
     });
