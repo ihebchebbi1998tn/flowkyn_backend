@@ -1,8 +1,19 @@
+/**
+ * @fileoverview Games Routes
+ *
+ * GET  /game-types                          — List available game types
+ * POST /events/:eventId/game-sessions       — Start a new game session
+ * POST /game-sessions/:id/rounds            — Start next round
+ * POST /game-sessions/:id/finish            — Finish session
+ * POST /game-actions                        — Submit a game action
+ */
+
 import { Router } from 'express';
 import { GamesController } from '../controllers/games.controller';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
 import { startSessionSchema, submitActionSchema } from '../validators/games.validator';
+import { eventIdParam, uuidParam } from '../validators/common.validator';
 
 const router = Router();
 const ctrl = new GamesController();
@@ -11,9 +22,9 @@ const ctrl = new GamesController();
 router.get('/game-types', authenticate, ctrl.listGameTypes);
 
 // Game sessions (under events)
-router.post('/events/:eventId/game-sessions', authenticate, validate(startSessionSchema), ctrl.startSession);
-router.post('/game-sessions/:id/rounds', authenticate, ctrl.startRound);
-router.post('/game-sessions/:id/finish', authenticate, ctrl.finishSession);
+router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
+router.post('/game-sessions/:id/rounds', authenticate, validate(uuidParam, 'params'), ctrl.startRound);
+router.post('/game-sessions/:id/finish', authenticate, validate(uuidParam, 'params'), ctrl.finishSession);
 
 // Game actions
 router.post('/game-actions', authenticate, validate(submitActionSchema), ctrl.submitAction);
