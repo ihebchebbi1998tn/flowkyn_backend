@@ -1,0 +1,14 @@
+import { Response, NextFunction } from 'express';
+import { AnalyticsService } from '../services/analytics.service';
+import { AuthRequest } from '../types';
+
+const analyticsService = new AnalyticsService();
+
+export class AnalyticsController {
+  async track(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const result = await analyticsService.track(req.user!.userId, req.body.event_name, req.body.properties);
+      res.status(201).json(result);
+    } catch (err) { next(err); }
+  }
+}

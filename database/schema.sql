@@ -1,0 +1,373 @@
+-- Flowkyn Database Schema
+-- PostgreSQL (Neon compatible)
+
+-- ─── Extensions ───
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- ─── Users ───
+CREATE TABLE users (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email VARCHAR(255) UNIQUE NOT NULL,
+  password_hash VARCHAR(255) NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  avatar_url TEXT,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, active, suspended
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_users_email ON users(email);
+CREATE INDEX idx_users_status ON users(status);
+
+-- ─── User Sessions ───
+CREATE TABLE user_sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  refresh_token VARCHAR(512) NOT NULL,
+  ip_address VARCHAR(45),
+  user_agent TEXT,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_user_sessions_user_id ON user_sessions(user_id);
+CREATE INDEX idx_user_sessions_refresh_token ON user_sessions(refresh_token);
+CREATE INDEX idx_user_sessions_expires ON user_sessions(expires_at);
+
+-- ─── Email Verifications ───
+CREATE TABLE email_verifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  token VARCHAR(255) NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_email_verifications_token ON email_verifications(token);
+
+-- ─── Password Resets ───
+CREATE TABLE password_resets (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  email VARCHAR(255) NOT NULL,
+  token VARCHAR(255) NOT NULL UNIQUE,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_password_resets_token ON password_resets(token);
+CREATE INDEX idx_password_resets_email ON password_resets(email);
+
+-- ─── Organizations ───
+CREATE TABLE organizations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(120) UNIQUE NOT NULL,
+  owner_user_id UUID NOT NULL REFERENCES users(id),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ─── Subscriptions ───
+CREATE TABLE subscriptions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  plan_name VARCHAR(50) NOT NULL DEFAULT 'free',
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  max_users INT DEFAULT 10,
+  max_events INT DEFAULT 5,
+  billing_email VARCHAR(255),
+  started_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  expires_at TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_subscriptions_org ON subscriptions(organization_id);
+
+-- ─── Roles & Permissions ───
+CREATE TABLE roles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(50) UNIQUE NOT NULL,
+  description TEXT
+);
+
+CREATE TABLE permissions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  key VARCHAR(100) UNIQUE NOT NULL,
+  description TEXT
+);
+
+CREATE TABLE role_permissions (
+  role_id UUID NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+  permission_id UUID NOT NULL REFERENCES permissions(id) ON DELETE CASCADE,
+  PRIMARY KEY (role_id, permission_id)
+);
+
+-- ─── Organization Members ───
+CREATE TABLE organization_members (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role_id UUID NOT NULL REFERENCES roles(id),
+  invited_by_member_id UUID REFERENCES organization_members(id),
+  is_subscription_manager BOOLEAN DEFAULT false,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  joined_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX idx_org_members_unique ON organization_members(organization_id, user_id);
+
+-- ─── Organization Invitations ───
+CREATE TABLE organization_invitations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  role_id UUID NOT NULL REFERENCES roles(id),
+  invited_by_member_id UUID REFERENCES organization_members(id),
+  token VARCHAR(255) UNIQUE NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_org_invitations_token ON organization_invitations(token);
+CREATE INDEX idx_org_invitations_email ON organization_invitations(email);
+
+-- ─── Events ───
+CREATE TABLE events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  created_by_member_id UUID NOT NULL REFERENCES organization_members(id),
+  title VARCHAR(200) NOT NULL,
+  description TEXT,
+  event_mode VARCHAR(20) DEFAULT 'sync', -- sync, async
+  visibility VARCHAR(20) DEFAULT 'private', -- public, private
+  max_participants INT DEFAULT 50,
+  start_time TIMESTAMP,
+  end_time TIMESTAMP,
+  expires_at TIMESTAMP,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft', -- draft, active, completed, cancelled
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_events_org ON events(organization_id);
+CREATE INDEX idx_events_status ON events(status);
+
+-- ─── Event Settings ───
+CREATE TABLE event_settings (
+  event_id UUID PRIMARY KEY REFERENCES events(id) ON DELETE CASCADE,
+  allow_guests BOOLEAN DEFAULT true,
+  allow_chat BOOLEAN DEFAULT true,
+  auto_start_games BOOLEAN DEFAULT false,
+  max_rounds INT DEFAULT 5
+);
+
+-- ─── Event Invitations ───
+CREATE TABLE event_invitations (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  email VARCHAR(255) NOT NULL,
+  invited_by_member_id UUID REFERENCES organization_members(id),
+  token VARCHAR(255) UNIQUE NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'pending',
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_event_invitations_token ON event_invitations(token);
+
+-- ─── Participants ───
+CREATE TABLE participants (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  organization_member_id UUID REFERENCES organization_members(id),
+  guest_name VARCHAR(100),
+  guest_avatar VARCHAR(255),
+  participant_type VARCHAR(20) NOT NULL DEFAULT 'member', -- member, guest
+  invited_by_member_id UUID REFERENCES organization_members(id),
+  joined_at TIMESTAMP,
+  left_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_participants_event ON participants(event_id);
+-- Prevent duplicate active participants
+CREATE UNIQUE INDEX idx_participants_active ON participants(event_id, organization_member_id) WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
+
+-- ─── Event Messages ───
+CREATE TABLE event_messages (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id),
+  message TEXT NOT NULL,
+  message_type VARCHAR(20) DEFAULT 'text',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_event_messages_event ON event_messages(event_id);
+CREATE INDEX idx_event_messages_created ON event_messages(event_id, created_at);
+
+-- ─── Game Types ───
+CREATE TABLE game_types (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  key VARCHAR(50) UNIQUE NOT NULL,
+  name VARCHAR(100) NOT NULL,
+  category VARCHAR(50),
+  is_sync BOOLEAN DEFAULT true,
+  min_players INT DEFAULT 2,
+  max_players INT DEFAULT 50,
+  description TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ─── Prompts ───
+CREATE TABLE prompts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_type_id UUID NOT NULL REFERENCES game_types(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  category VARCHAR(50),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ─── Game Sessions ───
+CREATE TABLE game_sessions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  game_type_id UUID NOT NULL REFERENCES game_types(id),
+  status VARCHAR(20) NOT NULL DEFAULT 'active', -- active, paused, finished
+  current_round INT DEFAULT 0,
+  game_duration_minutes INT DEFAULT 30,
+  expires_at TIMESTAMP,
+  metadata JSONB,
+  started_at TIMESTAMP,
+  ended_at TIMESTAMP
+);
+CREATE INDEX idx_game_sessions_event ON game_sessions(event_id);
+CREATE INDEX idx_game_sessions_status ON game_sessions(status);
+
+-- ─── Game Rounds ───
+CREATE TABLE game_rounds (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  round_number INT NOT NULL,
+  round_duration_seconds INT DEFAULT 60,
+  status VARCHAR(20) NOT NULL DEFAULT 'active',
+  metadata JSONB,
+  started_at TIMESTAMP,
+  ended_at TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_game_rounds_unique ON game_rounds(game_session_id, round_number);
+
+-- ─── Game Actions ───
+CREATE TABLE game_actions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  round_id UUID NOT NULL REFERENCES game_rounds(id),
+  participant_id UUID NOT NULL REFERENCES participants(id),
+  action_type VARCHAR(50) NOT NULL,
+  payload JSONB,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_game_actions_session ON game_actions(game_session_id);
+CREATE INDEX idx_game_actions_round ON game_actions(round_id);
+
+-- ─── Game State Snapshots ───
+CREATE TABLE game_state_snapshots (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  state JSONB NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+-- ─── Game Results ───
+CREATE TABLE game_results (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id),
+  score INT DEFAULT 0,
+  rank INT,
+  metadata JSONB,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX idx_game_results_unique ON game_results(game_session_id, participant_id);
+
+-- ─── Leaderboards ───
+CREATE TABLE leaderboards (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_type_id UUID NOT NULL REFERENCES game_types(id),
+  organization_id UUID NOT NULL REFERENCES organizations(id),
+  season VARCHAR(50),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE leaderboard_entries (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  leaderboard_id UUID NOT NULL REFERENCES leaderboards(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id),
+  score INT DEFAULT 0,
+  rank INT,
+  updated_at TIMESTAMP
+);
+CREATE UNIQUE INDEX idx_leaderboard_entries_unique ON leaderboard_entries(leaderboard_id, participant_id);
+
+-- ─── Activity Posts ───
+CREATE TABLE activity_posts (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  author_participant_id UUID NOT NULL REFERENCES participants(id),
+  content TEXT NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE post_reactions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  post_id UUID NOT NULL REFERENCES activity_posts(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id),
+  reaction_type VARCHAR(50) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+-- Prevent duplicate reactions of same type by same participant
+CREATE UNIQUE INDEX idx_post_reactions_unique ON post_reactions(post_id, participant_id, reaction_type);
+
+-- ─── Files ───
+CREATE TABLE files (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  owner_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  url TEXT NOT NULL,
+  file_type VARCHAR(100),
+  size INT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_files_owner ON files(owner_user_id);
+
+-- ─── Notifications ───
+CREATE TABLE notifications (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  type VARCHAR(50) NOT NULL,
+  data JSONB,
+  read_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_notifications_user ON notifications(user_id);
+CREATE INDEX idx_notifications_unread ON notifications(user_id) WHERE read_at IS NULL;
+
+-- ─── Analytics Events ───
+CREATE TABLE analytics_events (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  event_name VARCHAR(100) NOT NULL,
+  properties JSONB,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_analytics_events_name ON analytics_events(event_name);
+CREATE INDEX idx_analytics_events_created ON analytics_events(created_at);
+
+-- ─── Audit Logs ───
+CREATE TABLE audit_logs (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+  action VARCHAR(100) NOT NULL,
+  metadata JSONB,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_audit_logs_org ON audit_logs(organization_id);
+CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
+
+-- ─── Seed Default Roles ───
+INSERT INTO roles (id, name, description) VALUES
+  (uuid_generate_v4(), 'owner', 'Organization owner with full access'),
+  (uuid_generate_v4(), 'admin', 'Administrator with management access'),
+  (uuid_generate_v4(), 'moderator', 'Can moderate events and content'),
+  (uuid_generate_v4(), 'member', 'Standard organization member')
+ON CONFLICT (name) DO NOTHING;
