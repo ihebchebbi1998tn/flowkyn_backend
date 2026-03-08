@@ -2,10 +2,23 @@ import { Response, NextFunction } from 'express';
 import { GamesService } from '../services/games.service';
 import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
+import { AppError } from '../middleware/errorHandler';
 import { emitGameUpdate } from '../socket/emitter';
+import { queryOne } from '../config/database';
 
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
+
+/** Verify the authenticated user owns the given participant_id */
+async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
+  const row = await queryOne(
+    `SELECT p.id FROM participants p
+     JOIN organization_members om ON om.id = p.organization_member_id
+     WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+    [participantId, userId]
+  );
+  if (!row) throw new AppError('You do not own this participant', 403);
+}
 
 export class GamesController {
   async listGameTypes(_req: AuthRequest, res: Response, next: NextFunction) {
@@ -49,6 +62,10 @@ export class GamesController {
   async submitAction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { game_session_id, round_id, participant_id, action_type, payload } = req.body;
+
+      // SECURITY: Verify the user owns the participant_id they claim
+      await verifyParticipantOwnership(participant_id, req.user!.userId);
+
       const action = await gamesService.submitAction(game_session_id, round_id, participant_id, action_type, payload);
 
       emitGameUpdate(game_session_id, 'game:action', {

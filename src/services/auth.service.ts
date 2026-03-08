@@ -13,6 +13,9 @@ function hashToken(token: string): string {
   return crypto.createHash('sha256').update(token).digest('hex');
 }
 
+/** Maximum concurrent sessions per user */
+const MAX_SESSIONS_PER_USER = 10;
+
 export class AuthService {
   async register(email: string, password: string, name: string, lang?: string) {
     const passwordHash = await hashPassword(password);
@@ -84,7 +87,22 @@ export class AuthService {
     const hashedRefreshToken = hashToken(refreshToken);
 
     await transaction(async (client) => {
+      // Clean expired sessions
       await client.query('DELETE FROM user_sessions WHERE user_id = $1 AND expires_at < NOW()', [user.id]);
+
+      // SECURITY: Enforce session limit — delete oldest if at max
+      const { rows: sessions } = await client.query(
+        'SELECT id FROM user_sessions WHERE user_id = $1 ORDER BY created_at ASC',
+        [user.id]
+      );
+      if (sessions.length >= MAX_SESSIONS_PER_USER) {
+        const toDelete = sessions.slice(0, sessions.length - MAX_SESSIONS_PER_USER + 1);
+        await client.query(
+          `DELETE FROM user_sessions WHERE id = ANY($1)`,
+          [toDelete.map((s: any) => s.id)]
+        );
+      }
+
       await client.query(
         `INSERT INTO user_sessions (id, user_id, refresh_token, ip_address, user_agent, expires_at, created_at)
          VALUES ($1, $2, $3, $4, $5, NOW() + INTERVAL '7 days', NOW())`,
@@ -105,8 +123,17 @@ export class AuthService {
     );
     if (!session) throw new AppError('Invalid or expired refresh token', 401);
 
+    // SECURITY: Rotate refresh token on every refresh to limit stolen token impact
     const newAccessToken = signAccessToken({ userId: payload.userId, email: payload.email });
-    return { access_token: newAccessToken };
+    const newRefreshToken = signRefreshToken({ userId: payload.userId, email: payload.email });
+    const newHashedRefresh = hashToken(newRefreshToken);
+
+    await query(
+      `UPDATE user_sessions SET refresh_token = $1, expires_at = NOW() + INTERVAL '7 days' WHERE id = $2`,
+      [newHashedRefresh, session.id]
+    );
+
+    return { access_token: newAccessToken, refresh_token: newRefreshToken };
   }
 
   async logout(userId: string, refreshToken?: string) {
@@ -130,6 +157,7 @@ export class AuthService {
 
   async forgotPassword(email: string, lang?: string) {
     const user = await queryOne<UserRow>('SELECT id, name, language FROM users WHERE email = $1', [email]);
+    // SECURITY: Always return same message to prevent email enumeration
     if (!user) return { message: 'If the email exists, a reset link has been sent' };
 
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
@@ -162,6 +190,7 @@ export class AuthService {
     await transaction(async (client) => {
       await client.query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE email = $2', [hash, row.email]);
       await client.query('DELETE FROM password_resets WHERE email = $1', [row.email]);
+      // SECURITY: Invalidate ALL sessions on password reset (force re-login everywhere)
       await client.query(
         'DELETE FROM user_sessions WHERE user_id = (SELECT id FROM users WHERE email = $1)',
         [row.email]

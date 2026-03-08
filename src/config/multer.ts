@@ -8,6 +8,7 @@ export const avatarUpload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
+    // SECURITY: SVG removed — can contain JavaScript (stored XSS)
     const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
@@ -28,6 +29,9 @@ export const fileUpload = multer({
       'application/x-sh',
       'application/x-php',
       'text/html',
+      'image/svg+xml', // SECURITY: SVG can embed JS
+      'application/xml',
+      'text/xml',
     ];
     if (blocked.includes(file.mimetype)) {
       cb(new Error('This file type is not allowed'));
@@ -37,16 +41,16 @@ export const fileUpload = multer({
   },
 });
 
-/** General purpose upload (alias for org logos, etc.) — max 5MB images */
+/** Org logo upload — max 5MB images, no SVG */
 export const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
-    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'];
+    const allowed = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
     if (allowed.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Only image files are allowed'));
+      cb(new Error('Only image files (JPEG, PNG, GIF, WebP) are allowed'));
     }
   },
 });

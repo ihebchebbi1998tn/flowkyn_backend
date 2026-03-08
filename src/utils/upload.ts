@@ -6,8 +6,9 @@ import { env } from '../config/env';
 const UPLOAD_DIR = env.uploadsDir;
 
 // Whitelist of safe file extensions
+// SECURITY: SVG removed — SVGs can contain embedded JavaScript (stored XSS)
 const SAFE_EXTENSIONS = new Set([
-  '.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg',
+  '.jpg', '.jpeg', '.png', '.gif', '.webp',
   '.pdf', '.doc', '.docx', '.txt',
 ]);
 
@@ -41,7 +42,9 @@ export function saveFile(
   originalName: string,
   subDir: string = 'general'
 ): { filePath: string; fileName: string; url: string } {
-  const dir = ensureUploadDir(subDir);
+  // SECURITY: Sanitize subDir to prevent path traversal
+  const sanitizedSubDir = subDir.replace(/\.\./g, '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  const dir = ensureUploadDir(sanitizedSubDir);
   const ext = sanitizeExtension(originalName);
   const fileName = `${uuid()}${ext}`;
   const filePath = path.join(dir, fileName);
@@ -56,7 +59,7 @@ export function saveFile(
   fs.writeFileSync(filePath, fileBuffer);
 
   // URL is relative — served via express.static
-  const url = `${env.baseUrl}/uploads/${subDir}/${fileName}`;
+  const url = `${env.baseUrl}/uploads/${sanitizedSubDir}/${fileName}`;
 
   return { filePath, fileName, url };
 }
@@ -83,13 +86,13 @@ export function deleteFile(relativePath: string): boolean {
 
 /**
  * Get the allowed mime types for uploads.
+ * SECURITY: SVG removed — can contain JavaScript for stored XSS attacks
  */
 export const ALLOWED_IMAGE_TYPES = [
   'image/jpeg',
   'image/png',
   'image/gif',
   'image/webp',
-  'image/svg+xml',
 ];
 
 export const ALLOWED_FILE_TYPES = [
