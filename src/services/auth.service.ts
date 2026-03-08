@@ -121,6 +121,7 @@ export class AuthService {
         avatar_url: user.avatar_url,
         language: user.language,
         status: user.status,
+        onboarding_completed: user.onboarding_completed,
         created_at: user.created_at,
         updated_at: user.updated_at,
       },
@@ -168,7 +169,7 @@ export class AuthService {
 
   async getMe(userId: string) {
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
-      `SELECT id, email, name, avatar_url, language, status, created_at, updated_at FROM users WHERE id = $1`,
+      `SELECT id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at FROM users WHERE id = $1`,
       [userId]
     );
     if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');

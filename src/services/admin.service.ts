@@ -49,7 +49,7 @@ export class AdminService {
     const offsetParam = params.length + 1;
     const limitParam = params.length + 2;
     const rows = await query(
-      `SELECT u.id, u.name, u.email, u.status, u.language, u.avatar_url, u.created_at, u.updated_at
+      `SELECT u.id, u.name, u.email, u.status, u.language, u.avatar_url, u.onboarding_completed, u.created_at, u.updated_at
        FROM users u ${whereClause}
        ORDER BY u.created_at DESC
        OFFSET $${offsetParam} LIMIT $${limitParam}`,
@@ -61,7 +61,7 @@ export class AdminService {
 
   async getUserById(id: string) {
     const user = await queryOne(
-      'SELECT id, name, email, status, language, avatar_url, created_at, updated_at FROM users WHERE id = $1',
+      'SELECT id, name, email, status, language, avatar_url, onboarding_completed, created_at, updated_at FROM users WHERE id = $1',
       [id]
     );
     if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
