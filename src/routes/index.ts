@@ -9,6 +9,7 @@ import { notificationsRoutes } from './notifications.routes';
 import { filesRoutes } from './files.routes';
 import { analyticsRoutes } from './analytics.routes';
 import { auditLogsRoutes } from './auditLogs.routes';
+import { adminRoutes } from './admin.routes';
 
 const router = Router();
 
@@ -17,11 +18,12 @@ router.use('/users', usersRoutes);
 router.use('/organizations', organizationsRoutes);
 router.use('/events', eventsRoutes);
 router.use('/posts', postsRoutes);
-router.use('/', gamesRoutes);           // /game-types, /events/:id/game-sessions, etc.
+router.use('/', gamesRoutes);
 router.use('/leaderboards', leaderboardsRoutes);
 router.use('/notifications', notificationsRoutes);
 router.use('/files', filesRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/audit-logs', auditLogsRoutes);
+router.use('/admin', adminRoutes);
 
 export { router as routes };
