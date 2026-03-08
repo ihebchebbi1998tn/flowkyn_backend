@@ -147,6 +147,14 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
     return;
   }
 
+  // ─── PostgreSQL invalid UUID syntax ───
+  if (err.message?.includes('invalid input syntax for type uuid')) {
+    res.status(400).json(buildErrorResponse(400, 'Invalid ID format — expected a valid UUID', 'INVALID_FORMAT', requestId, [
+      { field: 'id', message: 'Must be a valid UUID' },
+    ]));
+    return;
+  }
+
   // ─── PostgreSQL unique constraint violation ───
   if ((err as any).code === '23505') {
     const detail = (err as any).detail || '';

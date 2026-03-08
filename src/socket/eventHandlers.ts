@@ -4,11 +4,11 @@
 import { Namespace } from 'socket.io';
 import { AuthenticatedSocket } from './types';
 import { addPresence, removePresence, getPresence, checkRateLimit } from './index';
-import { EventsService } from '../services/events.service';
+import { EventMessagesService } from '../services/events-messages.service';
 import { queryOne } from '../config/database';
 import { sanitizeText } from '../utils/sanitize';
 
-const eventsService = new EventsService();
+const messagesService = new EventMessagesService();
 
 /** Validate socket event data has required string fields */
 function validateFields(data: any, fields: string[]): boolean {
@@ -118,7 +118,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
       try {
         // Persist to DB using server-resolved participant ID
-        const saved = await eventsService.sendMessage(data.eventId, participant.participantId, message);
+        const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
 
         // Broadcast to all in room (including sender for confirmation)
         eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
