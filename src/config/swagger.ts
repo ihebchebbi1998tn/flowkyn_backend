@@ -142,6 +142,7 @@ Validation errors include field details:
             avatar_url: { type: 'string', nullable: true, example: '/uploads/avatars/abc123.jpg' },
             language: { type: 'string', enum: ['en', 'fr', 'de'], example: 'en' },
             status: { type: 'string', enum: ['pending', 'active', 'suspended'], example: 'active' },
+            onboarding_completed: { type: 'boolean', description: 'Whether the user has completed the onboarding wizard', example: false },
             created_at: { type: 'string', format: 'date-time' },
             updated_at: { type: 'string', format: 'date-time' },
           },
@@ -155,6 +156,7 @@ Validation errors include field details:
             avatar_url: { type: 'string', nullable: true },
             language: { type: 'string', enum: ['en', 'fr', 'de'] },
             status: { type: 'string' },
+            onboarding_completed: { type: 'boolean' },
             created_at: { type: 'string', format: 'date-time' },
           },
         },
@@ -206,10 +208,26 @@ Validation errors include field details:
             id: { type: 'string', format: 'uuid' },
             name: { type: 'string', example: 'Acme Corp' },
             slug: { type: 'string', example: 'acme-corp', description: 'URL-safe slug auto-generated from name' },
+            description: { type: 'string', example: 'A leading tech company', description: 'Organization description' },
+            industry: { type: 'string', enum: ['technology', 'healthcare', 'education', 'finance', 'consulting', 'startup', 'nonprofit', 'other'], nullable: true, example: 'technology' },
+            company_size: { type: 'string', enum: ['1-10', '11-50', '51-200', '201-500', '500+'], nullable: true, example: '11-50' },
+            goals: { type: 'array', items: { type: 'string' }, description: 'Platform usage goals', example: ['team_bonding', 'engagement'] },
             logo_url: { type: 'string', nullable: true },
             owner_user_id: { type: 'string', format: 'uuid' },
             created_at: { type: 'string', format: 'date-time' },
             updated_at: { type: 'string', format: 'date-time' },
+          },
+        },
+        CreateOrganizationRequest: {
+          type: 'object',
+          required: ['name'],
+          description: 'Request body for creating an organization (used during onboarding)',
+          properties: {
+            name: { type: 'string', minLength: 1, maxLength: 100, example: 'Acme Corp' },
+            description: { type: 'string', maxLength: 500, example: 'A leading tech company' },
+            industry: { type: 'string', enum: ['technology', 'healthcare', 'education', 'finance', 'consulting', 'startup', 'nonprofit', 'other'] },
+            company_size: { type: 'string', enum: ['1-10', '11-50', '51-200', '201-500', '500+'] },
+            goals: { type: 'array', items: { type: 'string' }, example: ['team_bonding', 'remote_culture'] },
           },
         },
         OrganizationMember: {
@@ -224,6 +242,49 @@ Validation errors include field details:
             is_subscription_manager: { type: 'boolean' },
             status: { type: 'string', enum: ['active', 'inactive'] },
             joined_at: { type: 'string', format: 'date-time' },
+          },
+        },
+        // ─── Participant ───
+        Participant: {
+          type: 'object',
+          description: 'An event participant (member or guest)',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            event_id: { type: 'string', format: 'uuid' },
+            organization_member_id: { type: 'string', format: 'uuid', nullable: true },
+            guest_name: { type: 'string', nullable: true, example: 'Guest User' },
+            guest_avatar: { type: 'string', nullable: true },
+            participant_type: { type: 'string', enum: ['member', 'guest'] },
+            joined_at: { type: 'string', format: 'date-time', nullable: true },
+            left_at: { type: 'string', format: 'date-time', nullable: true },
+            created_at: { type: 'string', format: 'date-time' },
+          },
+        },
+        GuestJoinRequest: {
+          type: 'object',
+          required: ['guest_name'],
+          description: 'Join an event as a guest (no authentication required)',
+          properties: {
+            guest_name: { type: 'string', minLength: 1, maxLength: 100, example: 'John Guest' },
+            guest_avatar: { type: 'string', maxLength: 255, example: 'avatar-seed-123' },
+          },
+        },
+        EventPublicInfo: {
+          type: 'object',
+          description: 'Public event info visible without authentication (for lobby screen)',
+          properties: {
+            id: { type: 'string', format: 'uuid' },
+            title: { type: 'string', example: 'Team Building Friday' },
+            description: { type: 'string' },
+            event_mode: { type: 'string', enum: ['sync', 'async'] },
+            visibility: { type: 'string', enum: ['public', 'private'] },
+            max_participants: { type: 'integer' },
+            start_time: { type: 'string', format: 'date-time' },
+            status: { type: 'string' },
+            organization_name: { type: 'string', example: 'Acme Corp' },
+            organization_logo: { type: 'string', nullable: true },
+            participant_count: { type: 'integer', example: 12 },
+            allow_guests: { type: 'boolean' },
           },
         },
 
@@ -517,9 +578,9 @@ Validation errors include field details:
     },
     tags: [
       { name: 'Auth', description: 'Authentication, registration, email verification, password reset, and session management.' },
-      { name: 'Users', description: 'User profile management, avatar uploads, and user directory.' },
-      { name: 'Organizations', description: 'Create and manage organizations, invite members, assign roles, and upload logos.' },
-      { name: 'Events', description: 'Create, manage, and participate in events. Includes messaging and post/reaction features.' },
+      { name: 'Users', description: 'User profile management, avatar uploads, onboarding completion, and user directory.' },
+      { name: 'Organizations', description: 'Create and manage organizations with industry/size/goals metadata, invite members, assign roles, and upload logos.' },
+      { name: 'Events', description: 'Create, manage, and participate in events. Includes public lobby endpoints for guest access, invitation validation, real-time messaging and post/reaction features.' },
       { name: 'Games', description: 'Game types, game sessions, rounds, and player actions. Real-time via WebSocket.' },
       { name: 'Leaderboards', description: 'View leaderboards and ranked player entries for game sessions.' },
       { name: 'Notifications', description: 'In-app notifications with read/unread status. Real-time delivery via WebSocket.' },
@@ -846,6 +907,23 @@ const paths: Record<string, any> = {
     },
   },
 
+  '/users/complete-onboarding': {
+    post: {
+      tags: ['Users'],
+      summary: 'Complete onboarding',
+      description: 'Marks the authenticated user\'s `onboarding_completed` flag as `true`. Called after the onboarding wizard is finished. Creates an audit log entry. Idempotent — calling multiple times has no side effects.',
+      operationId: 'completeOnboarding',
+      security: [{ bearerAuth: [] }],
+      responses: {
+        200: {
+          description: 'Onboarding marked as complete — returns updated user',
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/User' } } },
+        },
+        401: { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+
   '/users': {
     get: {
       tags: ['Users'],
@@ -901,15 +979,15 @@ const paths: Record<string, any> = {
     post: {
       tags: ['Organizations'],
       summary: 'Create an organization',
-      description: 'Creates a new organization. The authenticated user automatically becomes the **owner** with full permissions. A URL slug is auto-generated from the name.',
+      description: 'Creates a new organization with optional onboarding metadata (industry, size, goals). The authenticated user automatically becomes the **owner** with full permissions. A URL slug is auto-generated from the name. Typically called during the onboarding wizard.',
       operationId: 'createOrganization',
       security: [{ bearerAuth: [] }],
       requestBody: {
         required: true,
         content: {
           'application/json': {
-            schema: { type: 'object', required: ['name'], properties: { name: { type: 'string', minLength: 1, maxLength: 100, example: 'Acme Corp' } } },
-            example: { name: 'Acme Corp' },
+            schema: { $ref: '#/components/schemas/CreateOrganizationRequest' },
+            example: { name: 'Acme Corp', description: 'Leading tech company', industry: 'technology', company_size: '11-50', goals: ['team_bonding', 'engagement'] },
           },
         },
       },
@@ -1078,7 +1156,140 @@ const paths: Record<string, any> = {
   },
 
   // ═══════════════════════════════════════════════
-  // EVENTS
+  // EVENTS — Public (no auth)
+  // ═══════════════════════════════════════════════
+
+  '/events/{eventId}/public': {
+    get: {
+      tags: ['Events'],
+      summary: 'Get public event info',
+      description: 'Returns publicly visible event information for the lobby screen. **No authentication required.** Includes organization name/logo, participant count, and guest settings. Used by the join/lobby page before a user logs in or joins as guest.',
+      operationId: 'getEventPublicInfo',
+      parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+      responses: {
+        200: { description: 'Public event info', content: { 'application/json': { schema: { $ref: '#/components/schemas/EventPublicInfo' } } } },
+        404: { $ref: '#/components/responses/NotFound' },
+      },
+    },
+  },
+
+  '/events/{eventId}/validate-token': {
+    get: {
+      tags: ['Events'],
+      summary: 'Validate invitation token',
+      description: 'Validates an event invitation token without consuming it. Returns the invitation status (valid, expired, already accepted). **No authentication required.** Used by the lobby page to check if the user was invited.',
+      operationId: 'validateEventToken',
+      parameters: [
+        { name: 'eventId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        { name: 'token', in: 'query', required: true, description: 'Invitation token from email', schema: { type: 'string' } },
+      ],
+      responses: {
+        200: {
+          description: 'Token validation result',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  valid: { type: 'boolean', example: true },
+                  status: { type: 'string', enum: ['valid', 'expired', 'accepted', 'invalid'], example: 'valid' },
+                  email: { type: 'string', description: 'Email the invitation was sent to (only if valid)' },
+                },
+              },
+            },
+          },
+        },
+        400: { description: 'Token query parameter missing', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+      },
+    },
+  },
+
+  '/events/{eventId}/join-guest': {
+    post: {
+      tags: ['Events'],
+      summary: 'Join event as guest',
+      description: 'Allows an unauthenticated user to join an event as a guest. **No authentication required.** The event must have `allow_guests` enabled and not be at max capacity. Returns the created participant record. Emits `participant:joined` WebSocket event.',
+      operationId: 'joinEventAsGuest',
+      parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: { $ref: '#/components/schemas/GuestJoinRequest' },
+            example: { guest_name: 'John Guest', guest_avatar: 'avatar-seed-123' },
+          },
+        },
+      },
+      responses: {
+        201: { description: 'Guest joined successfully', content: { 'application/json': { schema: { $ref: '#/components/schemas/Participant' } } } },
+        400: { description: 'Guests not allowed or event is full', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        404: { $ref: '#/components/responses/NotFound' },
+        422: { $ref: '#/components/responses/ValidationFailed' },
+      },
+    },
+  },
+
+  '/events/{eventId}/accept-invitation': {
+    post: {
+      tags: ['Events'],
+      summary: 'Accept event invitation',
+      description: 'Accepts an event invitation using the token from the invitation email. The authenticated user is added as a participant. The invitation is marked as accepted. Emits `participant:joined` WebSocket event.',
+      operationId: 'acceptEventInvitation',
+      security: [{ bearerAuth: [] }],
+      parameters: [{ name: 'eventId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+      requestBody: {
+        required: true,
+        content: {
+          'application/json': {
+            schema: {
+              type: 'object',
+              required: ['token'],
+              properties: { token: { type: 'string', description: 'Invitation token from email', example: 'inv-token-abc123' } },
+            },
+          },
+        },
+      },
+      responses: {
+        200: { description: 'Invitation accepted — user joined as participant', content: { 'application/json': { schema: { $ref: '#/components/schemas/Participant' } } } },
+        400: { description: 'Invalid or expired invitation token', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        401: { $ref: '#/components/responses/Unauthorized' },
+      },
+    },
+  },
+
+  '/events/{eventId}/participants': {
+    get: {
+      tags: ['Events'],
+      summary: 'List event participants',
+      description: 'Returns all active participants in an event including both members and guests. **No authentication required** (public data for lobby screen). Supports pagination. Guest participants include `guest_name` and `guest_avatar`; member participants include resolved user `name` and `avatar_url`.',
+      operationId: 'listEventParticipants',
+      parameters: [
+        { name: 'eventId', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } },
+        { $ref: '#/components/parameters/PageParam' },
+        { $ref: '#/components/parameters/LimitParam' },
+      ],
+      responses: {
+        200: {
+          description: 'Paginated participant list',
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  data: { type: 'array', items: { $ref: '#/components/schemas/Participant' } },
+                  pagination: { $ref: '#/components/schemas/Pagination' },
+                },
+              },
+            },
+          },
+        },
+        404: { $ref: '#/components/responses/NotFound' },
+      },
+    },
+  },
+
+  // ═══════════════════════════════════════════════
+  // EVENTS — Authenticated
   // ═══════════════════════════════════════════════
 
   '/events': {
