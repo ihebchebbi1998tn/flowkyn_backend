@@ -10,6 +10,7 @@ import { filesRoutes } from './files.routes';
 import { analyticsRoutes } from './analytics.routes';
 import { auditLogsRoutes } from './auditLogs.routes';
 import { adminRoutes } from './admin.routes';
+import { contactRoutes } from './contact.routes';
 
 const router = Router();
 
@@ -25,5 +26,6 @@ router.use('/files', filesRoutes);
 router.use('/analytics', analyticsRoutes);
 router.use('/audit-logs', auditLogsRoutes);
 router.use('/admin', adminRoutes);
+router.use('/contact', contactRoutes);
 
 export { router as routes };

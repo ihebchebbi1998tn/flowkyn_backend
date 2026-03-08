@@ -366,6 +366,21 @@ CREATE TABLE audit_logs (
 CREATE INDEX idx_audit_logs_org ON audit_logs(organization_id);
 CREATE INDEX idx_audit_logs_created ON audit_logs(created_at);
 
+-- ─── Contact Submissions ───
+CREATE TABLE contact_submissions (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  name VARCHAR(100) NOT NULL,
+  email VARCHAR(255) NOT NULL,
+  subject VARCHAR(200) DEFAULT '',
+  message TEXT NOT NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'new', -- new, read, replied, archived
+  ip_address VARCHAR(45),
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE INDEX idx_contact_submissions_status ON contact_submissions(status);
+CREATE INDEX idx_contact_submissions_created ON contact_submissions(created_at);
+
 -- ─── Seed Default Roles ───
 INSERT INTO roles (id, name, description) VALUES
   (uuid_generate_v4(), 'owner', 'Organization owner with full access'),

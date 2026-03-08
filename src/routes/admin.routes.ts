@@ -1,10 +1,12 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller';
+import { ContactController } from '../controllers/contact.controller';
 import { authenticate } from '../middleware/auth';
 import { requireSuperAdmin } from '../config/superAdmin';
 
 const router = Router();
 const ctrl = new AdminController();
+const contactCtrl = new ContactController();
 
 // All admin routes require authentication + super-admin role
 router.use(authenticate);
@@ -30,5 +32,11 @@ router.get('/game-sessions', ctrl.listGameSessions);
 
 // Audit logs
 router.get('/audit-logs', ctrl.listAuditLogs);
+
+// Contact submissions
+router.get('/contact', contactCtrl.list);
+router.get('/contact/:id', contactCtrl.getById);
+router.patch('/contact/:id', contactCtrl.updateStatus);
+router.delete('/contact/:id', contactCtrl.delete);
 
 export { router as adminRoutes };
