@@ -57,7 +57,8 @@ export class EventsController {
         const member = await orgsService.getMemberByUserId(orgId, req.user!.userId);
         if (!member) { res.status(403).json({ error: 'Not a member' }); return; }
       }
-      const result = await eventsService.list(req.query as any, orgId);
+      // BUG FIX: Pass userId so events.list scopes results to user's orgs
+      const result = await eventsService.list(req.query as any, orgId, req.user!.userId);
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -78,7 +79,7 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgAdminForEvent(event.organization_id, req.user!.userId);
-      // SECURITY: Only owner/admin/moderator or the event creator can update
+      // Only owner/admin/moderator or the event creator can update
       if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
         res.status(403).json({ error: 'Insufficient permissions to update this event' }); return;
       }
@@ -93,7 +94,7 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgAdminForEvent(event.organization_id, req.user!.userId);
-      // SECURITY: Only owner/admin can delete events
+      // Only owner/admin can delete events
       if (!['owner', 'admin'].includes(member.role_name)) {
         res.status(403).json({ error: 'Insufficient permissions to delete events' }); return;
       }
@@ -146,7 +147,7 @@ export class EventsController {
 
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // SECURITY: Verify the user owns the participant_id they claim
+      // Verify the user owns the participant_id they claim
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
       res.status(201).json(result);
@@ -166,7 +167,7 @@ export class EventsController {
 
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // SECURITY: Verify the user owns the participant_id
+      // Verify the user owns the participant_id
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
       emitEventNotification(req.params.eventId, 'post:created', {
@@ -179,7 +180,7 @@ export class EventsController {
 
   async reactToPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // SECURITY: Verify the user owns the participant_id
+      // Verify the user owns the participant_id
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await eventsService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
       res.status(201).json(result);

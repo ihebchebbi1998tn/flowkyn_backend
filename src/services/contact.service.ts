@@ -1,13 +1,26 @@
 import { v4 as uuid } from 'uuid';
 import { query, queryOne } from '../config/database';
 import { buildPaginatedResponse } from '../utils/pagination';
+import { AppError } from '../middleware/errorHandler';
+import { sanitizeText } from '../utils/sanitize';
+
+// BUG FIX: Whitelist allowed status values to prevent arbitrary status injection
+const ALLOWED_STATUSES = new Set(['new', 'in_progress', 'resolved', 'closed']);
 
 export class ContactService {
   async create(data: { name: string; email: string; subject?: string; message: string; ipAddress?: string }) {
+    // Sanitize user input
+    const sanitizedName = sanitizeText(data.name, 100);
+    const sanitizedSubject = sanitizeText(data.subject || '', 200);
+    const sanitizedMessage = sanitizeText(data.message, 5000);
+
+    if (sanitizedName.length === 0) throw new AppError('Name is required', 400);
+    if (sanitizedMessage.length === 0) throw new AppError('Message is required', 400);
+
     const [submission] = await query(
       `INSERT INTO contact_submissions (id, name, email, subject, message, ip_address, status, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, 'new', NOW()) RETURNING *`,
-      [uuid(), data.name, data.email, data.subject || '', data.message, data.ipAddress || null]
+      [uuid(), sanitizedName, data.email, sanitizedSubject, sanitizedMessage, data.ipAddress || null]
     );
     return submission;
   }
@@ -18,6 +31,10 @@ export class ContactService {
     const params: unknown[] = [];
 
     if (status) {
+      // BUG FIX: Validate status value
+      if (!ALLOWED_STATUSES.has(status)) {
+        throw new AppError(`Invalid status: ${status}`, 400);
+      }
       whereClause = 'WHERE status = $1';
       params.push(status);
     }
@@ -41,18 +58,27 @@ export class ContactService {
   }
 
   async getById(id: string) {
-    return queryOne('SELECT * FROM contact_submissions WHERE id = $1', [id]);
+    const submission = await queryOne('SELECT * FROM contact_submissions WHERE id = $1', [id]);
+    if (!submission) throw new AppError('Contact submission not found', 404);
+    return submission;
   }
 
   async updateStatus(id: string, status: string) {
+    // BUG FIX: Validate status value
+    if (!ALLOWED_STATUSES.has(status)) {
+      throw new AppError(`Invalid status: ${status}`, 400);
+    }
     const row = await queryOne(
       `UPDATE contact_submissions SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
       [status, id]
     );
+    if (!row) throw new AppError('Contact submission not found', 404);
     return row;
   }
 
   async delete(id: string) {
-    return queryOne('DELETE FROM contact_submissions WHERE id = $1 RETURNING id', [id]);
+    const result = await queryOne('DELETE FROM contact_submissions WHERE id = $1 RETURNING id', [id]);
+    if (!result) throw new AppError('Contact submission not found', 404);
+    return result;
   }
 }

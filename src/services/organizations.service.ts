@@ -5,6 +5,7 @@ import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
 import { OrganizationRow, OrganizationMemberRow } from '../types';
 import { saveFile, isAllowedImageType } from '../utils/upload';
+import { env } from '../config/env';
 import crypto from 'crypto';
 
 export class OrganizationsService {
@@ -79,10 +80,11 @@ export class OrganizationsService {
       [uuid(), orgId, email, roleId, invitedByMemberId, token]
     );
 
+    // BUG FIX: Use env.frontendUrl instead of hardcoded domain
     await sendEmail({
       to: email,
       type: 'organization_invitation',
-      data: { orgName: org.name, link: `https://app.flowkyn.com/invitations/accept?token=${token}` },
+      data: { orgName: org.name, link: `${env.frontendUrl}/invitations/accept?token=${token}` },
       lang: emailLang,
     });
 
@@ -95,6 +97,17 @@ export class OrganizationsService {
       [token]
     );
     if (!invitation) throw new AppError('Invalid or expired invitation', 400);
+
+    // BUG FIX: Check if user is already a member (prevent duplicate memberships)
+    const existingMember = await queryOne(
+      `SELECT id FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
+      [invitation.organization_id, userId]
+    );
+    if (existingMember) {
+      // Mark invitation as accepted even if already a member
+      await query(`UPDATE organization_invitations SET status = 'accepted' WHERE id = $1`, [invitation.id]);
+      return { message: 'Already a member of this organization' };
+    }
 
     await transaction(async (client) => {
       await client.query(

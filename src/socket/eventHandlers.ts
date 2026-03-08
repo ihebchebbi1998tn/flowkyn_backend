@@ -6,6 +6,7 @@ import { AuthenticatedSocket } from './types';
 import { addPresence, removePresence, getPresence, checkRateLimit } from './index';
 import { EventsService } from '../services/events.service';
 import { queryOne } from '../config/database';
+import { sanitizeText } from '../utils/sanitize';
 
 const eventsService = new EventsService();
 
@@ -15,7 +16,7 @@ function validateFields(data: any, fields: string[]): boolean {
   return fields.every(f => typeof data[f] === 'string' && data[f].length > 0);
 }
 
-/** Verify a user is an active participant in an event */
+/** Verify a user is an active participant in an event and return their participant ID */
 async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string } | null> {
   const row = await queryOne<{ id: string; member_id: string }>(
     `SELECT p.id, p.organization_member_id as member_id
@@ -93,41 +94,53 @@ export function setupEventHandlers(eventsNs: Namespace) {
     });
 
     // ─── Chat message (persisted to DB) ───
-    socket.on('chat:message', async (data: { eventId: string; participantId: string; message: string }) => {
-      if (!validateFields(data, ['eventId', 'participantId', 'message'])) {
+    socket.on('chat:message', async (data: { eventId: string; message: string }) => {
+      if (!validateFields(data, ['eventId', 'message'])) {
         socket.emit('error', { message: 'Invalid chat message data', code: 'VALIDATION' });
         return;
       }
       if (!checkRateLimit(socket, 'chat:message')) return;
 
-      // Truncate message
-      const message = data.message.slice(0, 2000);
+      // BUG FIX: Verify the user is a participant and use their ACTUAL participant ID
+      // Previously accepted participantId from client, allowing impersonation
+      const participant = await verifyParticipant(data.eventId, user.userId);
+      if (!participant) {
+        socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+        return;
+      }
+
+      // Sanitize and truncate message
+      const message = sanitizeText(data.message, 2000);
+      if (message.length === 0) {
+        socket.emit('error', { message: 'Message cannot be empty', code: 'VALIDATION' });
+        return;
+      }
 
       try {
-        // Persist to DB (service verifies participant ownership)
-        const saved = await eventsService.sendMessage(data.eventId, data.participantId, message);
+        // Persist to DB using server-resolved participant ID
+        const saved = await eventsService.sendMessage(data.eventId, participant.participantId, message);
 
         // Broadcast to all in room (including sender for confirmation)
         eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
           id: saved.id,
-          participantId: data.participantId,
+          participantId: participant.participantId,
           message,
           userId: user.userId,
           timestamp: saved.created_at,
         });
       } catch (err: any) {
         console.error(`[Events] chat:message error:`, err.message);
-        socket.emit('error', { message: err.message || 'Failed to send message', code: 'CHAT_ERROR' });
+        socket.emit('error', { message: 'Failed to send message', code: 'CHAT_ERROR' });
       }
     });
 
     // ─── Typing indicator (not persisted) ───
-    socket.on('chat:typing', (data: { eventId: string; participantId: string; isTyping: boolean }) => {
-      if (!validateFields(data, ['eventId', 'participantId'])) return;
+    socket.on('chat:typing', (data: { eventId: string; isTyping: boolean }) => {
+      if (!validateFields(data, ['eventId'])) return;
       if (!checkRateLimit(socket, 'chat:typing')) return;
 
+      // BUG FIX: Use userId instead of client-supplied participantId
       socket.to(`event:${data.eventId}`).emit('chat:typing', {
-        participantId: data.participantId,
         userId: user.userId,
         isTyping: !!data.isTyping,
       });

@@ -72,6 +72,14 @@ export class GamesService {
     if (!round) throw new AppError('Round not found in this session', 404);
     if (round.status !== 'active') throw new AppError('Round is not active', 400);
 
+    // BUG FIX: Verify participant belongs to the event this session is for
+    const validParticipant = await queryOne(
+      `SELECT p.id FROM participants p
+       WHERE p.id = $1 AND p.event_id = $2 AND p.left_at IS NULL`,
+      [participantId, session.event_id]
+    );
+    if (!validParticipant) throw new AppError('Participant not found in this game session', 403);
+
     const [action] = await query(
       `INSERT INTO game_actions (id, game_session_id, round_id, participant_id, action_type, payload, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
@@ -111,20 +119,20 @@ export class GamesService {
       );
 
       if (actions.length > 0) {
-        // Build batch INSERT with VALUES list
+        // BUG FIX: Build batch INSERT correctly with all 6 columns including created_at
         const valueParts: string[] = [];
         const params: any[] = [sessionId];
         let paramIdx = 2;
 
         for (let i = 0; i < actions.length; i++) {
           const id = uuid();
-          valueParts.push(`($${paramIdx++}, $1, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+          valueParts.push(`($${paramIdx++}, $1, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`);
           params.push(id, actions[i].participant_id, actions.length - i, i + 1);
         }
 
         await client.query(
           `INSERT INTO game_results (id, game_session_id, participant_id, score, rank, created_at)
-           VALUES ${valueParts.map(v => v.replace(')', ', NOW())')).join(', ')}
+           VALUES ${valueParts.join(', ')}
            ON CONFLICT (game_session_id, participant_id) DO UPDATE SET score = EXCLUDED.score, rank = EXCLUDED.rank`,
           params
         );

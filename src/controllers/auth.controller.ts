@@ -44,7 +44,10 @@ export class AuthController {
 
   async logout(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const result = await authService.logout(req.user!.userId);
+      // BUG FIX: Pass the refresh token so only the current session is invalidated
+      // Previously deleted ALL user sessions on logout
+      const refreshToken = req.body.refresh_token;
+      const result = await authService.logout(req.user!.userId, refreshToken);
       await audit.create(null, req.user!.userId, 'AUTH_LOGOUT', { ip: req.ip });
       res.json(result);
     } catch (err) { next(err); }

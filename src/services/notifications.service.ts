@@ -3,6 +3,7 @@ import { query, queryOne } from '../config/database';
 import { NotificationRow } from '../types';
 import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
 import { emitNotification } from '../socket/emitter';
+import { AppError } from '../middleware/errorHandler';
 
 export class NotificationsService {
   async list(userId: string, pagination: { page?: number; limit?: number }) {
@@ -22,7 +23,17 @@ export class NotificationsService {
       `UPDATE notifications SET read_at = NOW() WHERE id = $1 AND user_id = $2 RETURNING *`,
       [notificationId, userId]
     );
+    // BUG FIX: Return proper error when notification not found
+    if (!result) throw new AppError('Notification not found', 404);
     return result;
+  }
+
+  async markAllRead(userId: string) {
+    await query(
+      `UPDATE notifications SET read_at = NOW() WHERE user_id = $1 AND read_at IS NULL`,
+      [userId]
+    );
+    return { message: 'All notifications marked as read' };
   }
 
   async create(userId: string, type: string, data: any) {

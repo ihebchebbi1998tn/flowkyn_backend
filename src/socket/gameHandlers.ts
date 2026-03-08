@@ -5,12 +5,38 @@ import { Namespace } from 'socket.io';
 import { AuthenticatedSocket } from './types';
 import { checkRateLimit } from './index';
 import { GamesService } from '../services/games.service';
+import { queryOne } from '../config/database';
 
 const gamesService = new GamesService();
 
 function validateFields(data: any, fields: string[]): boolean {
   if (!data || typeof data !== 'object') return false;
   return fields.every(f => typeof data[f] === 'string' && data[f].length > 0);
+}
+
+/** Verify the user is a participant in the game session's event and return their participant ID */
+async function verifyGameParticipant(sessionId: string, userId: string): Promise<{ participantId: string } | null> {
+  const row = await queryOne<{ id: string }>(
+    `SELECT p.id FROM participants p
+     JOIN organization_members om ON om.id = p.organization_member_id
+     JOIN game_sessions gs ON gs.event_id = p.event_id
+     WHERE gs.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+    [sessionId, userId]
+  );
+  return row ? { participantId: row.id } : null;
+}
+
+/** Check if user has admin/moderator role in the event's org */
+async function isEventAdmin(sessionId: string, userId: string): Promise<boolean> {
+  const row = await queryOne(
+    `SELECT r.name FROM organization_members om
+     JOIN roles r ON r.id = om.role_id
+     JOIN events e ON e.organization_id = om.organization_id
+     JOIN game_sessions gs ON gs.event_id = e.id
+     WHERE gs.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+    [sessionId, userId]
+  );
+  return row && ['owner', 'admin', 'moderator'].includes(row.name);
 }
 
 export function setupGameHandlers(gamesNs: Namespace) {
@@ -29,7 +55,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // Verify session exists
+        // BUG FIX: Verify user is a participant in the event before joining
+        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        if (!participant) {
+          socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
+          ack?.({ ok: false, error: 'Not a participant' });
+          return;
+        }
+
         const session = await gamesService.getSession(data.sessionId);
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
@@ -38,11 +71,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
         // Notify others
         socket.to(roomId).emit('game:player_joined', {
           userId: user.userId,
+          participantId: participant.participantId,
           sessionId: data.sessionId,
           timestamp: new Date().toISOString(),
         });
 
-        ack?.({ ok: true, data: { status: session.status, currentRound: session.current_round } });
+        ack?.({ ok: true, data: { status: session.status, currentRound: session.current_round, participantId: participant.participantId } });
       } catch (err: any) {
         console.error(`[Games] game:join error:`, err.message);
         socket.emit('error', { message: err.message, code: 'JOIN_ERROR' });
@@ -64,12 +98,18 @@ export function setupGameHandlers(gamesNs: Namespace) {
       });
     });
 
-    // ─── Start game (triggers DB update via service, broadcasts) ───
+    // ─── Start game (only admins/moderators) ───
     socket.on('game:start', async (data: { sessionId: string }) => {
       if (!validateFields(data, ['sessionId'])) return;
 
       try {
-        // Start first round in DB
+        // BUG FIX: Only org admins/moderators can start games
+        const admin = await isEventAdmin(data.sessionId, user.userId);
+        if (!admin) {
+          socket.emit('error', { message: 'Only event administrators can start games', code: 'FORBIDDEN' });
+          return;
+        }
+
         const round = await gamesService.startRound(data.sessionId);
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:started', {
@@ -89,7 +129,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
     });
 
-    // ─── Start next round (persisted) ───
+    // ─── Start next round (only admins/moderators) ───
     socket.on('game:round_start', async (data: { sessionId: string; roundNumber: number }) => {
       if (!validateFields(data, ['sessionId'])) return;
       if (typeof data.roundNumber !== 'number' || data.roundNumber < 1) {
@@ -98,6 +138,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
+        // BUG FIX: Only admins can start rounds
+        const admin = await isEventAdmin(data.sessionId, user.userId);
+        if (!admin) {
+          socket.emit('error', { message: 'Only event administrators can start rounds', code: 'FORBIDDEN' });
+          return;
+        }
+
         const round = await gamesService.startRound(data.sessionId);
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:round_started', {
@@ -112,23 +159,37 @@ export function setupGameHandlers(gamesNs: Namespace) {
     });
 
     // ─── Player action (persisted to DB, broadcast) ───
-    socket.on('game:action', async (data: { sessionId: string; roundId: string; participantId: string; actionType: string; payload: any }) => {
-      if (!validateFields(data, ['sessionId', 'roundId', 'participantId', 'actionType'])) {
+    socket.on('game:action', async (data: { sessionId: string; roundId: string; actionType: string; payload: any }) => {
+      if (!validateFields(data, ['sessionId', 'roundId', 'actionType'])) {
         socket.emit('error', { message: 'Invalid action data', code: 'VALIDATION' });
         return;
       }
       if (!checkRateLimit(socket, 'game:action')) return;
 
       try {
-        // Persist action to DB (service validates session/round are active)
+        // BUG FIX: Resolve participant ID from authenticated user instead of trusting client
+        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        if (!participant) {
+          socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
+          return;
+        }
+
+        // Limit payload size
+        const payloadStr = JSON.stringify(data.payload || {});
+        if (payloadStr.length > 10000) {
+          socket.emit('error', { message: 'Payload too large', code: 'VALIDATION' });
+          return;
+        }
+
+        // Persist action to DB using server-resolved participant ID
         const action = await gamesService.submitAction(
-          data.sessionId, data.roundId, data.participantId, data.actionType, data.payload || {}
+          data.sessionId, data.roundId, participant.participantId, data.actionType, data.payload || {}
         );
 
         // Broadcast to all players in session
         gamesNs.to(`game:${data.sessionId}`).emit('game:action', {
           userId: user.userId,
-          participantId: data.participantId,
+          participantId: participant.participantId,
           actionType: data.actionType,
           payload: data.payload,
           timestamp: action.created_at,
@@ -139,23 +200,47 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
     });
 
-    // ─── End round ───
-    socket.on('game:round_end', (data: { sessionId: string; roundNumber: number }) => {
-      if (!validateFields(data, ['sessionId'])) return;
-      if (typeof data.roundNumber !== 'number' || data.roundNumber < 1) return;
+    // ─── End round (persisted to DB) ───
+    socket.on('game:round_end', async (data: { sessionId: string; roundId: string }) => {
+      if (!validateFields(data, ['sessionId', 'roundId'])) return;
 
-      gamesNs.to(`game:${data.sessionId}`).emit('game:round_ended', {
-        sessionId: data.sessionId,
-        roundNumber: data.roundNumber,
-        timestamp: new Date().toISOString(),
-      });
+      try {
+        // BUG FIX: Only admins can end rounds, and persist to DB
+        const admin = await isEventAdmin(data.sessionId, user.userId);
+        if (!admin) {
+          socket.emit('error', { message: 'Only event administrators can end rounds', code: 'FORBIDDEN' });
+          return;
+        }
+
+        // BUG FIX: Actually persist round end to DB (was previously broadcast-only)
+        await queryOne(
+          `UPDATE game_rounds SET status = 'finished', ended_at = NOW()
+           WHERE id = $1 AND game_session_id = $2 AND status = 'active' RETURNING id`,
+          [data.roundId, data.sessionId]
+        );
+
+        gamesNs.to(`game:${data.sessionId}`).emit('game:round_ended', {
+          sessionId: data.sessionId,
+          roundId: data.roundId,
+          timestamp: new Date().toISOString(),
+        });
+      } catch (err: any) {
+        socket.emit('error', { message: err.message, code: 'ROUND_END_ERROR' });
+      }
     });
 
-    // ─── End game (persisted — calculates results) ───
+    // ─── End game (only admins, persisted — calculates results) ───
     socket.on('game:end', async (data: { sessionId: string }) => {
       if (!validateFields(data, ['sessionId'])) return;
 
       try {
+        // BUG FIX: Only admins can end games
+        const admin = await isEventAdmin(data.sessionId, user.userId);
+        if (!admin) {
+          socket.emit('error', { message: 'Only event administrators can end games', code: 'FORBIDDEN' });
+          return;
+        }
+
         const { results } = await gamesService.finishSession(data.sessionId);
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
@@ -174,6 +259,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
       if (!validateFields(data, ['sessionId'])) return;
 
       try {
+        // Verify user is a participant before sharing state
+        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        if (!participant) {
+          socket.emit('error', { message: 'Not a participant', code: 'FORBIDDEN' });
+          return;
+        }
+
         const session = await gamesService.getSession(data.sessionId);
         socket.emit('game:state', {
           sessionId: data.sessionId,

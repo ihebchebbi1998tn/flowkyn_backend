@@ -4,6 +4,8 @@ import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
 import { EventRow, ParticipantRow } from '../types';
 import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
+import { sanitizeText } from '../utils/sanitize';
+import { env } from '../config/env';
 import crypto from 'crypto';
 
 // Whitelist of allowed update fields to prevent SQL injection
@@ -50,19 +52,47 @@ export class EventsService {
     return event;
   }
 
-  async list(pagination: { page?: number; limit?: number }, orgId?: string) {
+  /**
+   * List events — BUG FIX: When no orgId is provided, only return events
+   * from organizations the user is a member of (prevents data leakage).
+   */
+  async list(pagination: { page?: number; limit?: number }, orgId?: string, userId?: string) {
     const { page, limit, offset } = parsePagination(pagination);
-    const whereClause = orgId ? 'WHERE organization_id = $1' : '';
-    const params = orgId ? [orgId, limit, offset] : [limit, offset];
-    const countParams = orgId ? [orgId] : [];
-    const limitIdx = orgId ? '$2' : '$1';
-    const offsetIdx = orgId ? '$3' : '$2';
 
-    const [data, [{ count }]] = await Promise.all([
-      query<EventRow>(`SELECT * FROM events ${whereClause} ORDER BY created_at DESC LIMIT ${limitIdx} OFFSET ${offsetIdx}`, params),
-      query<{ count: string }>(`SELECT COUNT(*) as count FROM events ${whereClause}`, countParams),
-    ]);
-    return buildPaginatedResponse(data, parseInt(count), page, limit);
+    if (orgId) {
+      // Filter by specific org
+      const [data, [{ count }]] = await Promise.all([
+        query<EventRow>(
+          `SELECT * FROM events WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+          [orgId, limit, offset]
+        ),
+        query<{ count: string }>(`SELECT COUNT(*) as count FROM events WHERE organization_id = $1`, [orgId]),
+      ]);
+      return buildPaginatedResponse(data, parseInt(count), page, limit);
+    }
+
+    if (userId) {
+      // BUG FIX: Only return events from orgs the user belongs to
+      const [data, [{ count }]] = await Promise.all([
+        query<EventRow>(
+          `SELECT e.* FROM events e
+           JOIN organization_members om ON om.organization_id = e.organization_id
+           WHERE om.user_id = $1 AND om.status = 'active'
+           ORDER BY e.created_at DESC LIMIT $2 OFFSET $3`,
+          [userId, limit, offset]
+        ),
+        query<{ count: string }>(
+          `SELECT COUNT(*) as count FROM events e
+           JOIN organization_members om ON om.organization_id = e.organization_id
+           WHERE om.user_id = $1 AND om.status = 'active'`,
+          [userId]
+        ),
+      ]);
+      return buildPaginatedResponse(data, parseInt(count), page, limit);
+    }
+
+    // Fallback: return empty (should not happen with proper controller logic)
+    return buildPaginatedResponse([], 0, page, limit);
   }
 
   /**
@@ -121,10 +151,11 @@ export class EventsService {
       [uuid(), eventId, email, invitedByMemberId, token]
     );
 
+    // BUG FIX: Use env.frontendUrl instead of hardcoded domain
     await sendEmail({
       to: email,
       type: 'event_invitation',
-      data: { eventTitle: event.title, link: `https://app.flowkyn.com/events/${eventId}/join?token=${token}` },
+      data: { eventTitle: event.title, link: `${env.frontendUrl}/events/${eventId}/join?token=${token}` },
       lang,
     });
 
@@ -139,22 +170,25 @@ export class EventsService {
     );
     if (existing) throw new AppError('Already a participant in this event', 409);
 
-    // Check max participants
-    const event = await this.getById(eventId);
-    const [{ count }] = await query<{ count: string }>(
-      'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
-      [eventId]
-    );
-    if (parseInt(count) >= event.max_participants) {
-      throw new AppError('Event has reached maximum participants', 400);
-    }
-
+    // Check max participants using transaction to prevent race condition
     const participantId = uuid();
-    await query(
-      `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
-       VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
-      [participantId, eventId, memberId]
-    );
+    await transaction(async (client) => {
+      const { rows: [{ count }] } = await client.query(
+        'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
+        [eventId]
+      );
+      const event = await this.getById(eventId);
+      if (parseInt(count) >= event.max_participants) {
+        throw new AppError('Event has reached maximum participants', 400);
+      }
+
+      await client.query(
+        `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+         VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+        [participantId, eventId, memberId]
+      );
+    });
+
     return { participant_id: participantId };
   }
 
@@ -175,10 +209,14 @@ export class EventsService {
     );
     if (!participant) throw new AppError('Invalid participant for this event', 403);
 
+    // Sanitize message content
+    const sanitizedMessage = sanitizeText(message, 2000);
+    if (sanitizedMessage.length === 0) throw new AppError('Message cannot be empty', 400);
+
     const [msg] = await query(
       `INSERT INTO event_messages (id, event_id, participant_id, message, message_type, created_at)
        VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-      [uuid(), eventId, participantId, message, messageType]
+      [uuid(), eventId, participantId, sanitizedMessage, messageType]
     );
     return msg;
   }
@@ -208,10 +246,14 @@ export class EventsService {
     );
     if (!participant) throw new AppError('Invalid participant for this event', 403);
 
+    // Sanitize content
+    const sanitizedContent = sanitizeText(content, 5000);
+    if (sanitizedContent.length === 0) throw new AppError('Content cannot be empty', 400);
+
     const [post] = await query(
       `INSERT INTO activity_posts (id, event_id, author_participant_id, content, created_at)
        VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-      [uuid(), eventId, participantId, content]
+      [uuid(), eventId, participantId, sanitizedContent]
     );
     return post;
   }
@@ -223,6 +265,6 @@ export class EventsService {
        ON CONFLICT DO NOTHING RETURNING *`,
       [uuid(), postId, participantId, reactionType]
     );
-    return reaction;
+    return reaction || { message: 'Reaction already exists' };
   }
 }
