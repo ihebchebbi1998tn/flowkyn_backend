@@ -5,7 +5,7 @@ import morgan from 'morgan';
 import compression from 'compression';
 import { corsOptions } from './config/cors';
 import { errorHandler } from './middleware/errorHandler';
-import { apiRateLimiter } from './middleware/rateLimiter';
+
 import { requestId } from './middleware/requestId';
 import { routes } from './routes';
 import { env } from './config/env';
@@ -81,8 +81,7 @@ app.use('/uploads', express.static(env.uploadsDir, {
   immutable: true,
 }));
 
-// ─── Rate limiting ───
-app.use('/v1/', apiRateLimiter);
+// ─── Rate limiting (disabled) ───
 
 // ─── Health check (extended with pool stats) ───
 app.get('/health', async (_req, res) => {
