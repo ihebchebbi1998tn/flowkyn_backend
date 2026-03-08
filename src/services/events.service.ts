@@ -97,16 +97,16 @@ export class EventsService {
        WHERE ei.event_id = $1 AND ei.token = $2`,
       [eventId, token]
     );
-    if (!invitation) throw new AppError('Invalid or expired invitation', 404, 'INVALID_INVITATION');
+    if (!invitation) throw new AppError('Invalid or expired invitation', 404, 'NOT_FOUND');
 
     if (invitation.status === 'accepted') {
-      throw new AppError('This invitation has already been accepted', 400, 'INVITATION_ALREADY_ACCEPTED');
+      throw new AppError('This invitation has already been accepted', 400, 'CONFLICT');
     }
     if (invitation.status === 'revoked') {
-      throw new AppError('This invitation has been revoked', 400, 'INVITATION_REVOKED');
+      throw new AppError('This invitation has been revoked', 400, 'FORBIDDEN');
     }
     if (new Date(invitation.expires_at) < new Date()) {
-      throw new AppError('This invitation has expired', 400, 'INVITATION_EXPIRED');
+      throw new AppError('This invitation has expired', 400, 'AUTH_VERIFICATION_EXPIRED');
     }
 
     return invitation;
@@ -139,7 +139,7 @@ export class EventsService {
       if (!member) {
         // Auto-add as 'member' role in the org
         const memberRole = await queryOne<{ id: string }>(`SELECT id FROM roles WHERE name = 'member'`);
-        if (!memberRole) throw new AppError('Default member role not found', 500, 'INTERNAL');
+        if (!memberRole) throw new AppError('Default member role not found', 500, 'INTERNAL_ERROR');
 
         const memberId = uuid();
         await client.query(
@@ -191,14 +191,14 @@ export class EventsService {
 
     // Check if guests are allowed
     if (!(event as any).allow_guests) {
-      throw new AppError('This event does not allow guest participants', 403, 'GUESTS_NOT_ALLOWED');
+      throw new AppError('This event does not allow guest participants', 403, 'FORBIDDEN');
     }
 
     // If a token is provided, validate it
     if (data.token) {
       await this.validateInvitationToken(eventId, data.token);
     } else if (event.visibility === 'private') {
-      throw new AppError('A valid invitation token is required to join this private event', 403, 'TOKEN_REQUIRED');
+      throw new AppError('A valid invitation token is required to join this private event', 403, 'FORBIDDEN');
     }
 
     return await transaction(async (client) => {
