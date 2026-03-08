@@ -24,7 +24,8 @@ app.use(helmet({
   contentSecurityPolicy: false,
 }));
 
-// ─── CORS ───
+// ─── CORS — handle preflight explicitly, then apply to all requests ───
+app.options('*', cors(corsOptions));
 app.use(cors(corsOptions));
 
 // ─── Response compression (gzip/brotli) ───
