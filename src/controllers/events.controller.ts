@@ -165,6 +165,7 @@ export class EventsController {
     try {
       const event = await eventsService.getById(req.params.eventId);
       const result = await invitationsService.joinAsGuest(req.params.eventId, req.body, event);
+      await audit.create(event.organization_id, null, 'EVENT_GUEST_JOIN', { eventId: req.params.eventId, guestName: result.guest_name, ip: req.ip });
       emitEventNotification(req.params.eventId, 'participant:joined', {
         guestName: result.guest_name,
         participantId: result.participant_id,
@@ -190,6 +191,7 @@ export class EventsController {
       if (!token) throw new AppError('Token is required', 400, 'VALIDATION_FAILED');
       const event = await eventsService.getById(req.params.eventId);
       const result = await invitationsService.acceptInvitation(req.params.eventId, token, req.user!.userId, event);
+      await audit.create(event.organization_id, req.user!.userId, 'EVENT_ACCEPT_INVITATION', { eventId: req.params.eventId });
       emitEventNotification(req.params.eventId, 'participant:joined', {
         userId: req.user!.userId,
         participantId: result.participant_id,
@@ -246,6 +248,7 @@ export class EventsController {
     try {
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await messagesService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
+      await audit.create(null, req.user!.userId, 'EVENT_SEND_MESSAGE', { eventId: req.params.eventId, messageId: result.id });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
@@ -266,6 +269,7 @@ export class EventsController {
     try {
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
+      await audit.create(null, req.user!.userId, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
       emitEventNotification(req.params.eventId, 'post:created', {
         postId: result.id,
         authorId: req.user!.userId,
@@ -279,6 +283,7 @@ export class EventsController {
     try {
       await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
       const result = await messagesService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
+      await audit.create(null, req.user!.userId, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
