@@ -456,6 +456,23 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_analytics_user_created ON analytics_events(user_id, created_at DESC);
     `,
   },
+  {
+    version: 3,
+    name: 'onboarding_and_org_details',
+    sql: `
+      -- Add onboarding_completed flag to users
+      ALTER TABLE users ADD COLUMN IF NOT EXISTS onboarding_completed BOOLEAN NOT NULL DEFAULT false;
+
+      -- Add industry, company_size, description, goals to organizations
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS description TEXT DEFAULT '';
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS industry VARCHAR(50);
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS company_size VARCHAR(20);
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS goals TEXT[] DEFAULT '{}';
+
+      -- Index for quick onboarding status lookups
+      CREATE INDEX IF NOT EXISTS idx_users_onboarding ON users(onboarding_completed) WHERE onboarding_completed = false;
+    `,
+  },
 ];
 
 /**

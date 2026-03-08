@@ -34,6 +34,7 @@ export interface UserRow {
   avatar_url: string | null;
   status: string;
   language: string;
+  onboarding_completed: boolean;
   created_at: Date;
   updated_at: Date;
 }
@@ -53,6 +54,10 @@ export interface OrganizationRow {
   name: string;
   slug: string;
   logo_url: string | null;
+  description: string;
+  industry: string | null;
+  company_size: string | null;
+  goals: string[];
   owner_user_id: string;
   created_at: Date;
   updated_at: Date;

@@ -28,7 +28,7 @@ async function requireOrgAdmin(orgId: string, userId: string): Promise<{ id: str
 export class OrganizationsController {
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const org = await orgsService.create(req.user!.userId, req.body.name);
+      const org = await orgsService.create(req.user!.userId, req.body);
       await audit.create(org.id, req.user!.userId, 'ORG_CREATE', { orgName: req.body.name });
       res.status(201).json(org);
     } catch (err) { next(err); }

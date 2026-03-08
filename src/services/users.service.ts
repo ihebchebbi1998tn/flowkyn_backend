@@ -5,7 +5,7 @@ import { AppError } from '../middleware/errorHandler';
 export class UsersService {
   async getProfile(userId: string) {
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
-      `SELECT id, email, name, avatar_url, language, status, created_at, updated_at FROM users WHERE id = $1`,
+      `SELECT id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at FROM users WHERE id = $1`,
       [userId]
     );
     if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
@@ -33,17 +33,26 @@ export class UsersService {
 
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
       `UPDATE users SET ${fields.join(', ')} WHERE id = $${idx}
-       RETURNING id, email, name, avatar_url, language, status, created_at, updated_at`,
+       RETURNING id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at`,
       values
     );
 
     return user;
   }
 
+  async completeOnboarding(userId: string) {
+    const user = await queryOne<Omit<UserRow, 'password_hash'>>(
+      `UPDATE users SET onboarding_completed = true, updated_at = NOW() WHERE id = $1
+       RETURNING id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at`,
+      [userId]
+    );
+    return user;
+  }
+
   async updateAvatar(userId: string, avatarUrl: string) {
     const user = await queryOne<Omit<UserRow, 'password_hash'>>(
       `UPDATE users SET avatar_url = $1, updated_at = NOW() WHERE id = $2
-       RETURNING id, email, name, avatar_url, language, status, created_at, updated_at`,
+       RETURNING id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at`,
       [avatarUrl, userId]
     );
     return user;

@@ -11,6 +11,7 @@ const ctrl = new UsersController();
 router.get('/me', authenticate, ctrl.getProfile);
 router.patch('/me', authenticate, validate(updateProfileSchema), ctrl.updateProfile);
 router.post('/avatar', authenticate, avatarUpload.single('avatar'), ctrl.uploadAvatar);
+router.post('/complete-onboarding', authenticate, ctrl.completeOnboarding);
 
 // List users (authenticated)
 router.get('/', authenticate, ctrl.listUsers);

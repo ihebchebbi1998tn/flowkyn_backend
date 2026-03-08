@@ -9,8 +9,11 @@ import { env } from '../config/env';
 import crypto from 'crypto';
 
 export class OrganizationsService {
-  async create(userId: string, name: string) {
-    let slug = generateSlug(name);
+  async create(userId: string, data: {
+    name: string; description?: string; industry?: string;
+    company_size?: string; goals?: string[];
+  }) {
+    let slug = generateSlug(data.name);
 
     const existingSlug = await queryOne<{ id: string }>('SELECT id FROM organizations WHERE slug = $1', [slug]);
     if (existingSlug) {
@@ -25,9 +28,10 @@ export class OrganizationsService {
 
     const org = await transaction(async (client) => {
       const { rows: [org] } = await client.query(
-        `INSERT INTO organizations (id, name, slug, owner_user_id, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW()) RETURNING *`,
-        [orgId, name, slug, userId]
+        `INSERT INTO organizations (id, name, slug, description, industry, company_size, goals, owner_user_id, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW()) RETURNING *`,
+        [orgId, data.name, slug, data.description || '', data.industry || null,
+         data.company_size || null, data.goals || [], userId]
       );
 
       await client.query(

@@ -13,6 +13,7 @@ CREATE TABLE users (
   avatar_url TEXT,
   language VARCHAR(10) NOT NULL DEFAULT 'en', -- en, fr, de
   status VARCHAR(20) NOT NULL DEFAULT 'pending', -- pending, active, suspended
+  onboarding_completed BOOLEAN NOT NULL DEFAULT false,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
@@ -60,6 +61,10 @@ CREATE TABLE organizations (
   name VARCHAR(100) NOT NULL,
   slug VARCHAR(120) UNIQUE NOT NULL,
   logo_url TEXT,
+  description TEXT DEFAULT '',
+  industry VARCHAR(50),
+  company_size VARCHAR(20),
+  goals TEXT[] DEFAULT '{}',
   owner_user_id UUID NOT NULL REFERENCES users(id),
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()

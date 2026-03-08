@@ -43,12 +43,20 @@ export class UsersController {
     } catch (err) { next(err); }
   }
 
+  async completeOnboarding(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const user = await usersService.completeOnboarding(req.user!.userId);
+      await audit.create(null, req.user!.userId, 'USER_COMPLETE_ONBOARDING', {});
+      res.json(user);
+    } catch (err) { next(err); }
+  }
+
   async listUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page, limit, offset } = parsePagination(req.query as any);
       const [data, countResult] = await Promise.all([
         query(
-          `SELECT id, name, email, avatar_url, language, status, created_at FROM users WHERE status = 'active' ORDER BY name ASC LIMIT $1 OFFSET $2`,
+          `SELECT id, name, email, avatar_url, language, status, onboarding_completed, created_at FROM users WHERE status = 'active' ORDER BY name ASC LIMIT $1 OFFSET $2`,
           [limit, offset]
         ),
         queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM users WHERE status = 'active'`),
@@ -60,7 +68,7 @@ export class UsersController {
   async getUserById(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const user = await queryOne(
-        'SELECT id, name, email, avatar_url, language, status, created_at FROM users WHERE id = $1',
+        'SELECT id, name, email, avatar_url, language, status, onboarding_completed, created_at FROM users WHERE id = $1',
         [req.params.id]
       );
       if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
