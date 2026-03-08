@@ -12,6 +12,7 @@ router.post('/', authenticate, validate(createOrgSchema), ctrl.create);
 router.get('/:orgId', authenticate, ctrl.getById);
 router.patch('/:orgId', authenticate, ctrl.update);
 router.get('/:orgId/members', authenticate, ctrl.listMembers);
+router.delete('/:orgId/members/:memberId', authenticate, ctrl.removeMember);
 router.post('/:orgId/logo', authenticate, upload.single('logo'), ctrl.uploadLogo);
 router.post('/:orgId/invitations', authenticate, validate(inviteMemberSchema), ctrl.inviteMember);
 router.post('/invitations/accept', authenticate, validate(acceptInvitationSchema), ctrl.acceptInvitation);

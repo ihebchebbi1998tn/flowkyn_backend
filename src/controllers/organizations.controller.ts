@@ -4,6 +4,7 @@ import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { isAllowedImageType } from '../utils/upload';
+import { query } from '../config/database';
 
 const orgsService = new OrganizationsService();
 const audit = new AuditLogsService();
@@ -28,6 +29,23 @@ export class OrganizationsController {
     try {
       const members = await orgsService.listMembers(req.params.orgId);
       res.json(members);
+    } catch (err) { next(err); }
+  }
+
+  async removeMember(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      // Verify requester is admin/owner of this org
+      const requester = await orgsService.getMemberByUserId(req.params.orgId, req.user!.userId);
+      if (!requester) { res.status(403).json({ error: 'Not a member' }); return; }
+
+      const result = await query(
+        `DELETE FROM organization_members WHERE id = $1 AND organization_id = $2 RETURNING id`,
+        [req.params.memberId, req.params.orgId]
+      );
+      if (result.length === 0) { res.status(404).json({ error: 'Member not found' }); return; }
+
+      await audit.create(req.params.orgId, req.user!.userId, 'ORG_REMOVE_MEMBER', { memberId: req.params.memberId });
+      res.status(204).end();
     } catch (err) { next(err); }
   }
 

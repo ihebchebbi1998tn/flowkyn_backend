@@ -12,4 +12,10 @@ router.get('/me', authenticate, ctrl.getProfile);
 router.patch('/me', authenticate, validate(updateProfileSchema), ctrl.updateProfile);
 router.post('/avatar', authenticate, avatarUpload.single('avatar'), ctrl.uploadAvatar);
 
+// List users (authenticated)
+router.get('/', authenticate, ctrl.listUsers);
+
+// Get user by ID (authenticated)
+router.get('/:id', authenticate, ctrl.getUserById);
+
 export { router as usersRoutes };
