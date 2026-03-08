@@ -81,7 +81,6 @@ export class GamesService {
   }
 
   async finishSession(sessionId: string) {
-    // Wrap everything in a transaction to prevent duplicate results
     const results = await transaction(async (client) => {
       // Lock session row
       const { rows: [session] } = await client.query(
@@ -103,7 +102,7 @@ export class GamesService {
         [sessionId]
       );
 
-      // Calculate and insert results
+      // Calculate and BATCH insert results (no N+1)
       const { rows: actions } = await client.query(
         `SELECT participant_id, COUNT(*) as action_count
          FROM game_actions WHERE game_session_id = $1
@@ -111,11 +110,23 @@ export class GamesService {
         [sessionId]
       );
 
-      for (let i = 0; i < actions.length; i++) {
+      if (actions.length > 0) {
+        // Build batch INSERT with VALUES list
+        const valueParts: string[] = [];
+        const params: any[] = [sessionId];
+        let paramIdx = 2;
+
+        for (let i = 0; i < actions.length; i++) {
+          const id = uuid();
+          valueParts.push(`($${paramIdx++}, $1, $${paramIdx++}, $${paramIdx++}, $${paramIdx++})`);
+          params.push(id, actions[i].participant_id, actions.length - i, i + 1);
+        }
+
         await client.query(
           `INSERT INTO game_results (id, game_session_id, participant_id, score, rank, created_at)
-           VALUES ($1, $2, $3, $4, $5, NOW())`,
-          [uuid(), sessionId, actions[i].participant_id, actions.length - i, i + 1]
+           VALUES ${valueParts.map(v => v.replace(')', ', NOW())')).join(', ')}
+           ON CONFLICT (game_session_id, participant_id) DO UPDATE SET score = EXCLUDED.score, rank = EXCLUDED.rank`,
+          params
         );
       }
 

@@ -1,20 +1,33 @@
 /**
- * Periodic cleanup service — removes expired sessions, tokens, and verifications.
+ * Periodic cleanup service — removes expired sessions, tokens, verifications,
+ * and old analytics/audit data beyond retention period.
  */
-import { query } from '../config/database';
+import { rawQuery } from '../config/database';
 
 /** Run all cleanup tasks and return counts of deleted rows */
-export async function runCleanup(): Promise<{ sessions: number; resets: number; verifications: number }> {
-  const [sessions, resets, verifications] = await Promise.all([
-    query('DELETE FROM user_sessions WHERE expires_at < NOW()'),
-    query('DELETE FROM password_resets WHERE expires_at < NOW()'),
-    query('DELETE FROM email_verifications WHERE expires_at < NOW()'),
+export async function runCleanup(): Promise<{
+  sessions: number; resets: number; verifications: number;
+  analytics: number; auditLogs: number; notifications: number;
+}> {
+  const [sessions, resets, verifications, analytics, auditLogs, notifications] = await Promise.all([
+    rawQuery('DELETE FROM user_sessions WHERE expires_at < NOW()'),
+    rawQuery('DELETE FROM password_resets WHERE expires_at < NOW()'),
+    rawQuery('DELETE FROM email_verifications WHERE expires_at < NOW()'),
+    // Retain analytics events for 90 days
+    rawQuery("DELETE FROM analytics_events WHERE created_at < NOW() - INTERVAL '90 days'"),
+    // Retain audit logs for 180 days
+    rawQuery("DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '180 days'"),
+    // Retain read notifications for 60 days
+    rawQuery("DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < NOW() - INTERVAL '60 days'"),
   ]);
 
   return {
     sessions: sessions.rowCount ?? 0,
     resets: resets.rowCount ?? 0,
     verifications: verifications.rowCount ?? 0,
+    analytics: analytics.rowCount ?? 0,
+    auditLogs: auditLogs.rowCount ?? 0,
+    notifications: notifications.rowCount ?? 0,
   };
 }
 
@@ -28,14 +41,15 @@ export function startCleanupCron(intervalMs = 30 * 60 * 1000): void {
 
   // Run once immediately on startup
   runCleanup()
-    .then((c) => console.log(`🧹 Initial cleanup: ${c.sessions} sessions, ${c.resets} resets, ${c.verifications} verifications`))
+    .then((c) => console.log(`🧹 Initial cleanup: sessions=${c.sessions} resets=${c.resets} verifications=${c.verifications} analytics=${c.analytics} auditLogs=${c.auditLogs} notifications=${c.notifications}`))
     .catch((err) => console.error('🧹 Cleanup error:', err));
 
   cleanupInterval = setInterval(async () => {
     try {
-      const counts = await runCleanup();
-      if (counts.sessions + counts.resets + counts.verifications > 0) {
-        console.log(`🧹 Cleanup: ${counts.sessions} sessions, ${counts.resets} resets, ${counts.verifications} verifications`);
+      const c = await runCleanup();
+      const total = c.sessions + c.resets + c.verifications + c.analytics + c.auditLogs + c.notifications;
+      if (total > 0) {
+        console.log(`🧹 Cleanup: sessions=${c.sessions} resets=${c.resets} verifications=${c.verifications} analytics=${c.analytics} auditLogs=${c.auditLogs} notifications=${c.notifications}`);
       }
     } catch (err) {
       console.error('🧹 Cleanup error:', err);

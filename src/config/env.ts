@@ -48,6 +48,10 @@ export const env = {
 
   rateLimit: {
     windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '900000', 10),
-    max: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+    max: parseInt(process.env.RATE_LIMIT_MAX || '200', 10), // bumped from 100 for scale
+  },
+
+  monitor: {
+    secret: process.env.MONITOR_SECRET || '',
   },
 };

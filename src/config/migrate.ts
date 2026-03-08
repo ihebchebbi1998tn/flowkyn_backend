@@ -6,7 +6,6 @@ import { pool } from './database';
 
 /**
  * All migrations in order. Each runs exactly once (tracked by version).
- * Use CREATE IF NOT EXISTS / DO $$ blocks for idempotency as a safety net.
  */
 const migrations: { version: number; name: string; sql: string }[] = [
   {
@@ -375,6 +374,21 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_audit_logs_org ON audit_logs(organization_id);
       CREATE INDEX IF NOT EXISTS idx_audit_logs_created ON audit_logs(created_at);
 
+      -- Contact Submissions
+      CREATE TABLE IF NOT EXISTS contact_submissions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) NOT NULL,
+        subject VARCHAR(200) DEFAULT '',
+        message TEXT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'new',
+        ip_address VARCHAR(45),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_contact_submissions_status ON contact_submissions(status);
+      CREATE INDEX IF NOT EXISTS idx_contact_submissions_created ON contact_submissions(created_at);
+
       -- Seed Default Roles
       INSERT INTO roles (id, name, description) VALUES
         (uuid_generate_v4(), 'owner', 'Organization owner with full access'),
@@ -394,6 +408,54 @@ const migrations: { version: number; name: string; sql: string }[] = [
       ON CONFLICT (key) DO NOTHING;
     `,
   },
+  {
+    version: 2,
+    name: 'performance_indexes',
+    sql: `
+      -- ─── Additional indexes for high-traffic query patterns ───
+
+      -- Audit logs: filter by user_id (admin dashboard)
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_user ON audit_logs(user_id);
+      CREATE INDEX IF NOT EXISTS idx_audit_logs_action ON audit_logs(action);
+
+      -- Participants: composite for join/leave lookups
+      CREATE INDEX IF NOT EXISTS idx_participants_member ON participants(organization_member_id) WHERE left_at IS NULL;
+      CREATE INDEX IF NOT EXISTS idx_participants_event_active ON participants(event_id) WHERE left_at IS NULL;
+
+      -- Game actions: composite for aggregation queries (finishSession)
+      CREATE INDEX IF NOT EXISTS idx_game_actions_session_participant ON game_actions(game_session_id, participant_id);
+
+      -- Notifications: composite for sorted paginated queries
+      CREATE INDEX IF NOT EXISTS idx_notifications_user_created ON notifications(user_id, created_at DESC);
+
+      -- Organizations: index on owner for admin queries
+      CREATE INDEX IF NOT EXISTS idx_organizations_owner ON organizations(owner_user_id);
+      CREATE INDEX IF NOT EXISTS idx_organizations_created ON organizations(created_at DESC);
+
+      -- Events: composite for org + status filtered queries
+      CREATE INDEX IF NOT EXISTS idx_events_org_status ON events(organization_id, status);
+      CREATE INDEX IF NOT EXISTS idx_events_created ON events(created_at DESC);
+
+      -- Organization members: composite for user lookups across orgs
+      CREATE INDEX IF NOT EXISTS idx_org_members_user ON organization_members(user_id) WHERE status = 'active';
+
+      -- Game sessions: composite for event lookups
+      CREATE INDEX IF NOT EXISTS idx_game_sessions_event_status ON game_sessions(event_id, status);
+
+      -- Users: updated_at for "active users" queries
+      CREATE INDEX IF NOT EXISTS idx_users_updated ON users(updated_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_users_created ON users(created_at DESC);
+
+      -- Leaderboard entries: composite for ranked queries
+      CREATE INDEX IF NOT EXISTS idx_leaderboard_entries_rank ON leaderboard_entries(leaderboard_id, rank ASC);
+
+      -- Contact submissions: composite for admin queries
+      CREATE INDEX IF NOT EXISTS idx_contact_created ON contact_submissions(created_at DESC);
+
+      -- Analytics: composite for time-series queries
+      CREATE INDEX IF NOT EXISTS idx_analytics_user_created ON analytics_events(user_id, created_at DESC);
+    `,
+  },
 ];
 
 /**
@@ -402,32 +464,24 @@ const migrations: { version: number; name: string; sql: string }[] = [
  */
 export async function runMigrations(): Promise<void> {
   const client = await pool.connect();
-
   try {
-    // Create migrations tracking table
+    // Create tracking table
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
         version INT PRIMARY KEY,
         name VARCHAR(255) NOT NULL,
         applied_at TIMESTAMP NOT NULL DEFAULT NOW()
-      );
+      )
     `);
 
     // Get already-applied versions
     const { rows: applied } = await client.query('SELECT version FROM _migrations ORDER BY version');
-    const appliedSet = new Set(applied.map((r: any) => r.version));
+    const appliedVersions = new Set(applied.map((r: any) => r.version));
 
-    // Run pending migrations in order
-    const pending = migrations.filter(m => !appliedSet.has(m.version));
+    for (const migration of migrations) {
+      if (appliedVersions.has(migration.version)) continue;
 
-    if (pending.length === 0) {
-      console.log('✅ Database is up to date (no pending migrations)');
-      return;
-    }
-
-    for (const migration of pending) {
-      console.log(`🔄 Running migration v${migration.version}: ${migration.name}...`);
-
+      console.log(`⬆️  Running migration v${migration.version}: ${migration.name}`);
       await client.query('BEGIN');
       try {
         await client.query(migration.sql);
@@ -444,7 +498,7 @@ export async function runMigrations(): Promise<void> {
       }
     }
 
-    console.log(`✅ ${pending.length} migration(s) applied successfully`);
+    console.log('✅ All migrations up to date');
   } finally {
     client.release();
   }

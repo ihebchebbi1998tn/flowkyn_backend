@@ -4,33 +4,30 @@ import { buildPaginatedResponse } from '../utils/pagination';
 
 export class AdminService {
   async getStats() {
-    const [users, orgs, events, sessions] = await Promise.all([
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM users'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM organizations'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM events'),
-      queryOne<{ count: string }>('SELECT COUNT(*) as count FROM game_sessions'),
-    ]);
-
-    const [activeUsers, newUsersToday, newOrgsToday] = await Promise.all([
-      queryOne<{ count: string }>(
-        "SELECT COUNT(*) as count FROM users WHERE updated_at > NOW() - INTERVAL '30 days'"
-      ),
-      queryOne<{ count: string }>(
-        "SELECT COUNT(*) as count FROM users WHERE created_at >= CURRENT_DATE"
-      ),
-      queryOne<{ count: string }>(
-        "SELECT COUNT(*) as count FROM organizations WHERE created_at >= CURRENT_DATE"
-      ),
-    ]);
+    // Single query with subqueries — much faster than 7 separate queries
+    const stats = await queryOne<{
+      total_users: string; total_organizations: string;
+      total_events: string; total_game_sessions: string;
+      active_users_30d: string; new_users_today: string; new_orgs_today: string;
+    }>(`
+      SELECT
+        (SELECT COUNT(*) FROM users) as total_users,
+        (SELECT COUNT(*) FROM organizations) as total_organizations,
+        (SELECT COUNT(*) FROM events) as total_events,
+        (SELECT COUNT(*) FROM game_sessions) as total_game_sessions,
+        (SELECT COUNT(*) FROM users WHERE updated_at > NOW() - INTERVAL '30 days') as active_users_30d,
+        (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE) as new_users_today,
+        (SELECT COUNT(*) FROM organizations WHERE created_at >= CURRENT_DATE) as new_orgs_today
+    `);
 
     return {
-      totalUsers: Number(users?.count || 0),
-      totalOrganizations: Number(orgs?.count || 0),
-      totalEvents: Number(events?.count || 0),
-      totalGameSessions: Number(sessions?.count || 0),
-      activeUsers30d: Number(activeUsers?.count || 0),
-      newUsersToday: Number(newUsersToday?.count || 0),
-      newOrgsToday: Number(newOrgsToday?.count || 0),
+      totalUsers: Number(stats?.total_users || 0),
+      totalOrganizations: Number(stats?.total_organizations || 0),
+      totalEvents: Number(stats?.total_events || 0),
+      totalGameSessions: Number(stats?.total_game_sessions || 0),
+      activeUsers30d: Number(stats?.active_users_30d || 0),
+      newUsersToday: Number(stats?.new_users_today || 0),
+      newOrgsToday: Number(stats?.new_orgs_today || 0),
     };
   }
 
@@ -127,15 +124,19 @@ export class AdminService {
 
     const offsetParam = params.length + 1;
     const limitParam = params.length + 2;
+
+    // Use LEFT JOIN with aggregation instead of correlated subqueries
     const rows = await query(
       `SELECT o.id, o.name, o.slug, o.logo_url, o.owner_user_id, o.created_at, o.updated_at,
               u.name as owner_name,
-              (SELECT COUNT(*) FROM organization_members WHERE organization_id = o.id) as member_count,
-              (SELECT COUNT(*) FROM events WHERE organization_id = o.id) as event_count,
+              COALESCE(mc.member_count, 0) as member_count,
+              COALESCE(ec.event_count, 0) as event_count,
               COALESCE(s.plan_name, 'free') as plan_name
        FROM organizations o
        LEFT JOIN users u ON o.owner_user_id = u.id
        LEFT JOIN subscriptions s ON s.organization_id = o.id
+       LEFT JOIN LATERAL (SELECT COUNT(*) as member_count FROM organization_members WHERE organization_id = o.id) mc ON true
+       LEFT JOIN LATERAL (SELECT COUNT(*) as event_count FROM events WHERE organization_id = o.id) ec ON true
        ${whereClause}
        ORDER BY o.created_at DESC
        OFFSET $${offsetParam} LIMIT $${limitParam}`,
@@ -155,16 +156,18 @@ export class AdminService {
     const countResult = await queryOne<{ count: string }>('SELECT COUNT(*) as count FROM game_sessions');
     const total = Number(countResult?.count || 0);
 
+    // Use LEFT JOIN LATERAL instead of correlated subquery for action_count
     const rows = await query(
       `SELECT gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at,
               gt.name as game_type_name, gt.key as game_type_key,
               e.title as event_title,
               o.name as organization_name,
-              (SELECT COUNT(*) FROM game_actions WHERE game_session_id = gs.id) as action_count
+              COALESCE(ac.action_count, 0) as action_count
        FROM game_sessions gs
        LEFT JOIN game_types gt ON gs.game_type_id = gt.id
        LEFT JOIN events e ON gs.event_id = e.id
        LEFT JOIN organizations o ON e.organization_id = o.id
+       LEFT JOIN LATERAL (SELECT COUNT(*) as action_count FROM game_actions WHERE game_session_id = gs.id) ac ON true
        ORDER BY gs.started_at DESC NULLS LAST
        OFFSET $1 LIMIT $2`,
       [offset, limit]

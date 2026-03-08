@@ -22,10 +22,15 @@ async function bootstrap() {
   const server = createServer(app);
   initializeSocket(server);
 
-  // 4. Start cleanup cron (every 30 min)
+  // 4. Configure server for high concurrency
+  server.maxConnections = 10000;
+  server.keepAliveTimeout = 65000; // Slightly above ALB/Nginx default (60s)
+  server.headersTimeout = 66000;
+
+  // 5. Start cleanup cron (every 30 min)
   startCleanupCron();
 
-  // 5. Start listening
+  // 6. Start listening
   server.listen(env.port, () => {
     console.log(`🚀 Flowkyn API running on port ${env.port} [${env.nodeEnv}]`);
     console.log(`   Health:  http://localhost:${env.port}/health`);
@@ -33,15 +38,25 @@ async function bootstrap() {
     console.log(`   Monitor: http://localhost:${env.port}/monitor`);
   });
 
-  // Graceful shutdown
+  // Graceful shutdown — wait for in-flight requests
+  let isShuttingDown = false;
   const shutdown = async (signal: string) => {
+    if (isShuttingDown) return; // Prevent double shutdown
+    isShuttingDown = true;
     console.log(`\n⏳ ${signal} received — shutting down gracefully...`);
 
     stopCleanupCron();
     console.log('  ✅ Cleanup cron stopped');
 
+    // Stop accepting new connections, wait for existing to finish (max 30s)
+    const forceTimeout = setTimeout(() => {
+      console.error('  ⚠️ Force shutdown after 30s timeout');
+      process.exit(1);
+    }, 30000);
+
     server.close(() => {
       console.log('  ✅ HTTP server closed');
+      clearTimeout(forceTimeout);
     });
 
     await pool.end();
@@ -59,7 +74,7 @@ async function bootstrap() {
 
   process.on('uncaughtException', (err) => {
     console.error('⚠️  Uncaught exception:', err);
-    process.exit(1);
+    shutdown('UNCAUGHT_EXCEPTION');
   });
 }
 
