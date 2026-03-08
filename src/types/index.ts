@@ -52,6 +52,7 @@ export interface OrganizationRow {
   id: string;
   name: string;
   slug: string;
+  logo_url: string | null;
   owner_user_id: string;
   created_at: Date;
   updated_at: Date;

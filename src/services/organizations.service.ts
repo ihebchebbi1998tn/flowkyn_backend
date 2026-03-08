@@ -4,6 +4,7 @@ import { generateSlug } from '../utils/slug';
 import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
 import { OrganizationRow, OrganizationMemberRow } from '../types';
+import { saveFile, isAllowedImageType } from '../utils/upload';
 import crypto from 'crypto';
 
 export class OrganizationsService {
@@ -114,6 +115,32 @@ export class OrganizationsService {
     return queryOne<OrganizationMemberRow>(
       `SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
       [orgId, userId]
+    );
+  }
+
+  async uploadLogo(orgId: string, file: { buffer: Buffer; originalname: string; mimetype: string }) {
+    if (!isAllowedImageType(file.mimetype)) {
+      throw new AppError('Only image files are allowed', 400);
+    }
+    const { url } = saveFile(file.buffer, file.originalname, 'org-logos');
+    const org = await queryOne<OrganizationRow>(
+      `UPDATE organizations SET logo_url = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [url, orgId]
+    );
+    return org;
+  }
+
+  async updateOrg(orgId: string, data: { name?: string }) {
+    const fields: string[] = [];
+    const values: any[] = [];
+    let idx = 1;
+    if (data.name) { fields.push(`name = $${idx++}`); values.push(data.name); }
+    if (fields.length === 0) throw new AppError('No fields to update', 400);
+    fields.push('updated_at = NOW()');
+    values.push(orgId);
+    return queryOne<OrganizationRow>(
+      `UPDATE organizations SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values
     );
   }
 }

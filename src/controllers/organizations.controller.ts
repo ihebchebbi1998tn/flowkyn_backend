@@ -1,6 +1,8 @@
 import { Response, NextFunction } from 'express';
 import { OrganizationsService } from '../services/organizations.service';
 import { AuthRequest } from '../types';
+import { AppError } from '../middleware/errorHandler';
+import { isAllowedImageType } from '../utils/upload';
 
 const orgsService = new OrganizationsService();
 
@@ -39,6 +41,23 @@ export class OrganizationsController {
     try {
       const result = await orgsService.acceptInvitation(req.user!.userId, req.body.token);
       res.json(result);
+    } catch (err) { next(err); }
+  }
+
+  async uploadLogo(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const file = req.file;
+      if (!file) throw new AppError('No file provided', 400);
+      if (!isAllowedImageType(file.mimetype)) throw new AppError('Only image files are allowed', 400);
+      const org = await orgsService.uploadLogo(req.params.orgId, file);
+      res.json(org);
+    } catch (err) { next(err); }
+  }
+
+  async update(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const org = await orgsService.updateOrg(req.params.orgId, req.body);
+      res.json(org);
     } catch (err) { next(err); }
   }
 }

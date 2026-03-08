@@ -409,6 +409,13 @@ export async function runMigrations(): Promise<void> {
       ALTER TABLE users ADD COLUMN IF NOT EXISTS language VARCHAR(10) DEFAULT 'en';
     `,
   },
+  {
+    version: 3,
+    name: 'add_organization_logo',
+    sql: `
+      ALTER TABLE organizations ADD COLUMN IF NOT EXISTS logo_url TEXT;
+    `,
+  },
 ];
 
     // Get already-applied versions
