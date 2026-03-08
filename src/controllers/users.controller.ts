@@ -7,6 +7,7 @@ import { saveFile, isAllowedImageType } from '../utils/upload';
 import { AppError } from '../middleware/errorHandler';
 import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
 import { query, queryOne } from '../config/database';
+import { comparePassword, hashPassword } from '../utils/hash';
 
 const usersService = new UsersService();
 const filesService = new FilesService();
@@ -40,6 +41,28 @@ export class UsersController {
 
       await audit.create(null, req.user!.userId, 'USER_UPLOAD_AVATAR', { mimetype: file.mimetype });
       res.json({ avatar_url: user?.avatar_url });
+    } catch (err) { next(err); }
+  }
+
+  async changePassword(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { current_password, new_password } = req.body;
+      const userId = req.user!.userId;
+
+      // Fetch current password hash
+      const user = await queryOne<{ password_hash: string }>('SELECT password_hash FROM users WHERE id = $1', [userId]);
+      if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
+
+      // Verify current password
+      const valid = await comparePassword(current_password, user.password_hash);
+      if (!valid) throw new AppError('Current password is incorrect', 400, 'AUTH_INVALID_PASSWORD');
+
+      // Hash and update
+      const newHash = await hashPassword(new_password);
+      await query('UPDATE users SET password_hash = $1, updated_at = NOW() WHERE id = $2', [newHash, userId]);
+
+      await audit.create(null, userId, 'USER_CHANGE_PASSWORD', { ip: req.ip });
+      res.json({ message: 'Password updated successfully' });
     } catch (err) { next(err); }
   }
 
