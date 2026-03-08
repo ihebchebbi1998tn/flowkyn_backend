@@ -8,6 +8,7 @@ import { env } from '../config/env';
 export type ErrorCode =
   // Auth
   | 'AUTH_INVALID_CREDENTIALS'
+  | 'AUTH_INVALID_PASSWORD'
   | 'AUTH_ACCOUNT_SUSPENDED'
   | 'AUTH_ACCOUNT_NOT_VERIFIED'
   | 'AUTH_TOKEN_EXPIRED'

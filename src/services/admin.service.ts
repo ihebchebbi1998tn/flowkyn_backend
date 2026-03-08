@@ -103,8 +103,20 @@ export class AdminService {
   }
 
   async deleteUser(id: string) {
-    const result = await queryOne('DELETE FROM users WHERE id = $1 RETURNING id', [id]);
-    if (!result) throw new AppError('User not found', 404, 'NOT_FOUND');
+    // Cascade: delete user sessions, email verifications, password resets, then user
+    const { query: q, transaction: tx } = await import('../config/database');
+    await tx(async (client) => {
+      await client.query('DELETE FROM user_sessions WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM email_verifications WHERE user_id = $1', [id]);
+      await client.query('DELETE FROM password_resets WHERE email = (SELECT email FROM users WHERE id = $1)', [id]);
+      // Remove notifications
+      await client.query('DELETE FROM notifications WHERE user_id = $1', [id]);
+      // Remove org memberships (cascaded participants will be handled by FK or manual cleanup)
+      await client.query('DELETE FROM organization_members WHERE user_id = $1', [id]);
+      // Delete user
+      const { rowCount } = await client.query('DELETE FROM users WHERE id = $1', [id]);
+      if (rowCount === 0) throw new AppError('User not found', 404, 'NOT_FOUND');
+    });
   }
 
   async listOrganizations(page: number, limit: number, search?: string) {
@@ -147,8 +159,41 @@ export class AdminService {
   }
 
   async deleteOrganization(id: string) {
-    const result = await queryOne('DELETE FROM organizations WHERE id = $1 RETURNING id', [id]);
-    if (!result) throw new AppError('Organization not found', 404, 'NOT_FOUND');
+    // Cascade: delete all org data before removing the organization
+    const { transaction: tx } = await import('../config/database');
+    await tx(async (client) => {
+      // Get all events for this org
+      const { rows: events } = await client.query('SELECT id FROM events WHERE organization_id = $1', [id]);
+      const eventIds = events.map((e: any) => e.id);
+
+      if (eventIds.length > 0) {
+        // Delete game data for all events
+        await client.query(`DELETE FROM game_actions WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM game_results WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM game_state_snapshots WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM game_rounds WHERE game_session_id IN (SELECT id FROM game_sessions WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM game_sessions WHERE event_id = ANY($1)`, [eventIds]);
+
+        // Delete event data
+        await client.query(`DELETE FROM post_reactions WHERE post_id IN (SELECT id FROM activity_posts WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM activity_posts WHERE event_id = ANY($1)`, [eventIds]);
+        await client.query(`DELETE FROM leaderboard_entries WHERE participant_id IN (SELECT id FROM participants WHERE event_id = ANY($1))`, [eventIds]);
+        await client.query(`DELETE FROM event_messages WHERE event_id = ANY($1)`, [eventIds]);
+        await client.query(`DELETE FROM event_invitations WHERE event_id = ANY($1)`, [eventIds]);
+        await client.query(`DELETE FROM participants WHERE event_id = ANY($1)`, [eventIds]);
+        await client.query(`DELETE FROM event_settings WHERE event_id = ANY($1)`, [eventIds]);
+        await client.query(`DELETE FROM events WHERE organization_id = $1`, [id]);
+      }
+
+      // Delete org data
+      await client.query('DELETE FROM organization_invitations WHERE organization_id = $1', [id]);
+      await client.query('DELETE FROM subscriptions WHERE organization_id = $1', [id]);
+      await client.query('DELETE FROM organization_members WHERE organization_id = $1', [id]);
+      await client.query('DELETE FROM audit_logs WHERE organization_id = $1', [id]);
+
+      const { rowCount } = await client.query('DELETE FROM organizations WHERE id = $1', [id]);
+      if (rowCount === 0) throw new AppError('Organization not found', 404, 'NOT_FOUND');
+    });
   }
 
   async listGameSessions(page: number, limit: number) {

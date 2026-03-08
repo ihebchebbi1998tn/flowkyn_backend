@@ -258,6 +258,11 @@ export class EventsService {
    * @throws {AppError} 409 if already participating, 400 if event is full
    */
   async join(eventId: string, memberId: string) {
+    const event = await this.getById(eventId);
+    if (event.status === 'completed' || event.status === 'cancelled') {
+      throw new AppError(`Cannot join — event is ${event.status}`, 400, 'VALIDATION_FAILED');
+    }
+
     const existing = await queryOne(
       'SELECT id FROM participants WHERE event_id = $1 AND organization_member_id = $2 AND left_at IS NULL',
       [eventId, memberId]
