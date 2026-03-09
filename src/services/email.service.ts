@@ -15,7 +15,7 @@ const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
   port: 465,
   secure: true,
   auth: {
-    user: "	test_email_sending@spadadibattaglia.com",
+    user: "test_email_sending@spadadibattaglia.com",
     pass: "Dadouhibou2025",
   },
   connectionTimeout: 10000,
@@ -62,7 +62,7 @@ export async function sendEmail(options: EmailOptions): Promise<void> {
   // Password is now hardcoded
 
   await transporter.sendMail({
-    from: '"Flowkyn" <noreply@flowkyn.com>',
+   from: '"Flowkyn" <test_email_sending@spadadibattaglia.com>',
     to: options.to,
     subject,
     html,
