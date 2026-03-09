@@ -11,7 +11,8 @@ export class AuthController {
     try {
       const { email, password, name, lang } = req.body;
       const result = await authService.register(email, password, name, lang);
-      await audit.create(null, null as any, 'AUTH_REGISTER', { email, ip: req.ip });
+      // Note: userId is null for registration (user doesn't exist yet in audit context)
+      await audit.create(null, null, 'AUTH_REGISTER', { email, ip: req.ip });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
@@ -19,7 +20,7 @@ export class AuthController {
   async verifyEmail(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await authService.verifyEmail(req.body.token);
-      await audit.create(null, null as any, 'AUTH_VERIFY_EMAIL', { ip: req.ip });
+      await audit.create(null, null, 'AUTH_VERIFY_EMAIL', { ip: req.ip });
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -44,8 +45,7 @@ export class AuthController {
 
   async logout(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // BUG FIX: Pass the refresh token so only the current session is invalidated
-      // Previously deleted ALL user sessions on logout
+      // Pass the refresh token so only the current session is invalidated
       const refreshToken = req.body.refresh_token;
       const result = await authService.logout(req.user!.userId, refreshToken);
       await audit.create(null, req.user!.userId, 'AUTH_LOGOUT', { ip: req.ip });
@@ -63,7 +63,7 @@ export class AuthController {
   async forgotPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await authService.forgotPassword(req.body.email, req.body.lang);
-      await audit.create(null, null as any, 'AUTH_FORGOT_PASSWORD', { email: req.body.email, ip: req.ip });
+      await audit.create(null, null, 'AUTH_FORGOT_PASSWORD', { email: req.body.email, ip: req.ip });
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -71,7 +71,7 @@ export class AuthController {
   async resetPassword(req: Request, res: Response, next: NextFunction) {
     try {
       const result = await authService.resetPassword(req.body.token, req.body.password);
-      await audit.create(null, null as any, 'AUTH_RESET_PASSWORD', { ip: req.ip });
+      await audit.create(null, null, 'AUTH_RESET_PASSWORD', { ip: req.ip });
       res.json(result);
     } catch (err) { next(err); }
   }

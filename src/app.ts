@@ -82,7 +82,9 @@ app.use('/uploads', express.static(env.uploadsDir, {
   immutable: true,
 }));
 
-// ─── Rate limiting (disabled) ───
+// ─── Global rate limiting ───
+import { apiRateLimiter } from './middleware/rateLimiter';
+app.use('/v1', apiRateLimiter);
 
 // ─── Health check (extended with pool stats) ───
 app.get('/health', async (_req, res) => {
