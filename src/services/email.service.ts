@@ -11,12 +11,12 @@ import {
 } from '../emails';
 
 const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
-  host: "smtp.mail.ovh.ca",
+  host: "ssl0.ovh.net",
   port: 465,
   secure: true,
   auth: {
-    user: "noreply@flowkyn.com",
-    pass: "Azerty123",
+    user: "	test_email_sending@spadadibattaglia.com",
+    pass: "Dadouhibou2025",
   },
   connectionTimeout: 10000,
   greetingTimeout: 10000,
