@@ -11,21 +11,13 @@ import {
 } from '../emails';
 
 const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
-  host: env.smtp.host,
-  port: env.smtp.port,
-  secure: env.smtp.secure, // true for 465 (SSL), false for 587 (STARTTLS)
+  host: "smtp.mail.ovh.ca",
+  port: 465,
+  secure: true,
   auth: {
-    user: env.smtp.user,
-    pass: env.smtp.pass,
+    user: "noreply@flowkyn.com",
+    pass: "Azerty123",
   },
-  // For port 587 with STARTTLS
-  ...(!env.smtp.secure && {
-    requireTLS: true,
-    tls: {
-      ciphers: 'SSLv3',
-      rejectUnauthorized: false, // OVH certificates sometimes need this
-    },
-  }),
   connectionTimeout: 10000,
   greetingTimeout: 10000,
   socketTimeout: 15000,
@@ -67,14 +59,10 @@ function buildEmail(type: EmailType, data: Record<string, string>, lang?: string
 export async function sendEmail(options: EmailOptions): Promise<void> {
   const { subject, html } = buildEmail(options.type, options.data, options.lang);
 
-  // Skip sending if SMTP not configured (dev mode)
-  if (!env.smtp.host || !env.smtp.user) {
-    console.warn(`[Email] SMTP not configured. Would have sent "${subject}" to ${options.to}`);
-    return;
-  }
+  // Password is now hardcoded
 
   await transporter.sendMail({
-    from: `"Flowkyn" <${env.smtp.user}>`,
+    from: '"Flowkyn" <noreply@flowkyn.com>',
     to: options.to,
     subject,
     html,
