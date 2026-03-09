@@ -15,14 +15,19 @@ import { UserRow } from '../types';
 import { env } from '../config/env';
 import crypto from 'crypto';
 
+/** Hash a token using SHA-256 (consistent with refresh token hashing) */
+function hashResetToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 export class AuthPasswordService {
   /**
    * Initiate password reset flow.
    * 
    * 1. Look up user by email (always return same message to prevent enumeration)
    * 2. Delete any existing reset tokens for this email
-   * 3. Create a new token valid for 1 hour
-   * 4. Send reset email with link
+   * 3. Create a new token valid for 1 hour (stored as SHA-256 hash)
+   * 4. Send reset email with link (containing the raw token)
    * 
    * @param email - User's email address
    * @param lang - Preferred language for the email template
@@ -34,17 +39,20 @@ export class AuthPasswordService {
 
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
 
-    const token = crypto.randomBytes(32).toString('hex');
+    // Generate raw token for the email link, store hashed version in DB
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = hashResetToken(rawToken);
+    
     await query(
       `INSERT INTO password_resets (id, email, token, expires_at, created_at)
        VALUES ($1, $2, $3, NOW() + INTERVAL '1 hour', NOW())`,
-      [uuid(), email, token]
+      [uuid(), email, hashedToken]
     );
 
     await sendEmail({
       to: email,
       type: 'reset_password',
-      data: { link: `${env.frontendUrl}/reset-password?token=${token}`, name: user.name },
+      data: { link: `${env.frontendUrl}/reset-password?token=${rawToken}`, name: user.name },
       lang: lang || user.language || 'en',
     });
 
@@ -65,9 +73,11 @@ export class AuthPasswordService {
    * @throws {AppError} 400 if token is invalid or expired
    */
   async resetPassword(token: string, newPassword: string) {
+    // Hash the incoming token to match against DB
+    const hashedToken = hashResetToken(token);
     const row = await queryOne<{ email: string }>(
       `SELECT email FROM password_resets WHERE token = $1 AND expires_at > NOW()`,
-      [token]
+      [hashedToken]
     );
     if (!row) throw new AppError('Reset link is invalid or has expired — request a new one', 400, 'AUTH_RESET_TOKEN_EXPIRED');
 

@@ -14,7 +14,7 @@ export class AdminService {
         (SELECT COUNT(*) FROM organizations) as total_organizations,
         (SELECT COUNT(*) FROM events) as total_events,
         (SELECT COUNT(*) FROM game_sessions) as total_game_sessions,
-        (SELECT COUNT(*) FROM users WHERE updated_at > NOW() - INTERVAL '30 days') as active_users_30d,
+        (SELECT COUNT(DISTINCT user_id) FROM user_sessions WHERE created_at > NOW() - INTERVAL '30 days') as active_users_30d,
         (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE) as new_users_today,
         (SELECT COUNT(*) FROM organizations WHERE created_at >= CURRENT_DATE) as new_orgs_today
     `);

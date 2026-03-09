@@ -143,14 +143,27 @@ export class OrganizationsService {
     return org;
   }
 
-  async updateOrg(orgId: string, data: { name?: string }) {
+  async updateOrg(orgId: string, data: {
+    name?: string;
+    description?: string;
+    industry?: string;
+    company_size?: string;
+    goals?: string[];
+  }) {
     const fields: string[] = [];
     const values: any[] = [];
     let idx = 1;
-    if (data.name) { fields.push(`name = $${idx++}`); values.push(data.name); }
+    
+    if (data.name !== undefined) { fields.push(`name = $${idx++}`); values.push(data.name); }
+    if (data.description !== undefined) { fields.push(`description = $${idx++}`); values.push(data.description); }
+    if (data.industry !== undefined) { fields.push(`industry = $${idx++}`); values.push(data.industry); }
+    if (data.company_size !== undefined) { fields.push(`company_size = $${idx++}`); values.push(data.company_size); }
+    if (data.goals !== undefined) { fields.push(`goals = $${idx++}`); values.push(data.goals); }
+    
     if (fields.length === 0) throw new AppError('No fields to update', 400, 'VALIDATION_FAILED');
     fields.push('updated_at = NOW()');
     values.push(orgId);
+    
     return queryOne<OrganizationRow>(
       `UPDATE organizations SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
       values

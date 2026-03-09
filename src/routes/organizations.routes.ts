@@ -15,7 +15,7 @@ import { Router } from 'express';
 import { OrganizationsController } from '../controllers/organizations.controller';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { createOrgSchema, inviteMemberSchema, acceptInvitationSchema } from '../validators/organizations.validator';
+import { createOrgSchema, updateOrgSchema, inviteMemberSchema, acceptInvitationSchema } from '../validators/organizations.validator';
 import { orgIdParam, orgMemberParams } from '../validators/common.validator';
 import { upload } from '../config/multer';
 
@@ -24,7 +24,7 @@ const ctrl = new OrganizationsController();
 
 router.post('/', authenticate, validate(createOrgSchema), ctrl.create);
 router.get('/:orgId', authenticate, validate(orgIdParam, 'params'), ctrl.getById);
-router.patch('/:orgId', authenticate, validate(orgIdParam, 'params'), ctrl.update);
+router.patch('/:orgId', authenticate, validate(orgIdParam, 'params'), validate(updateOrgSchema), ctrl.update);
 router.get('/:orgId/members', authenticate, validate(orgIdParam, 'params'), ctrl.listMembers);
 router.delete('/:orgId/members/:memberId', authenticate, validate(orgMemberParams, 'params'), ctrl.removeMember);
 router.post('/:orgId/logo', authenticate, validate(orgIdParam, 'params'), upload.single('logo'), ctrl.uploadLogo);
