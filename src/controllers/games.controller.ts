@@ -9,20 +9,36 @@ import { queryOne } from '../config/database';
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
 
-/** Verify the authenticated user owns the given participant_id (supports both org members and guests) */
-async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
-  // Check org-member participant
-  const memberRow = await queryOne(
-    `SELECT p.id FROM participants p
-     JOIN organization_members om ON om.id = p.organization_member_id
-     WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
-    [participantId, userId]
-  );
-  if (memberRow) return;
+/**
+ * Verify the caller owns the given participant_id.
+ * Supports both authenticated org members AND guest participants.
+ */
+async function verifyParticipantOwnership(participantId: string, req: AuthRequest): Promise<void> {
+  // If this is a guest request, verify the guest token's participantId matches
+  if (req.guest) {
+    if (req.guest.participantId !== participantId) {
+      throw new AppError('Guest token does not match the provided participant_id', 403, 'FORBIDDEN');
+    }
+    // Verify participant still exists and is active
+    const guestRow = await queryOne(
+      `SELECT id FROM participants WHERE id = $1 AND participant_type = 'guest' AND left_at IS NULL`,
+      [participantId]
+    );
+    if (!guestRow) throw new AppError('Guest participant not found or has left', 403, 'FORBIDDEN');
+    return;
+  }
 
-  // Note: Guest participants don't have a user_id link, so game actions
-  // for guests are verified at the session/round level in the service layer.
-  // If no org-member match, deny access.
+  // Authenticated user — check org-member participant
+  if (req.user) {
+    const memberRow = await queryOne(
+      `SELECT p.id FROM participants p
+       JOIN organization_members om ON om.id = p.organization_member_id
+       WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+      [participantId, req.user.userId]
+    );
+    if (memberRow) return;
+  }
+
   throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
@@ -37,12 +53,14 @@ export class GamesController {
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       // Authorization: only admins/moderators can start game sessions
+      if (!req.user) throw new AppError('Only authenticated users can start game sessions', 403, 'FORBIDDEN');
+
       const member = await queryOne<{ id: string; role_name: string }>(
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
          WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
-        [req.params.eventId, req.user!.userId]
+        [req.params.eventId, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
       if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
@@ -57,21 +75,22 @@ export class GamesController {
         gameTypeId: session.game_type_id,
       });
 
-      await audit.create(null, req.user!.userId, 'GAME_START_SESSION', { eventId: req.params.eventId, sessionId: session.id, gameTypeId: req.body.game_type_id });
+      await audit.create(null, req.user.userId, 'GAME_START_SESSION', { eventId: req.params.eventId, sessionId: session.id, gameTypeId: req.body.game_type_id });
       res.status(201).json(session);
     } catch (err) { next(err); }
   }
 
   async startRound(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Authorization: only admins/moderators can start rounds
+      if (!req.user) throw new AppError('Only authenticated users can start rounds', 403, 'FORBIDDEN');
+
       const session = await gamesService.getSession(req.params.id);
       const member = await queryOne<{ id: string; role_name: string }>(
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
          WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
-        [session.event_id, req.user!.userId]
+        [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
       if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
@@ -87,42 +106,54 @@ export class GamesController {
         timestamp: new Date().toISOString(),
       });
 
-      await audit.create(null, req.user!.userId, 'GAME_START_ROUND', { sessionId: req.params.id, roundId: round.id, roundNumber: round.round_number });
+      await audit.create(null, req.user.userId, 'GAME_START_ROUND', { sessionId: req.params.id, roundId: round.id, roundNumber: round.round_number });
       res.status(201).json(round);
     } catch (err) { next(err); }
   }
 
+  /**
+   * Submit a game action — supports BOTH authenticated users AND guests.
+   * Uses authenticateOrGuest middleware, so req.user OR req.guest is set.
+   */
   async submitAction(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { game_session_id, round_id, participant_id, action_type, payload } = req.body;
 
-      await verifyParticipantOwnership(participant_id, req.user!.userId);
+      await verifyParticipantOwnership(participant_id, req);
 
       const action = await gamesService.submitAction(game_session_id, round_id, participant_id, action_type, payload);
 
+      const callerId = req.user?.userId || `guest:${req.guest?.participantId}`;
+
       emitGameUpdate(game_session_id, 'game:action', {
-        userId: req.user!.userId,
+        userId: callerId,
         participantId: participant_id,
         actionType: action_type,
         payload,
         timestamp: action.created_at,
       });
 
-      await audit.create(null, req.user!.userId, 'GAME_SUBMIT_ACTION', { sessionId: game_session_id, actionType: action_type });
+      await audit.create(null, req.user?.userId || null, 'GAME_SUBMIT_ACTION', {
+        sessionId: game_session_id,
+        actionType: action_type,
+        isGuest: !!req.guest,
+        participantId: participant_id,
+      });
       res.status(201).json(action);
     } catch (err) { next(err); }
   }
 
   async finishSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Authorization: only admins/moderators can finish sessions
+      if (!req.user) throw new AppError('Only authenticated users can finish game sessions', 403, 'FORBIDDEN');
+
       const session = await gamesService.getSession(req.params.id);
       const member = await queryOne<{ id: string; role_name: string }>(
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
          WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
-        [session.event_id, req.user!.userId]
+        [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
       if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
@@ -137,7 +168,7 @@ export class GamesController {
         timestamp: new Date().toISOString(),
       });
 
-      await audit.create(null, req.user!.userId, 'GAME_FINISH_SESSION', { sessionId: req.params.id });
+      await audit.create(null, req.user.userId, 'GAME_FINISH_SESSION', { sessionId: req.params.id });
       res.json(result);
     } catch (err) { next(err); }
   }

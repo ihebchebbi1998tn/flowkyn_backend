@@ -75,4 +75,12 @@ export class AuthController {
       res.json(result);
     } catch (err) { next(err); }
   }
+
+  async resendVerification(req: Request, res: Response, next: NextFunction) {
+    try {
+      const result = await authService.resendVerification(req.body.email, req.body.lang);
+      await audit.create(null, null, 'AUTH_RESEND_VERIFICATION', { email: req.body.email, ip: req.ip });
+      res.json(result);
+    } catch (err) { next(err); }
+  }
 }

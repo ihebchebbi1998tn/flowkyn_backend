@@ -175,7 +175,17 @@ export class EventsController {
         guestName: result.guest_name,
         participantId: result.participant_id,
       });
-      res.status(201).json(result);
+
+      // Generate a guest token so the guest can participate in games and chat via REST/WebSocket
+      const { signGuestToken } = await import('../utils/jwt');
+      const guest_token = signGuestToken({
+        participantId: result.participant_id,
+        eventId: req.params.eventId,
+        guestName: result.guest_name,
+        isGuest: true,
+      });
+
+      res.status(201).json({ ...result, guest_token });
     } catch (err) { next(err); }
   }
 

@@ -15,6 +15,7 @@ router.post('/login', authRateLimiter, validate(loginSchema), ctrl.login);
 router.post('/refresh', publicRateLimiter, validate(refreshSchema), ctrl.refresh);
 router.post('/forgot-password', authRateLimiter, validate(forgotPasswordSchema), ctrl.forgotPassword);
 router.post('/reset-password', authRateLimiter, validate(resetPasswordSchema), ctrl.resetPassword);
+router.post('/resend-verification', authRateLimiter, validate(forgotPasswordSchema), ctrl.resendVerification);
 
 // Authenticated endpoints
 router.post('/logout', authenticate, ctrl.logout);
