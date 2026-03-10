@@ -77,12 +77,36 @@ export class UsersController {
   async listUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page, limit, offset } = parsePagination(req.query as any);
+      const userId = req.user!.userId;
+
+      // Get the user's organization — scope users to org members only
+      const orgMember = await queryOne<{ organization_id: string }>(
+        'SELECT organization_id FROM organization_members WHERE user_id = $1 LIMIT 1',
+        [userId]
+      );
+
+      if (!orgMember) {
+        // No org — return empty
+        return res.json(buildPaginatedResponse([], 0, page, limit));
+      }
+
+      const orgId = orgMember.organization_id;
       const [data, countResult] = await Promise.all([
         query(
-          `SELECT id, name, email, avatar_url, language, status, onboarding_completed, created_at FROM users WHERE status = 'active' ORDER BY name ASC LIMIT $1 OFFSET $2`,
-          [limit, offset]
+          `SELECT u.id, u.name, u.email, u.avatar_url, u.language, u.status, u.onboarding_completed,
+                  u.created_at, u.updated_at, om.role, om.created_at as joined_at
+           FROM users u
+           JOIN organization_members om ON u.id = om.user_id
+           WHERE om.organization_id = $1 AND u.status = 'active'
+           ORDER BY u.name ASC LIMIT $2 OFFSET $3`,
+          [orgId, limit, offset]
         ),
-        queryOne<{ count: string }>(`SELECT COUNT(*) as count FROM users WHERE status = 'active'`),
+        queryOne<{ count: string }>(
+          `SELECT COUNT(*) as count FROM organization_members om
+           JOIN users u ON u.id = om.user_id
+           WHERE om.organization_id = $1 AND u.status = 'active'`,
+          [orgId]
+        ),
       ]);
       res.json(buildPaginatedResponse(data, Number(countResult?.count || 0), page, limit));
     } catch (err) { next(err); }
@@ -96,6 +120,45 @@ export class UsersController {
       );
       if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
       res.json(user);
+    } catch (err) { next(err); }
+  }
+
+  async deleteAccount(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+
+      // Check if user is an org owner — prevent deletion if sole owner
+      const ownedOrgs = await query(
+        `SELECT om.organization_id, (SELECT COUNT(*) FROM organization_members om2 WHERE om2.organization_id = om.organization_id AND om2.role = 'owner') as owner_count
+         FROM organization_members om WHERE om.user_id = $1 AND om.role = 'owner'`,
+        [userId]
+      );
+
+      for (const org of ownedOrgs) {
+        if (Number(org.owner_count) <= 1) {
+          throw new AppError(
+            'You are the sole owner of an organization. Transfer ownership before deleting your account.',
+            400,
+            'SOLE_OWNER'
+          );
+        }
+      }
+
+      // Invalidate all sessions
+      await query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+
+      // Soft-delete: mark as inactive, anonymize PII
+      await query(
+        `UPDATE users SET status = 'deleted', email = CONCAT('deleted_', id, '@deleted.flowkyn.com'),
+         name = 'Deleted User', avatar_url = NULL, updated_at = NOW() WHERE id = $1`,
+        [userId]
+      );
+
+      // Remove from org memberships
+      await query('DELETE FROM organization_members WHERE user_id = $1', [userId]);
+
+      await audit.create(null, userId, 'USER_DELETE_ACCOUNT', { ip: req.ip });
+      res.json({ message: 'Account deleted successfully' });
     } catch (err) { next(err); }
   }
 }
