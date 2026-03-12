@@ -19,6 +19,7 @@ import { EventInvitationsService } from '../services/events-invitations.service'
 import { EventMessagesService } from '../services/events-messages.service';
 import { OrganizationsService } from '../services/organizations.service';
 import { AuditLogsService } from '../services/auditLogs.service';
+import { NotificationsService } from '../services/notifications.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { emitEventUpdate, emitEventNotification } from '../socket/emitter';
@@ -28,6 +29,7 @@ const eventsService = new EventsService();
 const invitationsService = new EventInvitationsService();
 const messagesService = new EventMessagesService();
 const orgsService = new OrganizationsService();
+const notificationsService = new NotificationsService();
 const audit = new AuditLogsService();
 
 // ─── Authorization Helpers ────────────────────────────────────────────────────
@@ -86,6 +88,19 @@ export class EventsController {
       requireAdminRole(member, 'create events');
       const event = await eventsService.create(member.id, req.body);
       await audit.create(req.body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: req.body.title });
+
+      // Optional: notify the creator that the event was created successfully.
+      // Failure to create the notification must not break event creation.
+      try {
+        await notificationsService.create(req.user!.userId, 'event_created', {
+          event_id: event.id,
+          title: event.title,
+          organization_id: event.organization_id,
+        });
+      } catch (notifErr) {
+        console.warn('[EventsController] Failed to create event_created notification:', (notifErr as any)?.message);
+      }
+
       res.status(201).json(event);
     } catch (err) { next(err); }
   }
@@ -177,6 +192,26 @@ export class EventsController {
         participantId: result.participant_id,
       });
 
+      // Notify the event creator that a guest joined (if we can resolve a user_id).
+      try {
+        const creator = await queryOne<{ user_id: string }>(
+          `SELECT om.user_id
+           FROM organization_members om
+           WHERE om.id = $1`,
+          [event.created_by_member_id]
+        );
+        if (creator?.user_id) {
+          await notificationsService.create(creator.user_id, 'event_participant_joined', {
+            event_id: event.id,
+            title: event.title,
+            participant_id: result.participant_id,
+            guest_name: result.guest_name,
+          });
+        }
+      } catch (notifErr) {
+        console.warn('[EventsController] Failed to create guest join notification:', (notifErr as any)?.message);
+      }
+
       // Generate a guest token so the guest can participate in games and chat via REST/WebSocket
       const { signGuestToken } = await import('../utils/jwt');
       const guest_token = signGuestToken({
@@ -212,6 +247,33 @@ export class EventsController {
         userId: req.user!.userId,
         participantId: result.participant_id,
       });
+
+      // Notify the user who accepted the invitation and the event creator.
+      try {
+        await notificationsService.create(req.user!.userId, 'event_joined', {
+          event_id: event.id,
+          title: event.title,
+          participant_id: result.participant_id,
+        });
+
+        const creator = await queryOne<{ user_id: string }>(
+          `SELECT om.user_id
+           FROM organization_members om
+           WHERE om.id = $1`,
+          [event.created_by_member_id]
+        );
+        if (creator?.user_id && creator.user_id !== req.user!.userId) {
+          await notificationsService.create(creator.user_id, 'event_participant_joined', {
+            event_id: event.id,
+            title: event.title,
+            participant_id: result.participant_id,
+            user_id: req.user!.userId,
+          });
+        }
+      } catch (notifErr) {
+        console.warn('[EventsController] Failed to create join notifications (acceptInvitation):', (notifErr as any)?.message);
+      }
+
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -240,6 +302,33 @@ export class EventsController {
         userId: req.user!.userId,
         participantId: result.participant_id,
       });
+
+      // Notify the joining user and the event creator.
+      try {
+        await notificationsService.create(req.user!.userId, 'event_joined', {
+          event_id: event.id,
+          title: event.title,
+          participant_id: result.participant_id,
+        });
+
+        const creator = await queryOne<{ user_id: string }>(
+          `SELECT om.user_id
+           FROM organization_members om
+           WHERE om.id = $1`,
+          [event.created_by_member_id]
+        );
+        if (creator?.user_id && creator.user_id !== req.user!.userId) {
+          await notificationsService.create(creator.user_id, 'event_participant_joined', {
+            event_id: event.id,
+            title: event.title,
+            participant_id: result.participant_id,
+            user_id: req.user!.userId,
+          });
+        }
+      } catch (notifErr) {
+        console.warn('[EventsController] Failed to create join notifications (join):', (notifErr as any)?.message);
+      }
+
       res.json(result);
     } catch (err) { next(err); }
   }
