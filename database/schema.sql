@@ -190,6 +190,8 @@ CREATE TABLE participants (
   created_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 CREATE INDEX idx_participants_event ON participants(event_id);
+-- Optimize queries checking if participants were active within a time range
+CREATE INDEX idx_participants_active_range ON participants(event_id, left_at, joined_at);
 -- Prevent duplicate active participants
 CREATE UNIQUE INDEX idx_participants_active ON participants(event_id, organization_member_id) WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
 
@@ -268,6 +270,8 @@ CREATE TABLE game_actions (
 );
 CREATE INDEX idx_game_actions_session ON game_actions(game_session_id);
 CREATE INDEX idx_game_actions_round ON game_actions(round_id);
+-- Prevent double voting/actions: a participant can only submit one action of a specific type per round
+CREATE UNIQUE INDEX idx_game_actions_unique ON game_actions(round_id, participant_id, action_type);
 
 -- ─── Game State Snapshots ───
 CREATE TABLE game_state_snapshots (

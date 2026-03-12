@@ -523,6 +523,17 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_email_verifications_otp ON email_verifications(otp_code) WHERE otp_code IS NOT NULL;
     `,
   },
+  {
+    version: 7,
+    name: 'bugfixes_indexes_and_constraints',
+    sql: `
+      -- Optimize queries checking if participants were active within a time range
+      CREATE INDEX IF NOT EXISTS idx_participants_active_range ON participants(event_id, left_at, joined_at);
+
+      -- Prevent double voting/actions: a participant can only submit one action of a specific type per round
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_game_actions_unique ON game_actions(round_id, participant_id, action_type);
+    `,
+  },
 ];
 
 /**
