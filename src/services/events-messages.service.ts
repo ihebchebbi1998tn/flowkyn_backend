@@ -57,8 +57,9 @@ export class EventMessagesService {
     const { page, limit, offset } = parsePagination(pagination);
     const [data, [{ count }]] = await Promise.all([
       query(
-        `SELECT em.*, p.guest_name, p.participant_type,
-                u.name as user_name, u.id as user_id, u.avatar_url as user_avatar
+        `SELECT em.*, p.guest_name, p.participant_type, p.guest_avatar,
+                u.name as user_name, u.id as user_id,
+                COALESCE(u.avatar_url, p.guest_avatar) as avatar_url
          FROM event_messages em
          LEFT JOIN participants p ON p.id = em.participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
