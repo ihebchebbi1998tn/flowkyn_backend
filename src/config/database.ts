@@ -24,13 +24,21 @@ pool.on('error', (err) => {
 });
 
 // Log pool stats periodically in dev
+let poolMonitorInterval: NodeJS.Timeout | undefined;
 if (env.nodeEnv === 'development') {
-  setInterval(() => {
+  poolMonitorInterval = setInterval(() => {
     const { totalCount, idleCount, waitingCount } = pool;
     if (waitingCount > 0) {
       console.warn(`⚠️ DB Pool: total=${totalCount} idle=${idleCount} waiting=${waitingCount}`);
     }
   }, 30000);
+}
+
+export function stopPoolMonitor(): void {
+  if (poolMonitorInterval) {
+    clearInterval(poolMonitorInterval);
+    poolMonitorInterval = undefined;
+  }
 }
 
 export async function query<T = any>(text: string, params?: any[]): Promise<T[]> {

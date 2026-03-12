@@ -59,25 +59,30 @@ export class GamesService {
     const session = await this.getSession(sessionId);
     if (session.status !== 'active') throw new AppError('Game session is not active', 400, 'SESSION_NOT_ACTIVE');
 
-    const round = await queryOne(
-      'SELECT id, status FROM game_rounds WHERE id = $1 AND game_session_id = $2',
-      [roundId, sessionId]
-    );
-    if (!round) throw new AppError('Round not found in this session', 404, 'NOT_FOUND');
-    if (round.status !== 'active') throw new AppError('This round is no longer active', 400, 'ROUND_NOT_ACTIVE');
+    // Use transaction to prevent concurrent round-end race conditions
+    const action = await transaction(async (client) => {
+      const { rows: [round] } = await client.query(
+        'SELECT id, status FROM game_rounds WHERE id = $1 AND game_session_id = $2 FOR UPDATE',
+        [roundId, sessionId]
+      );
+      if (!round) throw new AppError('Round not found in this session', 404, 'NOT_FOUND');
+      if (round.status !== 'active') throw new AppError('This round is no longer active', 400, 'ROUND_NOT_ACTIVE');
 
-    const validParticipant = await queryOne(
-      `SELECT p.id FROM participants p
-       WHERE p.id = $1 AND p.event_id = $2 AND p.left_at IS NULL`,
-      [participantId, session.event_id]
-    );
-    if (!validParticipant) throw new AppError('Participant not found in this game session', 403, 'NOT_PARTICIPANT');
+      const { rows: [validParticipant] } = await client.query(
+        `SELECT p.id FROM participants p
+         WHERE p.id = $1 AND p.event_id = $2 AND p.left_at IS NULL`,
+        [participantId, session.event_id]
+      );
+      if (!validParticipant) throw new AppError('Participant not found in this game session', 403, 'NOT_PARTICIPANT');
 
-    const [action] = await query(
-      `INSERT INTO game_actions (id, game_session_id, round_id, participant_id, action_type, payload, created_at)
-       VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
-      [uuid(), sessionId, roundId, participantId, actionType, JSON.stringify(payload)]
-    );
+      const { rows: [newAction] } = await client.query(
+        `INSERT INTO game_actions (id, game_session_id, round_id, participant_id, action_type, payload, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
+        [uuid(), sessionId, roundId, participantId, actionType, JSON.stringify(payload)]
+      );
+      return newAction;
+    });
+    
     return action;
   }
 

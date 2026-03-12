@@ -19,8 +19,12 @@ for (const key of REQUIRED_VARS) {
 export const env = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  baseUrl: process.env.BASE_URL || `http://localhost:${process.env.PORT || '3000'}`,
-  frontendUrl: process.env.FRONTEND_URL || 'http://localhost:5173',
+  baseUrl: process.env.NODE_ENV === 'production' 
+    ? (process.env.BASE_URL || (() => { throw new Error('BASE_URL required in production'); })())
+    : process.env.BASE_URL || `http://localhost:${process.env.PORT || '3000'}`,
+  frontendUrl: process.env.NODE_ENV === 'production'
+    ? (process.env.FRONTEND_URL || (() => { throw new Error('FRONTEND_URL required in production'); })())
+    : process.env.FRONTEND_URL || 'http://localhost:5173',
 
   databaseUrl: process.env.DATABASE_URL!,
 
@@ -34,7 +38,7 @@ export const env = {
   smtp: {
     host: process.env.SMTP_HOST || 'ssl0.ovh.ca',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
-    secure: process.env.SMTP_SECURE === 'true', // false for port 587 (STARTTLS), true for port 465 (SSL)
+    secure: process.env.SMTP_SECURE === 'true',
     user: process.env.SMTP_USER || 'noreply@flowkyn.com',
     pass: process.env.SMTP_PASS || '',
   },
@@ -43,7 +47,9 @@ export const env = {
   uploadsDir: process.env.UPLOADS_DIR || path.resolve(process.cwd(), 'flowkyn_uploads'),
 
   cors: {
-    origin: process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.NODE_ENV === 'production'
+      ? (process.env.CORS_ORIGIN || (() => { throw new Error('CORS_ORIGIN required in production'); })())
+      : process.env.CORS_ORIGIN || 'http://localhost:5173',
   },
 
   rateLimit: {

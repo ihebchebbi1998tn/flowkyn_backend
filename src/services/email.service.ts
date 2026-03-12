@@ -11,12 +11,12 @@ import {
 } from '../emails';
 
 const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
-  host: "ssl0.ovh.net",
-  port: 465,
-  secure: true,
+  host: env.smtp.host,
+  port: env.smtp.port,
+  secure: env.smtp.secure,
   auth: {
-    user: "test_email_sending@spadadibattaglia.com",
-    pass: "Dadouhibou2025",
+    user: env.smtp.user,
+    pass: env.smtp.pass,
   },
   connectionTimeout: 10000,
   greetingTimeout: 10000,
@@ -24,10 +24,33 @@ const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
 };
 const transporter = nodemailer.createTransport(transportOptions);
 
-// Verify SMTP connection on startup
-transporter.verify()
-  .then(() => console.log('✅ SMTP connection verified successfully'))
-  .catch((err) => console.warn(`⚠️ SMTP verification failed: ${err.message}`));
+// Verify SMTP connection on startup with retry logic
+let smtpVerified = false;
+async function verifySMTPWithRetry(attempts = 3): Promise<void> {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      await transporter.verify();
+      console.log('✅ SMTP connection verified successfully');
+      smtpVerified = true;
+      return;
+    } catch (err: any) {
+      console.warn(`⚠️ SMTP verification failed (attempt ${i + 1}/${attempts}): ${err.message}`);
+      if (i < attempts - 1) {
+        // Wait 2 seconds before retrying
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+  }
+  console.error('❌ SMTP connection could not be verified after retries');
+}
+
+// Try to verify SMTP on startup (non-blocking)
+verifySMTPWithRetry().catch(err => {
+  console.error('Fatal SMTP error:', err);
+});
+
+// Export flag for testing
+export const isSMTPVerified = () => smtpVerified;
 
 type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation';
 

@@ -2,17 +2,50 @@
  * Game namespace handlers — sessions, rounds, actions with DB persistence.
  */
 import { Namespace } from 'socket.io';
+import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
 import { checkRateLimit } from './index';
 import { GamesService } from '../services/games.service';
-import { queryOne } from '../config/database';
+import { queryOne, transaction } from '../config/database';
 
 const gamesService = new GamesService();
 
-function validateFields(data: any, fields: string[]): boolean {
-  if (!data || typeof data !== 'object') return false;
-  return fields.every(f => typeof data[f] === 'string' && data[f].length > 0);
-}
+// Zod schemas for game socket events
+const gameJoinSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+});
+
+const gameRoundSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+});
+
+const gameRoundNumberSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  roundNumber: z.number().int().min(1, 'Invalid round number'),
+});
+
+const gameActionSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  roundId: z.string().uuid('Invalid round ID'),
+  actionType: z.string().trim().min(1).max(50).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid action type'),
+  payload: z.record(z.unknown()).refine(
+    (val) => JSON.stringify(val).length <= 10000,
+    { message: 'Payload too large (max 10KB)' }
+  ).optional(),
+});
+
+const gameRoundEndSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  roundId: z.string().uuid('Invalid round ID'),
+});
+
+const gameEndSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+});
+
+const gameStateSyncSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+});
 
 /** Verify the user is a participant in the game session's event and return their participant ID */
 async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
@@ -61,8 +94,10 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Join game session room ───
     socket.on('game:join', async (data: { sessionId: string }, ack) => {
-      if (!validateFields(data, ['sessionId'])) {
-        socket.emit('error', { message: 'Invalid session ID', code: 'VALIDATION' });
+      const validation = gameJoinSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        ack?.({ ok: false, error: 'Invalid session ID' });
         return;
       }
 
@@ -98,7 +133,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Leave game session ───
     socket.on('game:leave', (data: { sessionId: string }) => {
-      if (!validateFields(data, ['sessionId'])) return;
+      const validation = gameRoundSchema.safeParse(data);
+      if (!validation.success) return;
       const roomId = `game:${data.sessionId}`;
       socket.leave(roomId);
       joinedSessions.delete(data.sessionId);
@@ -112,7 +148,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Start game (only admins/moderators) ───
     socket.on('game:start', async (data: { sessionId: string }) => {
-      if (!validateFields(data, ['sessionId'])) return;
+      const validation = gameRoundSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        return;
+      }
 
       try {
         // BUG FIX: Only org admins/moderators can start games
@@ -143,9 +183,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Start next round (only admins/moderators) ───
     socket.on('game:round_start', async (data: { sessionId: string; roundNumber: number }) => {
-      if (!validateFields(data, ['sessionId'])) return;
-      if (typeof data.roundNumber !== 'number' || data.roundNumber < 1) {
-        socket.emit('error', { message: 'Invalid round number', code: 'VALIDATION' });
+      const validation = gameRoundNumberSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
 
@@ -172,8 +212,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Player action (persisted to DB, broadcast) ───
     socket.on('game:action', async (data: { sessionId: string; roundId: string; actionType: string; payload: any }) => {
-      if (!validateFields(data, ['sessionId', 'roundId', 'actionType'])) {
-        socket.emit('error', { message: 'Invalid action data', code: 'VALIDATION' });
+      const validation = gameActionSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
       if (!checkRateLimit(socket, 'game:action')) return;
@@ -183,13 +224,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
-          return;
-        }
-
-        // Limit payload size
-        const payloadStr = JSON.stringify(data.payload || {});
-        if (payloadStr.length > 10000) {
-          socket.emit('error', { message: 'Payload too large', code: 'VALIDATION' });
           return;
         }
 
@@ -214,22 +248,30 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── End round (persisted to DB) ───
     socket.on('game:round_end', async (data: { sessionId: string; roundId: string }) => {
-      if (!validateFields(data, ['sessionId', 'roundId'])) return;
+      const validation = gameRoundEndSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        return;
+      }
 
       try {
-        // BUG FIX: Only admins can end rounds, and persist to DB
+        // BUG FIX: Only admins can end rounds, and persist to DB with transaction
         const admin = await isEventAdmin(data.sessionId, user.userId);
         if (!admin) {
           socket.emit('error', { message: 'Only event administrators can end rounds', code: 'FORBIDDEN' });
           return;
         }
 
-        // BUG FIX: Actually persist round end to DB (was previously broadcast-only)
-        await queryOne(
-          `UPDATE game_rounds SET status = 'finished', ended_at = NOW()
-           WHERE id = $1 AND game_session_id = $2 AND status = 'active' RETURNING id`,
-          [data.roundId, data.sessionId]
-        );
+        // Use transaction to ensure round wasn't already ended concurrently
+        await transaction(async (client) => {
+          const { rows: [round] } = await client.query(
+            `UPDATE game_rounds SET status = 'finished', ended_at = NOW()
+             WHERE id = $1 AND game_session_id = $2 AND status = 'active' RETURNING id`,
+            [data.roundId, data.sessionId]
+          );
+          if (!round) throw new Error('Round not found or already finished');
+          return round;
+        });
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:round_ended', {
           sessionId: data.sessionId,
@@ -243,7 +285,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── End game (only admins, persisted — calculates results) ───
     socket.on('game:end', async (data: { sessionId: string }) => {
-      if (!validateFields(data, ['sessionId'])) return;
+      const validation = gameEndSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        return;
+      }
 
       try {
         // BUG FIX: Only admins can end games
@@ -268,7 +314,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Request current game state (snapshot) ───
     socket.on('game:state_sync', async (data: { sessionId: string }) => {
-      if (!validateFields(data, ['sessionId'])) return;
+      const validation = gameStateSyncSchema.safeParse(data);
+      if (!validation.success) {
+        socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        return;
+      }
 
       try {
         // Verify user is a participant before sharing state

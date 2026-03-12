@@ -2,7 +2,7 @@ import { createServer } from 'http';
 import { app } from './app';
 import { env } from './config/env';
 import { initializeSocket } from './socket';
-import { pool, checkConnection } from './config/database';
+import { pool, checkConnection, stopPoolMonitor } from './config/database';
 import { runMigrations } from './config/migrate';
 import { startCleanupCron, stopCleanupCron } from './services/cleanup.service';
 import { seedSuperAdmin } from './config/seedAdmin';
@@ -48,6 +48,9 @@ async function bootstrap() {
     if (isShuttingDown) return; // Prevent double shutdown
     isShuttingDown = true;
     console.log(`\n⏳ ${signal} received — shutting down gracefully...`);
+
+    stopPoolMonitor();
+    console.log('  ✅ Pool monitor stopped');
 
     stopCleanupCron();
     console.log('  ✅ Cleanup cron stopped');
