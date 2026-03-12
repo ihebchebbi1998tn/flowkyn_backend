@@ -17,7 +17,7 @@ export class LeaderboardsController {
 
   async getEntries(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const entries = await leaderboardsService.getEntries(req.params.id);
+      const entries = await leaderboardsService.getEntries(req.params.id, req.query as any);
       res.json(entries);
     } catch (err) { next(err); }
   }
