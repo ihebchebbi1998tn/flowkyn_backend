@@ -7,6 +7,7 @@
  * POST  /users/avatar            — Upload avatar image
  * POST  /users/change-password   — Change password (requires current password)
  * POST  /users/complete-onboarding — Mark onboarding as completed
+ * POST  /users/onboarding-invites — Send team invitations during onboarding
  * GET   /users/sessions          — List active sessions
  * DELETE /users/sessions          — Revoke all sessions
  * DELETE /users/sessions/:sessionId — Revoke a specific session
@@ -35,6 +36,7 @@ router.delete('/me', authenticate, authRateLimiter, ctrl.deleteAccount);
 router.post('/avatar', authenticate, avatarUpload.single('avatar'), ctrl.uploadAvatar);
 router.post('/change-password', authenticate, validate(changePasswordSchema), ctrl.changePassword);
 router.post('/complete-onboarding', authenticate, ctrl.completeOnboarding);
+router.post('/onboarding-invites', authenticate, ctrl.sendOnboardingInvites);
 
 // Session management
 router.get('/sessions', authenticate, sessionsCtrl.listSessions);

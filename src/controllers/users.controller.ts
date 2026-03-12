@@ -74,6 +74,30 @@ export class UsersController {
     } catch (err) { next(err); }
   }
 
+  /** POST /users/onboarding-invites — Send team invitations during onboarding */
+  async sendOnboardingInvites(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { orgId, invites, lang } = req.body;
+      const userId = req.user!.userId;
+
+      if (!orgId || !Array.isArray(invites)) {
+        throw new AppError('Invalid request: orgId and invites array required', 400, 'INVALID_REQUEST');
+      }
+
+      // User must be the organization owner to invite during onboarding
+      const isMember = await queryOne<{ role: string }>(
+        `SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2`,
+        [orgId, userId]
+      );
+
+      if (!isMember) throw new AppError('Not a member of this organization', 403, 'FORBIDDEN');
+
+      const result = await usersService.sendOnboardingInvites(orgId, userId, invites, lang);
+      await audit.create(orgId, userId, 'ONBOARDING_SEND_INVITES', { count: invites.length });
+      res.json(result);
+    } catch (err) { next(err); }
+  }
+
   async listUsers(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const { page, limit, offset } = parsePagination(req.query as any);
