@@ -205,22 +205,22 @@ Organizations use a hierarchical role system:
       `,
       contact: {
         name: 'Flowkyn Team',
-        url: 'https://flowkyn.com',
-        email: 'support@flowkyn.com',
+        url: process.env.WEBSITE_URL || 'https://flowkyn.com',
+        email: process.env.SUPPORT_EMAIL || 'support@flowkyn.com',
       },
       license: {
         name: 'Proprietary',
-        url: 'https://flowkyn.com/terms',
+        url: (process.env.WEBSITE_URL || 'https://flowkyn.com') + '/terms',
       },
     },
     externalDocs: {
       description: 'Flowkyn Platform Documentation',
-      url: 'https://docs.flowkyn.com',
+      url: process.env.DOCS_URL || 'https://docs.flowkyn.com',
     },
     servers: [
-      { url: 'https://api.flowkyn.com/v1', description: '🟢 Production' },
-      { url: 'https://staging-api.flowkyn.com/v1', description: '🟡 Staging' },
-      { url: 'http://localhost:3000/v1', description: '🔵 Local Development' },
+      { url: process.env.PRODUCTION_API_URL || 'https://api.flowkyn.com/v1', description: '🟢 Production' },
+      { url: process.env.STAGING_API_URL || 'https://staging-api.flowkyn.com/v1', description: '🟡 Staging' },
+      { url: `http://localhost:${process.env.PORT || 3000}/v1`, description: '🔵 Local Development' },
     ],
     components: {
       securitySchemes: {

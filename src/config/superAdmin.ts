@@ -6,10 +6,13 @@ import { AuthRequest } from '../types';
  * Only env-configured emails can access admin endpoints.
  */
 /**
- * Super admin emails. Defaults include support@flowkyn.com.
+ * Super admin emails. Defaults include SUPER_ADMIN_DEFAULT_EMAIL env var, or support@flowkyn.com.
  * Add more via SUPER_ADMIN_EMAILS env var (comma-separated).
  */
-const DEFAULT_SUPER_ADMINS = ['support@flowkyn.com'];
+const DEFAULT_SUPER_ADMINS = (process.env.SUPER_ADMIN_DEFAULT_EMAIL || 'support@flowkyn.com')
+  .split(',')
+  .map(e => e.trim().toLowerCase())
+  .filter(Boolean);
 
 const SUPER_ADMIN_EMAILS = [
   ...DEFAULT_SUPER_ADMINS,

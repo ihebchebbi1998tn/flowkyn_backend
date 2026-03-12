@@ -31,6 +31,7 @@ export interface SystemMetrics {
 }
 
 const MAX_LOGS = 500;
+const MAX_ENDPOINTS = 500; // Prevent unbounded growth of endpoint stats
 const logs: RequestLog[] = [];
 let totalRequests = 0;
 let totalErrors = 0;
@@ -44,7 +45,7 @@ let currentMinute = Math.floor(Date.now() / 60000);
 // Status code counters
 const statusCodes: Record<string, number> = {};
 
-// Endpoint stats
+// Endpoint stats — with size limit to prevent memory leaks
 const endpointStats: Map<string, { count: number; totalMs: number }> = new Map();
 
 export function addLog(log: RequestLog) {
@@ -65,6 +66,19 @@ export function addLog(log: RequestLog) {
   ep.count++;
   ep.totalMs += log.duration;
   endpointStats.set(key, ep);
+
+  // Prevent unbounded growth: if exceeding limit, remove least accessed endpoint
+  if (endpointStats.size > MAX_ENDPOINTS) {
+    let leastUsedKey: string | null = null;
+    let leastCount = Infinity;
+    for (const [k, v] of endpointStats.entries()) {
+      if (v.count < leastCount) {
+        leastCount = v.count;
+        leastUsedKey = k;
+      }
+    }
+    if (leastUsedKey) endpointStats.delete(leastUsedKey);
+  }
 
   // Per-minute bucket
   const min = Math.floor(Date.now() / 60000);

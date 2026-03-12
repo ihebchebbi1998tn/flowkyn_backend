@@ -6,8 +6,8 @@
  * and is auto-added to the SUPER_ADMIN_EMAILS allowlist.
  * 
  * Default credentials (change password after first login!):
- *   Email:    support@flowkyn.com
- *   Password: Flowkyn2026
+ *   Email:    support@flowkyn.com (or SEED_ADMIN_EMAIL env var)
+ *   Password: Flowkyn2026 (or SEED_ADMIN_PASSWORD env var)
  */
 
 import { v4 as uuid } from 'uuid';
@@ -21,9 +21,9 @@ interface SeedAdminConfig {
 }
 
 const DEFAULT_ADMIN: SeedAdminConfig = {
-  email: 'support@flowkyn.com',
-  password: 'Flowkyn2026',
-  name: 'Flowkyn Admin',
+  email: process.env.SEED_ADMIN_EMAIL || 'support@flowkyn.com',
+  password: process.env.SEED_ADMIN_PASSWORD || 'Flowkyn2026',
+  name: process.env.SEED_ADMIN_NAME || 'Flowkyn Admin',
 };
 
 /**
