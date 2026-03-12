@@ -154,15 +154,28 @@ export class AuthService {
   /**
    * Resend verification email for a pending user.
    * Deletes any existing verification record and creates a new one.
+   * Rate limited: max once per 2 minutes.
    * 
    * @throws {AppError} 404 if email not found
    * @throws {AppError} 400 if user is already verified
+   * @throws {AppError} 429 if resend attempted within 2 minutes
    */
   async resendVerification(email: string, lang?: string) {
     const user = await queryOne<UserRow>('SELECT id, name, status, language FROM users WHERE email = $1', [email]);
     if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
     if (user.status === 'active') throw new AppError('Email is already verified', 400, 'AUTH_ALREADY_VERIFIED');
     if (user.status === 'suspended') throw new AppError('Account is suspended', 403, 'AUTH_ACCOUNT_SUSPENDED');
+
+    // Check rate limit: max once per 2 minutes
+    const recentVerification = await queryOne<{ created_at: string }>(
+      `SELECT created_at FROM email_verifications 
+       WHERE user_id = $1 AND created_at > NOW() - INTERVAL '2 minutes'
+       ORDER BY created_at DESC LIMIT 1`,
+      [user.id]
+    );
+    if (recentVerification) {
+      throw new AppError('Please wait before requesting a new verification code', 429, 'RATE_LIMITED');
+    }
 
     const token = crypto.randomBytes(32).toString('hex');
     const otpCode = String(Math.floor(100000 + Math.random() * 900000));
