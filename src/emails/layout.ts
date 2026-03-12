@@ -112,7 +112,7 @@ export function emailLayout(data: LayoutData): string {
         <table class="container" role="presentation" cellpadding="0" cellspacing="0" style="margin-bottom:8px;">
           <tr>
             <td align="center" style="padding: 16px 0;">
-              <span style="font-size:24px;font-weight:800;color:#7c3aed;letter-spacing:-0.5px;">Flowkyn</span>
+              <img src="https://www.flowkyn.com/assets/logo-B300Ujwg.png" alt="Flowkyn Logo" style="height:48px;width:auto;display:block;margin:auto;" />
             </td>
           </tr>
         </table>
