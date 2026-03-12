@@ -1,6 +1,6 @@
 /**
  * Periodic cleanup service — removes expired sessions, tokens, verifications,
- * invitations, and old analytics/audit data beyond retention period.
+ * invitations, old analytics/audit data, and purges soft-deleted users beyond retention.
  */
 import { rawQuery } from '../config/database';
 
@@ -14,6 +14,7 @@ export async function runCleanup(): Promise<{
   analytics: number;
   auditLogs: number;
   notifications: number;
+  deletedUsers: number;
 }> {
   const [
     sessions,
@@ -24,23 +25,18 @@ export async function runCleanup(): Promise<{
     analytics,
     auditLogs,
     notifications,
+    deletedUsers,
   ] = await Promise.all([
-    // Expired user sessions
     rawQuery('DELETE FROM user_sessions WHERE expires_at < NOW()'),
-    // Expired password reset tokens
     rawQuery('DELETE FROM password_resets WHERE expires_at < NOW()'),
-    // Expired email verification tokens
     rawQuery('DELETE FROM email_verifications WHERE expires_at < NOW()'),
-    // Expired organization invitations (pending + expired)
     rawQuery("DELETE FROM organization_invitations WHERE expires_at < NOW() AND status = 'pending'"),
-    // Expired event invitations (pending + expired)
     rawQuery("DELETE FROM event_invitations WHERE expires_at < NOW() AND status = 'pending'"),
-    // Retain analytics events for 90 days
     rawQuery("DELETE FROM analytics_events WHERE created_at < NOW() - INTERVAL '90 days'"),
-    // Retain audit logs for 180 days
     rawQuery("DELETE FROM audit_logs WHERE created_at < NOW() - INTERVAL '180 days'"),
-    // Retain read notifications for 60 days
     rawQuery("DELETE FROM notifications WHERE read_at IS NOT NULL AND created_at < NOW() - INTERVAL '60 days'"),
+    // Purge soft-deleted users after 30 days
+    rawQuery("DELETE FROM users WHERE status = 'deleted' AND updated_at < NOW() - INTERVAL '30 days'"),
   ]);
 
   return {
@@ -52,6 +48,7 @@ export async function runCleanup(): Promise<{
     analytics: analytics.rowCount ?? 0,
     auditLogs: auditLogs.rowCount ?? 0,
     notifications: notifications.rowCount ?? 0,
+    deletedUsers: deletedUsers.rowCount ?? 0,
   };
 }
 
@@ -63,19 +60,9 @@ export function startCleanupCron(intervalMs = 30 * 60 * 1000): void {
 
   console.log(`🧹 Cleanup cron started (every ${intervalMs / 60000}m)`);
 
-  // Run once immediately on startup
   runCleanup()
     .then((c) => {
-      const parts = [
-        `sessions=${c.sessions}`,
-        `resets=${c.resets}`,
-        `verifications=${c.verifications}`,
-        `orgInvites=${c.orgInvitations}`,
-        `eventInvites=${c.eventInvitations}`,
-        `analytics=${c.analytics}`,
-        `auditLogs=${c.auditLogs}`,
-        `notifications=${c.notifications}`,
-      ];
+      const parts = Object.entries(c).map(([k, v]) => `${k}=${v}`);
       console.log(`🧹 Initial cleanup: ${parts.join(' ')}`);
     })
     .catch((err) => console.error('🧹 Cleanup error:', err));
@@ -85,16 +72,7 @@ export function startCleanupCron(intervalMs = 30 * 60 * 1000): void {
       const c = await runCleanup();
       const total = Object.values(c).reduce((a, b) => a + b, 0);
       if (total > 0) {
-        const parts = [
-          `sessions=${c.sessions}`,
-          `resets=${c.resets}`,
-          `verifications=${c.verifications}`,
-          `orgInvites=${c.orgInvitations}`,
-          `eventInvites=${c.eventInvitations}`,
-          `analytics=${c.analytics}`,
-          `auditLogs=${c.auditLogs}`,
-          `notifications=${c.notifications}`,
-        ];
+        const parts = Object.entries(c).map(([k, v]) => `${k}=${v}`);
         console.log(`🧹 Cleanup: ${parts.join(' ')}`);
       }
     } catch (err) {

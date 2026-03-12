@@ -1,5 +1,6 @@
 /**
  * Event namespace handlers — chat, presence, typing, with DB persistence.
+ * Includes avatar_url in chat messages for proper display.
  */
 import { Namespace } from 'socket.io';
 import { AuthenticatedSocket } from './types';
@@ -16,23 +17,34 @@ function validateFields(data: any, fields: string[]): boolean {
   return fields.every(f => typeof data[f] === 'string' && data[f].length > 0);
 }
 
-/** Verify a user is an active participant in an event and return their participant ID + display name */
-async function verifyParticipant(eventId: string, userId: string): Promise<{ participantId: string; memberId: string | null; displayName: string } | null> {
+/** Verify a user is an active participant in an event and return their participant ID + display name + avatar */
+async function verifyParticipant(eventId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string; memberId: string | null; displayName: string; avatarUrl: string | null } | null> {
+  // If this is a guest socket, use the guest payload directly
+  if (socket?.isGuest && socket.guestPayload) {
+    const guestRow = await queryOne<{ id: string; guest_name: string; guest_avatar: string | null }>(
+      `SELECT p.id, p.guest_name, p.guest_avatar FROM participants p
+       WHERE p.event_id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
+      [eventId, socket.guestPayload.participantId]
+    );
+    if (guestRow) {
+      return { participantId: guestRow.id, memberId: null, displayName: guestRow.guest_name || 'Guest', avatarUrl: guestRow.guest_avatar || null };
+    }
+    return null;
+  }
+
   // First try: match via organization_members (registered users)
-  const memberRow = await queryOne<{ id: string; member_id: string | null; display_name: string }>(
+  const memberRow = await queryOne<{ id: string; member_id: string | null; display_name: string; avatar_url: string | null }>(
     `SELECT p.id, p.organization_member_id as member_id,
-            COALESCE(u.name, p.guest_name, 'Unknown') as display_name
+            COALESCE(u.name, p.guest_name, 'Unknown') as display_name,
+            u.avatar_url
      FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN users u ON u.id = om.user_id
      WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [eventId, userId]
   );
-  if (memberRow) return { participantId: memberRow.id, memberId: memberRow.member_id, displayName: memberRow.display_name };
+  if (memberRow) return { participantId: memberRow.id, memberId: memberRow.member_id, displayName: memberRow.display_name, avatarUrl: memberRow.avatar_url || null };
 
-  // Fallback: guest participants don't have organization_member_id
-  // Guests authenticate via a temporary token — they won't have a userId match here
-  // This path is only reachable if a guest somehow gets an auth token (not typical)
   return null;
 }
 
@@ -54,11 +66,23 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
       try {
         // Verify user is a participant in this event
-        const participant = await verifyParticipant(data.eventId, user.userId);
+        const participant = await verifyParticipant(data.eventId, user.userId, socket);
+        // Also allow event creator (organizer) to join without being a participant
+        let isOrganizer = false;
         if (!participant) {
-          socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
-          ack?.({ ok: false, error: 'Not a participant' });
-          return;
+          const eventRow = await queryOne<{ created_by_member_id: string }>(
+            `SELECT e.created_by_member_id FROM events e
+             JOIN organization_members om ON om.id = e.created_by_member_id
+             WHERE e.id = $1 AND om.user_id = $2`,
+            [data.eventId, user.userId]
+          );
+          if (eventRow) {
+            isOrganizer = true;
+          } else {
+            socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+            ack?.({ ok: false, error: 'Not a participant' });
+            return;
+          }
         }
 
         const roomId = `event:${data.eventId}`;
@@ -78,7 +102,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
           onlineUserIds: getPresence(data.eventId),
         });
 
-        ack?.({ ok: true, data: { participantId: participant.participantId } });
+        ack?.({ ok: true, data: { participantId: participant?.participantId || 'organizer', isOrganizer } });
       } catch (err: any) {
         console.error(`[Events] event:join error:`, err.message);
         socket.emit('error', { message: 'Failed to join event room', code: 'INTERNAL' });
@@ -109,11 +133,39 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
       if (!checkRateLimit(socket, 'chat:message')) return;
 
-      // BUG FIX: Verify the user is a participant and use their ACTUAL participant ID
-      // Previously accepted participantId from client, allowing impersonation
-      const participant = await verifyParticipant(data.eventId, user.userId);
+      // Verify the user is a participant and use their ACTUAL participant ID
+      const participant = await verifyParticipant(data.eventId, user.userId, socket);
       if (!participant) {
-        socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+        // Allow organizer to chat too
+        const eventRow = await queryOne<{ id: string }>(
+          `SELECT e.id FROM events e
+           JOIN organization_members om ON om.id = e.created_by_member_id
+           WHERE e.id = $1 AND om.user_id = $2`,
+          [data.eventId, user.userId]
+        );
+        if (!eventRow) {
+          socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+          return;
+        }
+        // Organizer chatting — get their name
+        const userRow = await queryOne<{ name: string; avatar_url: string | null }>(
+          `SELECT name, avatar_url FROM users WHERE id = $1`, [user.userId]
+        );
+        const message = sanitizeText(data.message, 2000);
+        if (message.length === 0) {
+          socket.emit('error', { message: 'Message cannot be empty', code: 'VALIDATION' });
+          return;
+        }
+        // Broadcast organizer message (not persisted to participant messages since they're not a participant)
+        eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
+          id: `org-${Date.now()}`,
+          participantId: 'organizer',
+          senderName: userRow?.name || 'Organizer',
+          senderAvatarUrl: userRow?.avatar_url || null,
+          message,
+          userId: user.userId,
+          timestamp: new Date().toISOString(),
+        });
         return;
       }
 
@@ -129,11 +181,12 @@ export function setupEventHandlers(eventsNs: Namespace) {
         const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
 
         // Broadcast to all in room (including sender for confirmation)
-        // IMPORTANT: Include senderName so frontend can display it without extra lookups
+        // Include senderName and senderAvatarUrl for proper display
         eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
           id: saved.id,
           participantId: participant.participantId,
           senderName: participant.displayName,
+          senderAvatarUrl: participant.avatarUrl,
           message,
           userId: user.userId,
           timestamp: saved.created_at,
@@ -154,7 +207,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
       // Resolve display name once per connection
       if (!cachedDisplayName) {
-        const participant = await verifyParticipant(data.eventId, user.userId);
+        const participant = await verifyParticipant(data.eventId, user.userId, socket);
         cachedDisplayName = participant?.displayName || 'Someone';
       }
 

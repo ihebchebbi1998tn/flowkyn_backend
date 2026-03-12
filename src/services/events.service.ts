@@ -87,10 +87,12 @@ export class EventsService {
       `SELECT e.id, e.title, e.description, e.event_mode, e.visibility,
               e.max_participants, e.start_time, e.end_time, e.status,
               e.created_at, es.allow_guests,
-              o.name as organization_name, o.logo_url as organization_logo
+              o.name as organization_name, o.logo_url as organization_logo,
+              om_creator.user_id as created_by_user_id
        FROM events e
        LEFT JOIN event_settings es ON es.event_id = e.id
        LEFT JOIN organizations o ON o.id = e.organization_id
+       LEFT JOIN organization_members om_creator ON om_creator.id = e.created_by_member_id
        WHERE e.id = $1`,
       [eventId]
     );

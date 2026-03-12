@@ -22,7 +22,6 @@ const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
   greetingTimeout: 10000,
   socketTimeout: 15000,
 };
-
 const transporter = nodemailer.createTransport(transportOptions);
 
 // Verify SMTP connection on startup
@@ -46,7 +45,7 @@ interface EmailOptions {
 function buildEmail(type: EmailType, data: Record<string, string>, lang?: string): { subject: string; html: string } {
   switch (type) {
     case 'verify_account':
-      return verifyAccountTemplate({ link: data.link, name: data.name, lang });
+      return verifyAccountTemplate({ link: data.link, name: data.name, otpCode: data.otpCode, lang });
     case 'reset_password':
       return resetPasswordTemplate({ link: data.link, name: data.name, lang });
     case 'organization_invitation':
@@ -59,10 +58,14 @@ function buildEmail(type: EmailType, data: Record<string, string>, lang?: string
 export async function sendEmail(options: EmailOptions): Promise<void> {
   const { subject, html } = buildEmail(options.type, options.data, options.lang);
 
-  // Password is now hardcoded
+  // Skip sending if SMTP not configured (dev mode)
+  if (!env.smtp.host || !env.smtp.user) {
+    console.warn(`[Email] SMTP not configured. Would have sent "${subject}" to ${options.to}`);
+    return;
+  }
 
   await transporter.sendMail({
-   from: '"Flowkyn" <test_email_sending@spadadibattaglia.com>',
+    from: `"Flowkyn" <${env.smtp.user}>`,
     to: options.to,
     subject,
     html,

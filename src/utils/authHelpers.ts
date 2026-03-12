@@ -5,6 +5,7 @@
 
 import { queryOne } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
+import { AuthRequest } from '../types';
 
 /**
  * Verify a user has an active membership in an org and return their role.
@@ -46,19 +47,33 @@ export async function requireOrgAdmin(orgId: string, userId: string): Promise<{ 
 }
 
 /**
- * Verify the authenticated user owns a given participant_id.
- * Supports both org-member participants and guest participants.
+ * Verify the caller owns a given participant_id.
+ * Supports both authenticated org-member participants AND guest participants.
  */
-export async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
-  // Check org-member participant
-  const memberRow = await queryOne(
-    `SELECT p.id FROM participants p
-     JOIN organization_members om ON om.id = p.organization_member_id
-     WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
-    [participantId, userId]
-  );
-  if (memberRow) return;
+export async function verifyParticipantOwnership(participantId: string, req: AuthRequest): Promise<void> {
+  // Guest request: verify guest token's participantId matches
+  if (req.guest) {
+    if (req.guest.participantId !== participantId) {
+      throw new AppError('Guest token does not match the provided participant_id', 403, 'FORBIDDEN');
+    }
+    const guestRow = await queryOne(
+      `SELECT id FROM participants WHERE id = $1 AND participant_type = 'guest' AND left_at IS NULL`,
+      [participantId]
+    );
+    if (!guestRow) throw new AppError('Guest participant not found or has left', 403, 'FORBIDDEN');
+    return;
+  }
 
-  // No match — user doesn't own this participant
+  // Authenticated user: check org-member participant
+  if (req.user) {
+    const memberRow = await queryOne(
+      `SELECT p.id FROM participants p
+       JOIN organization_members om ON om.id = p.organization_member_id
+       WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+      [participantId, req.user.userId]
+    );
+    if (memberRow) return;
+  }
+
   throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }

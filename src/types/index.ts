@@ -5,8 +5,17 @@ export interface AuthPayload {
   email: string;
 }
 
+export interface GuestPayload {
+  participantId: string;
+  eventId: string;
+  guestName: string;
+  isGuest: true;
+}
+
 export interface AuthRequest extends Request {
   user?: AuthPayload;
+  /** Set when a guest token is used instead of a regular JWT */
+  guest?: GuestPayload;
 }
 
 export interface PaginationQuery {

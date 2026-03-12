@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
-import { AuthPayload } from '../types';
+import { AuthPayload, GuestPayload } from '../types';
 
 export function signAccessToken(payload: AuthPayload): string {
   return jwt.sign(payload, env.jwt.accessSecret, {
@@ -20,4 +20,29 @@ export function verifyAccessToken(token: string): AuthPayload {
 
 export function verifyRefreshToken(token: string): AuthPayload {
   return jwt.verify(token, env.jwt.refreshSecret) as AuthPayload;
+}
+
+/**
+ * Sign a short-lived guest token for game/chat participation.
+ * Contains participantId and eventId — no userId (guests are anonymous).
+ */
+export function signGuestToken(payload: GuestPayload): string {
+  return jwt.sign({ ...payload, isGuest: true }, env.jwt.accessSecret, {
+    expiresIn: '24h',
+  });
+}
+
+/**
+ * Verify a guest token — returns GuestPayload if valid.
+ * Throws if the token is invalid/expired or not a guest token.
+ */
+export function verifyGuestToken(token: string): GuestPayload {
+  const decoded = jwt.verify(token, env.jwt.accessSecret) as any;
+  if (!decoded.isGuest) throw new Error('Not a guest token');
+  return {
+    participantId: decoded.participantId,
+    eventId: decoded.eventId,
+    guestName: decoded.guestName,
+    isGuest: true,
+  };
 }

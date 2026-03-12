@@ -71,7 +71,8 @@ export class OrganizationsService {
   }
 
   async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleId: string, lang?: string) {
-    const token = crypto.randomBytes(32).toString('hex');
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
     const org = await this.getById(orgId);
 
     const invitee = await queryOne<{ language: string }>('SELECT language FROM users WHERE email = $1', [email]);
@@ -80,13 +81,13 @@ export class OrganizationsService {
     await query(
       `INSERT INTO organization_invitations (id, organization_id, email, role_id, invited_by_member_id, token, status, expires_at, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW() + INTERVAL '7 days', NOW())`,
-      [uuid(), orgId, email, roleId, invitedByMemberId, token]
+      [uuid(), orgId, email, roleId, invitedByMemberId, hashedToken]
     );
 
     await sendEmail({
       to: email,
       type: 'organization_invitation',
-      data: { orgName: org.name, link: `${env.frontendUrl}/invite/${token}?type=org` },
+      data: { orgName: org.name, link: `${env.frontendUrl}/invite/${rawToken}?type=org` },
       lang: emailLang,
     });
 
@@ -94,9 +95,10 @@ export class OrganizationsService {
   }
 
   async acceptInvitation(userId: string, token: string) {
+    const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
     const invitation = await queryOne<any>(
       `SELECT * FROM organization_invitations WHERE token = $1 AND status = 'pending' AND expires_at > NOW()`,
-      [token]
+      [hashedToken]
     );
     if (!invitation) throw new AppError('Invitation is invalid or has expired', 400, 'AUTH_VERIFICATION_EXPIRED');
 

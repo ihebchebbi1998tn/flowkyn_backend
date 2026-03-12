@@ -2,11 +2,15 @@
  * Socket.io type definitions for all namespaces.
  */
 import { Socket } from 'socket.io';
-import { AuthPayload } from '../types';
+import { AuthPayload, GuestPayload } from '../types';
 
-// ─── Authenticated socket ───
+// ─── Authenticated socket (supports both users and guests) ───
 export interface AuthenticatedSocket extends Socket {
   user: AuthPayload;
+  /** True if the socket is authenticated with a guest token */
+  isGuest?: boolean;
+  /** Present only for guest connections */
+  guestPayload?: GuestPayload;
 }
 
 // ─── Events Namespace ───

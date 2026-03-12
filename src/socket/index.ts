@@ -1,9 +1,10 @@
 /**
  * Socket.io initialization — core setup with namespaces, auth, CORS, and error handling.
+ * Supports both regular JWT auth and guest tokens.
  */
 import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
-import { verifyAccessToken } from '../utils/jwt';
+import { verifyAccessToken, verifyGuestToken } from '../utils/jwt';
 import { setupEventHandlers } from './eventHandlers';
 import { setupGameHandlers } from './gameHandlers';
 import { setupNotificationHandlers } from './notificationHandlers';
@@ -28,15 +29,34 @@ export function removePresence(roomId: string, userId: string) {
   if (presenceMap.get(roomId)?.size === 0) presenceMap.delete(roomId);
 }
 
-// ─── Shared auth middleware ───
+// ─── Shared auth middleware (supports both user JWTs and guest tokens) ───
 function socketAuthMiddleware(socket: any, next: (err?: Error) => void) {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
   if (!token) {
     return next(new Error('Authentication required'));
   }
+
+  // Try regular user token first
   try {
     const payload = verifyAccessToken(token);
     socket.user = payload;
+    socket.isGuest = false;
+    next();
+    return;
+  } catch {
+    // Not a user token — try guest
+  }
+
+  // Try guest token
+  try {
+    const guestPayload = verifyGuestToken(token);
+    // Set user-like shape so handlers can work uniformly
+    socket.user = {
+      userId: `guest:${guestPayload.participantId}`,
+      email: '',
+    };
+    socket.guestPayload = guestPayload;
+    socket.isGuest = true;
     next();
   } catch {
     next(new Error('Invalid or expired token'));

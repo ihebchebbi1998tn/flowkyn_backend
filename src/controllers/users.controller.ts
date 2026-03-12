@@ -94,7 +94,7 @@ export class UsersController {
       const [data, countResult] = await Promise.all([
         query(
           `SELECT u.id, u.name, u.email, u.avatar_url, u.language, u.status, u.onboarding_completed,
-                  u.created_at, u.updated_at, om.role, om.created_at as joined_at
+                  u.created_at, u.updated_at, u.last_active_at, om.role, om.created_at as joined_at
            FROM users u
            JOIN organization_members om ON u.id = om.user_id
            WHERE om.organization_id = $1 AND u.status = 'active'
@@ -145,7 +145,7 @@ export class UsersController {
       }
 
       // Invalidate all sessions
-      await query('DELETE FROM sessions WHERE user_id = $1', [userId]);
+      await query('DELETE FROM user_sessions WHERE user_id = $1', [userId]);
 
       // Soft-delete: mark as inactive, anonymize PII
       await query(
@@ -159,6 +159,32 @@ export class UsersController {
 
       await audit.create(null, userId, 'USER_DELETE_ACCOUNT', { ip: req.ip });
       res.json({ message: 'Account deleted successfully' });
+    } catch (err) { next(err); }
+  }
+
+  /** PATCH /users/notification-preferences */
+  async updateNotificationPreferences(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+      const prefs = req.body; // { email, event_reminders, activity_updates, weekly_digest, marketing }
+      await query(
+        `UPDATE users SET notification_preferences = $1, updated_at = NOW() WHERE id = $2`,
+        [JSON.stringify(prefs), userId]
+      );
+      res.json({ message: 'Notification preferences updated', preferences: prefs });
+    } catch (err) { next(err); }
+  }
+
+  /** GET /users/notification-preferences */
+  async getNotificationPreferences(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const userId = req.user!.userId;
+      const user = await queryOne<{ notification_preferences: any }>(
+        'SELECT notification_preferences FROM users WHERE id = $1',
+        [userId]
+      );
+      const defaults = { email: true, event_reminders: true, activity_updates: true, weekly_digest: false, marketing: false };
+      res.json(user?.notification_preferences || defaults);
     } catch (err) { next(err); }
   }
 }

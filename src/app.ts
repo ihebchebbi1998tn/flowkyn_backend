@@ -84,7 +84,9 @@ app.use('/uploads', express.static(env.uploadsDir, {
 
 // ─── Global rate limiting ───
 import { apiRateLimiter } from './middleware/rateLimiter';
+import { trackLastActive } from './middleware/lastActive';
 app.use('/v1', apiRateLimiter);
+app.use('/v1', trackLastActive);
 
 // ─── Health check (extended with pool stats) ───
 app.get('/health', async (_req, res) => {

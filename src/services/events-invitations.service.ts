@@ -8,6 +8,7 @@
  *
  * Separated from the core EventsService for maintainability.
  * Invitation tokens are 32-byte hex strings with a 7-day TTL.
+ * Tokens are stored as SHA-256 hashes for defense-in-depth security.
  */
 
 import { v4 as uuid } from 'uuid';
@@ -19,6 +20,11 @@ import { sanitizeText } from '../utils/sanitize';
 import { env } from '../config/env';
 import crypto from 'crypto';
 
+/** Hash a token using SHA-256 (consistent with refresh/password-reset token hashing) */
+function hashInvitationToken(token: string): string {
+  return crypto.createHash('sha256').update(token).digest('hex');
+}
+
 export class EventInvitationsService {
   /**
    * Validate an invitation token and return event + invitation info.
@@ -29,6 +35,7 @@ export class EventInvitationsService {
    * @throws {AppError} 404 if token is invalid, 400 if expired/used/revoked
    */
   async validateInvitationToken(eventId: string, token: string) {
+    const hashedToken = hashInvitationToken(token);
     const invitation = await queryOne<any>(
       `SELECT ei.id, ei.email, ei.status, ei.expires_at, ei.created_at,
               e.title as event_title, e.description as event_description,
@@ -38,7 +45,7 @@ export class EventInvitationsService {
        JOIN events e ON e.id = ei.event_id
        JOIN organizations o ON o.id = e.organization_id
        WHERE ei.event_id = $1 AND ei.token = $2`,
-      [eventId, token]
+      [eventId, hashedToken]
     );
     if (!invitation) throw new AppError('Invalid or expired invitation', 404, 'NOT_FOUND');
 
@@ -109,7 +116,7 @@ export class EventInvitationsService {
       if (existing) {
         await client.query(
           `UPDATE event_invitations SET status = 'accepted' WHERE event_id = $1 AND token = $2`,
-          [eventId, token]
+          [eventId, hashInvitationToken(token)]
         );
         return { participant_id: existing.id, already_joined: true };
       }
@@ -125,7 +132,7 @@ export class EventInvitationsService {
       // Mark invitation as accepted
       await client.query(
         `UPDATE event_invitations SET status = 'accepted' WHERE event_id = $1 AND token = $2`,
-        [eventId, token]
+        [eventId, hashInvitationToken(token)]
       );
 
       return { participant_id: participantId, already_joined: false };
@@ -178,7 +185,7 @@ export class EventInvitationsService {
       if (data.token) {
         await client.query(
           `UPDATE event_invitations SET status = 'accepted' WHERE event_id = $1 AND token = $2`,
-          [eventId, data.token]
+          [eventId, hashInvitationToken(data.token)]
         );
       }
 
@@ -208,18 +215,19 @@ export class EventInvitationsService {
       throw new AppError(`Event has reached its maximum of ${maxParticipants} participants`, 400, 'EVENT_FULL');
     }
 
-    const token = crypto.randomBytes(32).toString('hex');
+    const rawToken = crypto.randomBytes(32).toString('hex');
+    const hashedToken = hashInvitationToken(rawToken);
 
     await query(
       `INSERT INTO event_invitations (id, event_id, email, invited_by_member_id, token, status, expires_at, created_at)
        VALUES ($1, $2, $3, $4, $5, 'pending', NOW() + INTERVAL '7 days', NOW())`,
-      [uuid(), eventId, email, invitedByMemberId, token]
+      [uuid(), eventId, email, invitedByMemberId, hashedToken]
     );
 
     await sendEmail({
       to: email,
       type: 'event_invitation',
-      data: { eventTitle, link: `${env.frontendUrl}/join/${eventId}?token=${token}` },
+      data: { eventTitle, link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}` },
       lang,
     });
 

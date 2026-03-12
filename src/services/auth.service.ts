@@ -151,4 +151,38 @@ export class AuthService {
   async resetPassword(token: string, newPassword: string) {
     return this.passwords.resetPassword(token, newPassword);
   }
+  /**
+   * Resend verification email for a pending user.
+   * Deletes any existing verification record and creates a new one.
+   * 
+   * @throws {AppError} 404 if email not found
+   * @throws {AppError} 400 if user is already verified
+   */
+  async resendVerification(email: string, lang?: string) {
+    const user = await queryOne<UserRow>('SELECT id, name, status, language FROM users WHERE email = $1', [email]);
+    if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
+    if (user.status === 'active') throw new AppError('Email is already verified', 400, 'AUTH_ALREADY_VERIFIED');
+    if (user.status === 'suspended') throw new AppError('Account is suspended', 403, 'AUTH_ACCOUNT_SUSPENDED');
+
+    const token = crypto.randomBytes(32).toString('hex');
+    const otpCode = String(Math.floor(100000 + Math.random() * 900000));
+
+    await transaction(async (client) => {
+      await client.query('DELETE FROM email_verifications WHERE user_id = $1', [user.id]);
+      await client.query(
+        `INSERT INTO email_verifications (id, user_id, token, otp_code, expires_at, created_at)
+         VALUES ($1, $2, $3, $4, NOW() + INTERVAL '24 hours', NOW())`,
+        [uuid(), user.id, token, otpCode]
+      );
+    });
+
+    await sendEmail({
+      to: email,
+      type: 'verify_account',
+      data: { link: `${env.frontendUrl}/verify?token=${token}`, name: user.name, otpCode },
+      lang: lang || user.language || 'en',
+    });
+
+    return { message: 'Verification email sent' };
+  }
 }

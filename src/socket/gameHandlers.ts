@@ -15,7 +15,19 @@ function validateFields(data: any, fields: string[]): boolean {
 }
 
 /** Verify the user is a participant in the game session's event and return their participant ID */
-async function verifyGameParticipant(sessionId: string, userId: string): Promise<{ participantId: string } | null> {
+async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
+  // If this is a guest socket, use the guest payload directly
+  if (socket?.isGuest && socket.guestPayload) {
+    const guestRow = await queryOne<{ id: string }>(
+      `SELECT p.id FROM participants p
+       JOIN game_sessions gs ON gs.event_id = p.event_id
+       WHERE gs.id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
+      [sessionId, socket.guestPayload.participantId]
+    );
+    return guestRow ? { participantId: guestRow.id } : null;
+  }
+
+  // Authenticated user: match via organization_members
   const row = await queryOne<{ id: string }>(
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
@@ -56,7 +68,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
       try {
         // BUG FIX: Verify user is a participant in the event before joining
-        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
           ack?.({ ok: false, error: 'Not a participant' });
@@ -168,7 +180,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
       try {
         // BUG FIX: Resolve participant ID from authenticated user instead of trusting client
-        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
           return;
@@ -260,7 +272,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
       try {
         // Verify user is a participant before sharing state
-        const participant = await verifyGameParticipant(data.sessionId, user.userId);
+        const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
           socket.emit('error', { message: 'Not a participant', code: 'FORBIDDEN' });
           return;
