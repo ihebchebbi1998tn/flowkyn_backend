@@ -98,12 +98,17 @@ export class EventsService {
     );
     if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
 
-    const [{ count }] = await query<{ count: string }>(
+    const [{ count: participantCount }] = await query<{ count: string }>(
       'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
       [eventId]
     );
 
-    return { ...event, participant_count: parseInt(count) };
+    const [{ count: invitedCount }] = await query<{ count: string }>(
+      `SELECT COUNT(*) as count FROM event_invitations WHERE event_id = $1`,
+      [eventId]
+    );
+
+    return { ...event, participant_count: parseInt(participantCount), invited_count: parseInt(invitedCount) };
   }
 
   /**
