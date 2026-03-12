@@ -118,9 +118,10 @@ export class UsersController {
       const [data, countResult] = await Promise.all([
         query(
           `SELECT u.id, u.name, u.email, u.avatar_url, u.language, u.status, u.onboarding_completed,
-                  u.created_at, u.updated_at, u.last_active_at, om.role, om.created_at as joined_at
+                  u.created_at, u.updated_at, u.last_active_at, r.name as role, om.created_at as joined_at
            FROM users u
            JOIN organization_members om ON u.id = om.user_id
+           JOIN roles r ON r.id = om.role_id
            WHERE om.organization_id = $1 AND u.status = 'active'
            ORDER BY u.name ASC LIMIT $2 OFFSET $3`,
           [orgId, limit, offset]
@@ -153,8 +154,13 @@ export class UsersController {
 
       // Check if user is an org owner — prevent deletion if sole owner
       const ownedOrgs = await query(
-        `SELECT om.organization_id, (SELECT COUNT(*) FROM organization_members om2 WHERE om2.organization_id = om.organization_id AND om2.role = 'owner') as owner_count
-         FROM organization_members om WHERE om.user_id = $1 AND om.role = 'owner'`,
+        `SELECT om.organization_id,
+                (SELECT COUNT(*) FROM organization_members om2
+                 JOIN roles r2 ON r2.id = om2.role_id
+                 WHERE om2.organization_id = om.organization_id AND r2.name = 'owner') as owner_count
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         WHERE om.user_id = $1 AND r.name = 'owner'`,
         [userId]
       );
 

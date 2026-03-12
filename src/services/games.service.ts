@@ -114,14 +114,22 @@ export class GamesService {
       );
 
       if (actions.length > 0) {
+        // Build individual INSERT rows with correct, self-contained parameter lists.
+        // Each row: (id, game_session_id, participant_id, score, rank)
+        // score  = total action count for this participant (used as engagement score)
+        // rank   = ordinal position (1 = most actions)
         const valueParts: string[] = [];
-        const params: any[] = [sessionId];
-        let paramIdx = 2;
+        const params: any[] = [];
+        let paramIdx = 1;
 
         for (let i = 0; i < actions.length; i++) {
-          const id = uuid();
-          valueParts.push(`($${paramIdx++}, $1, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`);
-          params.push(id, actions[i].participant_id, actions.length - i, i + 1);
+          const rowId = uuid();
+          const score = Number(actions[i].action_count);
+          const rank = i + 1;
+          valueParts.push(
+            `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`
+          );
+          params.push(rowId, sessionId, actions[i].participant_id, score, rank);
         }
 
         await client.query(

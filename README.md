@@ -47,6 +47,61 @@ NodejsBackend/
 └── tsconfig.json
 ```
 
+## Functional Overview
+
+### Domains & Features
+
+- **Auth**: Registration, login, email verification, password reset, JWT, sessions
+- **Users**: Profile, avatar upload, onboarding, notification preferences, team invites
+- **Organizations**: Creation, info, members, invitations, logo upload, onboarding
+- **Events**: Creation, management, invitations, joining, leaving, messaging, posts
+- **Games**: Game sessions, rounds, scoring, analytics
+- **Leaderboards**: Rankings, scores, stats
+- **Notifications**: Real-time and email notifications
+- **Files**: Uploads, avatars, logos
+- **Analytics**: Participation, engagement, activity stats
+- **Audit Logs**: Change tracking, security logs
+
+### Folder Mapping
+
+| Domain         | Controller           | Service              | Route                | Validator            |
+|---------------|----------------------|----------------------|----------------------|----------------------|
+| Auth          | controllers/auth.controller.ts      | services/auth.service.ts         | routes/auth.routes.ts          | validators/auth.validator.ts       |
+| Users         | controllers/users.controller.ts     | services/users.service.ts        | routes/users.routes.ts         | validators/users.validator.ts      |
+| Organizations | controllers/organizations.controller.ts   | services/organizations.service.ts    | routes/organizations.routes.ts | validators/organizations.validator.ts    |
+| Events        | controllers/events.controller.ts    | services/events.service.ts       | routes/events.routes.ts        | validators/events.validator.ts     |
+| Games         | controllers/games.controller.ts     | services/games.service.ts        | routes/games.routes.ts         | validators/games.validator.ts      |
+| Leaderboards  | controllers/leaderboards.controller.ts    | services/leaderboards.service.ts     | routes/leaderboards.routes.ts  | -                    |
+| Notifications | controllers/notifications.controller.ts   | services/notifications.service.ts    | routes/notifications.routes.ts | -                    |
+| Files         | controllers/files.controller.ts     | services/files.service.ts        | routes/files.routes.ts         | -                    |
+| Analytics     | controllers/analytics.controller.ts | services/analytics.service.ts    | routes/analytics.routes.ts     | -                    |
+| Audit Logs    | controllers/auditLogs.controller.ts | services/auditLogs.service.ts    | routes/auditLogs.routes.ts     | -                    |
+
+### Shared Services
+
+- **email.service.ts**: Transactional email sending
+- **cleanup.service.ts**: Scheduled data cleanup
+
+### Real-Time
+
+- **socket/**: WebSocket event/game/notification handlers
+
+### Monitoring
+
+- **monitor/**: Dashboard, middleware, store
+
+### Utilities
+
+- **utils/**: Hash, JWT, pagination, slug, upload helpers
+
+### Validation
+
+- **validators/**: Zod request schemas
+
+### Types
+
+- **types/**: Shared TypeScript types
+
 ## API Endpoints
 
 | Method | Route | Description |

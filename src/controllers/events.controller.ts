@@ -138,8 +138,9 @@ export class EventsController {
       if (!['owner', 'admin'].includes(member.role_name)) {
         throw new AppError('Only organization owners and admins can delete events', 403, 'INSUFFICIENT_PERMISSIONS');
       }
-      emitEventNotification(req.params.eventId, 'event:deleted', { eventId: req.params.eventId, title: event.title });
+      // Delete first — only notify clients after the deletion is confirmed
       const result = await eventsService.delete(req.params.eventId);
+      emitEventNotification(req.params.eventId, 'event:deleted', { eventId: req.params.eventId, title: event.title });
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_DELETE', { eventId: req.params.eventId, title: event.title });
       res.json(result);
     } catch (err) { next(err); }

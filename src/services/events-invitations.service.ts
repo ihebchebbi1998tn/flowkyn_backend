@@ -96,14 +96,18 @@ export class EventInvitationsService {
       );
 
       if (!member) {
-        const memberRole = await queryOne<{ id: string }>(`SELECT id FROM roles WHERE name = 'member'`);
-        if (!memberRole) throw new AppError('Default member role not found', 500, 'INTERNAL_ERROR');
+        // Lookup the default 'member' role inside the transaction for atomicity
+        const memberRole = await client.query<{ id: string }>(
+          `SELECT id FROM roles WHERE name = 'member' LIMIT 1`
+        );
+        const roleRow = memberRole.rows[0];
+        if (!roleRow) throw new AppError('Default member role not found', 500, 'INTERNAL_ERROR');
 
         const memberId = uuid();
         await client.query(
           `INSERT INTO organization_members (id, organization_id, user_id, role_id, status, joined_at, created_at)
            VALUES ($1, $2, $3, $4, 'active', NOW(), NOW())`,
-          [memberId, event.organization_id, userId, memberRole.id]
+          [memberId, event.organization_id, userId, roleRow.id]
         );
         member = { id: memberId };
       }
