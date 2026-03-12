@@ -81,7 +81,7 @@ export class UsersController {
       const userId = req.user!.userId;
 
       if (!orgId || !Array.isArray(invites)) {
-        throw new AppError('Invalid request: orgId and invites array required', 400, 'INVALID_REQUEST');
+        throw new AppError('Invalid request: orgId and invites array required', 400, 'VALIDATION_FAILED');
       }
 
       // User must be the organization owner to invite during onboarding
