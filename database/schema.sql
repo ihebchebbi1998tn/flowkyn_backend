@@ -242,8 +242,7 @@ CREATE TABLE game_sessions (
   started_at TIMESTAMP,
   ended_at TIMESTAMP
 );
-CREATE INDEX idx_game_sessions_event ON game_sessions(event_id);
-CREATE INDEX idx_game_sessions_status ON game_sessions(status);
+CREATE INDEX idx_game_sessions_event_status ON game_sessions(event_id, status);
 
 -- ─── Game Rounds ───
 CREATE TABLE game_rounds (
@@ -256,7 +255,7 @@ CREATE TABLE game_rounds (
   started_at TIMESTAMP,
   ended_at TIMESTAMP
 );
-CREATE UNIQUE INDEX idx_game_rounds_unique ON game_rounds(game_session_id, round_number);
+CREATE INDEX idx_game_rounds_session_status ON game_rounds(game_session_id, status);
 
 -- ─── Game Actions ───
 CREATE TABLE game_actions (

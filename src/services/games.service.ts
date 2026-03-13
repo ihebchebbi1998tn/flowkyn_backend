@@ -87,7 +87,7 @@ export class GamesService {
     return snapshot || null;
   }
 
-  async getSessionActions(sessionId: string) {
+  async getSessionActions(sessionId: string, limit = 100, offset = 0) {
     return query(
       `SELECT ga.*, 
               COALESCE(u.name, p.guest_name, 'Unknown') as participant_name
@@ -96,17 +96,19 @@ export class GamesService {
        LEFT JOIN organization_members om ON om.id = p.organization_member_id
        LEFT JOIN users u ON u.id = om.user_id
        WHERE ga.game_session_id = $1
-       ORDER BY ga.created_at ASC`,
-      [sessionId]
+       ORDER BY ga.created_at ASC
+       LIMIT $2 OFFSET $3`,
+      [sessionId, limit, offset]
     );
   }
 
-  async getSessionSnapshots(sessionId: string) {
+  async getSessionSnapshots(sessionId: string, limit = 100, offset = 0) {
     return query(
       `SELECT * FROM game_state_snapshots
        WHERE game_session_id = $1
-       ORDER BY created_at ASC`,
-      [sessionId]
+       ORDER BY created_at ASC
+       LIMIT $2 OFFSET $3`,
+      [sessionId, limit, offset]
     );
   }
 

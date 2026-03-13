@@ -213,7 +213,9 @@ export class GamesController {
         throw new AppError('Only admins and moderators can view actions', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
-      const actions = await gamesService.getSessionActions(req.params.id);
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+      const actions = await gamesService.getSessionActions(req.params.id, limit, offset);
       res.json(actions);
     } catch (err) { next(err); }
   }
@@ -235,7 +237,9 @@ export class GamesController {
         throw new AppError('Only admins and moderators can view snapshots', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
-      const snapshots = await gamesService.getSessionSnapshots(req.params.id);
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+      const snapshots = await gamesService.getSessionSnapshots(req.params.id, limit, offset);
       res.json(snapshots);
     } catch (err) { next(err); }
   }
