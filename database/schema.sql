@@ -147,7 +147,7 @@ CREATE TABLE events (
   start_time TIMESTAMP,
   end_time TIMESTAMP,
   expires_at TIMESTAMP,
-  status VARCHAR(20) NOT NULL DEFAULT 'draft', -- draft, active, completed, cancelled
+  status VARCHAR(20) NOT NULL DEFAULT 'draft', -- draft, active, paused, completed, cancelled
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
