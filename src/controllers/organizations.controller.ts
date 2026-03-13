@@ -61,6 +61,23 @@ export class OrganizationsController {
     } catch (err) { next(err); }
   }
 
+  /** Get the current user's primary organization (first membership) */
+  async getCurrentForUser(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const row = await queryOne<{ organization_id: string }>(
+        `SELECT organization_id
+         FROM organization_members
+         WHERE user_id = $1 AND status = 'active'
+         ORDER BY joined_at ASC
+         LIMIT 1`,
+        [req.user!.userId]
+      );
+      if (!row) throw new AppError('You are not a member of any organization', 404, 'NOT_A_MEMBER');
+      const org = await orgsService.getById(row.organization_id);
+      res.json(org);
+    } catch (err) { next(err); }
+  }
+
   async removeMember(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const requester = await requireOrgAdmin(req.params.orgId, req.user!.userId);

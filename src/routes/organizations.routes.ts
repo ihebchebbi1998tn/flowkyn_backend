@@ -2,6 +2,7 @@
  * @fileoverview Organizations Routes
  *
  * POST   /organizations                          — Create organization
+ * GET    /organizations/current                  — Get current user's org
  * GET    /organizations/:orgId                   — Get org details
  * PATCH  /organizations/:orgId                   — Update org
  * GET    /organizations/:orgId/members           — List members
@@ -24,6 +25,7 @@ const router = Router();
 const ctrl = new OrganizationsController();
 
 router.post('/', authenticate, validate(createOrgSchema), ctrl.create);
+router.get('/current', authenticate, ctrl.getCurrentForUser);
 router.get('/:orgId', authenticate, validate(orgIdParam, 'params'), ctrl.getById);
 router.patch('/:orgId', authenticate, validate(orgIdParam, 'params'), validate(updateOrgSchema), ctrl.update);
 router.get('/:orgId/members', authenticate, validate(orgIdParam, 'params'), ctrl.listMembers);
