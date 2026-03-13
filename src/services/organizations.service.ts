@@ -70,6 +70,16 @@ export class OrganizationsService {
     );
   }
 
+  async listInvitations(orgId: string) {
+    return query(
+      `SELECT id, email, status, invited_by_member_id, created_at, expires_at
+       FROM organization_invitations
+       WHERE organization_id = $1
+       ORDER BY created_at DESC`,
+      [orgId]
+    );
+  }
+
   async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleIdOrName: string, lang?: string) {
     const rawToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');

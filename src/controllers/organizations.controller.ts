@@ -52,6 +52,15 @@ export class OrganizationsController {
     } catch (err) { next(err); }
   }
 
+  async listInvitations(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const member = await orgsService.getMemberByUserId(req.params.orgId, req.user!.userId);
+      if (!member) throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
+      const invites = await orgsService.listInvitations(req.params.orgId);
+      res.json(invites);
+    } catch (err) { next(err); }
+  }
+
   async removeMember(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const requester = await requireOrgAdmin(req.params.orgId, req.user!.userId);
