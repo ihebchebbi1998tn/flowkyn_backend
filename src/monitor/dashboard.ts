@@ -36,7 +36,7 @@ function checkMonitorAuth(req: Request, res: Response): boolean {
 
 router.get('/api/logs', (req, res) => {
   if (!checkMonitorAuth(req, res)) return;
-  const { limit = '100', method, status, search } = req.query;
+  const { limit = '1000', method, status, search } = req.query;
   const logs = getLogs(Number(limit), {
     method: method as string,
     status: status as string,

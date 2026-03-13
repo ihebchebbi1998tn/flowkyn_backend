@@ -1,7 +1,9 @@
 /**
- * In-memory request/response log store with circular buffer.
- * Stores the last N requests for the live monitor dashboard.
+ * Professional monitoring system - In-memory store with complete log retention
+ * Keeps ALL logs for analysis and debugging
  */
+import * as fs from 'fs';
+import * as path from 'path';
 
 export interface RequestLog {
   id: string;
@@ -32,8 +34,23 @@ export interface SystemMetrics {
   topEndpoints: { path: string; count: number; avgMs: number }[];
 }
 
-const MAX_LOGS = 500;
-const MAX_ENDPOINTS = 500; // Prevent unbounded growth of endpoint stats
+// ============= CONFIGURATION =============
+const MAX_LOGS = 100000;        // Keep 100,000 logs in memory (all recent requests)
+const MAX_ENDPOINTS = 1000;     // Track up to 1000 unique endpoints
+const LOG_DIR = path.join(process.cwd(), '.logs');
+const ENABLE_FILE_LOGGING = true; // Enable persistent file logs
+
+// Create logs directory if it doesn't exist
+if (ENABLE_FILE_LOGGING && !fs.existsSync(LOG_DIR)) {
+  try {
+    fs.mkdirSync(LOG_DIR, { recursive: true });
+    console.log(`[Monitor] Log directory created: ${LOG_DIR}`);
+  } catch (err) {
+    console.error('[Monitor] Failed to create log directory:', err);
+  }
+}
+
+// ============= STORAGE =============
 const logs: RequestLog[] = [];
 let totalRequests = 0;
 let totalErrors = 0;
@@ -51,8 +68,10 @@ const statusCodes: Record<string, number> = {};
 const endpointStats: Map<string, { count: number; totalMs: number }> = new Map();
 
 export function addLog(log: RequestLog) {
-  logs.unshift(log);
-  if (logs.length > MAX_LOGS) logs.pop();
+  logs.push(log);
+  if (logs.length > MAX_LOGS) {
+    logs.shift(); // Remove oldest log when exceeding max
+  }
 
   totalRequests++;
   totalDuration += log.duration;
@@ -63,7 +82,12 @@ export function addLog(log: RequestLog) {
   statusCodes[codeGroup] = (statusCodes[codeGroup] || 0) + 1;
 
   // Endpoint tracking
-  const key = `${log.method} ${log.path.replace(/\/[0-9a-f-]{36}/g, '/:id').replace(/\/\d+/g, '/:n')}`;
+  const pathNormalized = log.path
+    .replace(/\/[0-9a-f-]{36}/gi, '/:id')      // Replace UUIDs
+    .replace(/\/\d+/g, '/:id')                  // Replace numeric IDs
+    .split('?')[0];                             // Remove query string
+  
+  const key = `${log.method} ${pathNormalized}`;
   const ep = endpointStats.get(key) || { count: 0, totalMs: 0 };
   ep.count++;
   ep.totalMs += log.duration;
@@ -91,38 +115,41 @@ export function addLog(log: RequestLog) {
   }
   minuteBuckets[minuteBuckets.length - 1] = (minuteBuckets[minuteBuckets.length - 1] || 0) + 1;
 
-  // Debug logging for slow/error requests
-  if (log.statusCode >= 400 || log.duration > 2000) {
-    const statusColor = log.statusCode >= 500 ? '❌ SERVER ERROR' : log.statusCode >= 400 ? '⚠️ CLIENT ERROR' : '⏱️ SLOW';
-    console.log(
-      `\n[Monitor] ${statusColor}`
-    );
-    console.log(`  🔗 ${log.method} ${log.path}`);
-    console.log(`  📊 Status: ${log.statusCode} | Duration: ${log.duration}ms`);
-    if (log.queryParams && Object.keys(log.queryParams).length > 0) {
-      console.log(`  📥 Query Params:`, log.queryParams);
-    }
-    if (log.requestBody) {
-      console.log(`  📤 Request Body:`, log.requestBody);
-    }
-    if (log.responseBody) {
-      const bodyStr = typeof log.responseBody === 'string' 
-        ? log.responseBody 
-        : JSON.stringify(log.responseBody);
-      const display = bodyStr.length > 300 ? bodyStr.substring(0, 300) + '...' : bodyStr;
-      console.log(`  📬 Response Body:`, display);
-    }
-    if (log.userId) {
-      console.log(`  👤 User ID: ${log.userId}`);
-    }
-    if (log.error) {
-      console.log(`  ❌ Error: ${log.error}`);
-    }
-    console.log('');
+  // PROFESSIONAL FILE LOGGING - All requests logged to file
+  if (ENABLE_FILE_LOGGING) {
+    writeLogToFile(log);
   }
 }
 
-export function getLogs(limit = 100, filter?: { method?: string; status?: string; search?: string }): RequestLog[] {
+/**
+ * Write log to file with professional formatting
+ * Creates daily log files for easy analysis
+ */
+function writeLogToFile(log: RequestLog) {
+  try {
+    const date = new Date(log.timestamp);
+    const dateStr = date.toISOString().split('T')[0]; // YYYY-MM-DD
+    const logFile = path.join(LOG_DIR, `api-${dateStr}.log`);
+
+    // Format: [HH:MM:SS] METHOD /path → STATUS (Xms) [ID] [Error: msg]
+    const time = date.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const statusStr = log.statusCode >= 500 ? `ERROR(${log.statusCode})` : log.statusCode >= 400 ? `FAILED(${log.statusCode})` : `OK(${log.statusCode})`;
+    const errorStr = log.error ? ` [Error: ${log.error}]` : '';
+    const userStr = log.userId ? ` [User: ${log.userId}]` : '';
+    
+    const logStr = `[${time}] ${log.method.padEnd(6)} ${log.path.substring(0, 80).padEnd(80)} → ${statusStr} (${log.duration}ms) [${log.id.substring(0, 8)}]${userStr}${errorStr}\n`;
+    
+    fs.appendFileSync(logFile, logStr, 'utf8');
+
+    // Also write detailed JSON log for full analysis
+    const jsonLogFile = path.join(LOG_DIR, `api-${dateStr}.json`);
+    fs.appendFileSync(jsonLogFile, JSON.stringify(log) + '\n', 'utf8');
+  } catch (err) {
+    console.error('[Monitor] Error writing log file:', err);
+  }
+}
+
+export function getLogs(limit = 1000, filter?: { method?: string; status?: string; search?: string }): RequestLog[] {
   let result = logs;
   if (filter?.method) result = result.filter(l => l.method === filter.method);
   if (filter?.status === 'error') result = result.filter(l => l.statusCode >= 400);
@@ -131,7 +158,7 @@ export function getLogs(limit = 100, filter?: { method?: string; status?: string
     const s = filter.search.toLowerCase();
     result = result.filter(l => l.path.toLowerCase().includes(s) || l.error?.toLowerCase().includes(s));
   }
-  return result.slice(0, limit);
+  return result.slice(-limit).reverse(); // Most recent first
 }
 
 export function getMetrics(): SystemMetrics {

@@ -157,7 +157,8 @@ export class EventInvitationsService {
    * @returns Object with participant_id and sanitized guest_name
    */
   async joinAsGuest(eventId: string, data: { name: string; email?: string; avatar_url?: string; token?: string }, event: any) {
-    if (!(event as any).allow_guests) {
+    // null means no event_settings row (shouldn't happen, but default to allowing guests)
+    if ((event as any).allow_guests === false) {
       throw new AppError('This event does not allow guest participants', 403, 'FORBIDDEN');
     }
 

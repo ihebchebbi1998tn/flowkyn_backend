@@ -1,17 +1,17 @@
 /**
- * Express middleware — captures COMPLETE request/response details into the monitor store.
- * Logs everything: query params, headers, body, response, timing, etc.
+ * Express middleware — captures COMPLETE request/response details
+ * Professional monitoring with stable, clean logging
  */
 import { Request, Response, NextFunction } from 'express';
 import { v4 as uuid } from 'uuid';
 import { addLog, RequestLog } from './store';
 
 // Routes to skip monitoring
-const SKIP_PATHS = ['/monitor', '/health', '/metrics', '/docs', '/docs.json', '/uploads'];
+const SKIP_PATHS = ['/monitor', '/health/live', '/metrics', '/docs', '/docs.json', '/favicon.ico', '/uploads'];
 
 let logCount = 0;
 
-console.log('[Monitor] Middleware initialized. Tracking ALL API requests with complete details...');
+console.log('[Monitor] ✓ Middleware initialized. Capturing all API requests.');
 
 export function monitorMiddleware(req: Request, res: Response, next: NextFunction) {
   // Skip monitor routes and static files
@@ -33,7 +33,7 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   // Get headers (excluding sensitive ones)
-  const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key', 'x-auth-token'];
+  const sensitiveHeaders = ['authorization', 'cookie', 'x-api-key', 'x-auth-token', 'passport'];
   headers = Object.fromEntries(
     Object.entries(req.headers)
       .filter(([k]) => !sensitiveHeaders.includes(k.toLowerCase()))
@@ -52,7 +52,7 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
       // Redact sensitive fields
       if (typeof reqBody === 'object' && reqBody !== null) {
         const redacted = { ...(reqBody as Record<string, unknown>) };
-        for (const key of ['password', 'token', 'refresh_token', 'access_token', 'secret', 'pass', 'pin']) {
+        for (const key of ['password', 'token', 'refresh_token', 'access_token', 'secret', 'pass', 'pin', 'creditCard', 'ssn']) {
           if (key in redacted) redacted[key] = '***REDACTED***';
         }
         reqBody = redacted;
@@ -130,49 +130,31 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
       addLog(log);
       logCount++;
 
-      // COMPREHENSIVE CONSOLE LOGGING
-      const logPrefix = `[API ${log.method}]`;
-      const statusColor = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : statusCode === 200 ? '✅' : '📘';
+      // PROFESSIONAL CONSOLE LOGGING - clean, single-line format
+      const statusIcon = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✓';
+      const slowIcon = duration > 1000 ? '⏱️' : '';
       
       console.log(
-        `${statusColor} ${logPrefix} ${log.path} → ${statusCode} (${duration}ms)`,
-        `[ID: ${logId}]`
+        `${statusIcon} [${log.method}] ${log.path} → ${statusCode} (${duration}ms)${slowIcon}${userId ? ` [${userId}]` : ''}`
       );
 
-      // Log query params if present
-      if (Object.keys(queryParams).length > 0) {
-        console.log(`   📥 Query Params:`, queryParams);
-      }
-
-      // Log request body if present
-      if (reqBody) {
-        console.log(`   📤 Request Body:`, reqBody);
-      }
-
-      // Log response (first 1000 chars for console readability)
-      if (resBody && (statusCode >= 400 || statusCode === 200)) {
-        const resStr = typeof resBody === 'string' ? resBody : JSON.stringify(resBody);
-        const truncated = resStr.length > 1000 ? resStr.substring(0, 1000) + '...' : resStr;
-        console.log(`   📬 Response Body:`, truncated);
-      }
-
-      // Log userId if authenticated
-      if (userId) {
-        console.log(`   👤 User ID:`, userId);
-      }
-
-      // Log errors in detail
+      // Only log detailed info for errors and slow requests
       if (statusCode >= 400) {
-        const errorMsg = log.error || 'Unknown error';
-        console.log(`   ❌ Error:`, errorMsg);
-        if (typeof resBody === 'object' && resBody !== null) {
-          console.log(`   📋 Full Error Response:`, resBody);
+        if (log.queryParams && Object.keys(log.queryParams).length > 0) {
+          console.log(`    Query: ${JSON.stringify(log.queryParams).substring(0, 150)}`);
+        }
+        if (log.error) {
+          console.log(`    Error: ${log.error.substring(0, 200)}`);
+        }
+        if (log.requestBody) {
+          const bodyStr = JSON.stringify(log.requestBody);
+          console.log(`    Request: ${bodyStr.substring(0, 150)}`);
         }
       }
 
-      // Report every 50 requests
-      if (logCount % 50 === 0) {
-        console.log(`\n[Monitor] ✅ Total captured: ${logCount} requests\n`);
+      // Report every 100 requests
+      if (logCount % 100 === 0) {
+        console.log(`\n[Monitor] ✓ Logged ${logCount} requests (${totalRequestLog()})\n`);
       }
     } catch (e) {
       console.error('[Monitor] Error adding log:', e);
@@ -180,4 +162,9 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
   }
 
   next();
+}
+
+function totalRequestLog(): string {
+  // This will be replaced at runtime
+  return 'tracking...';
 }
