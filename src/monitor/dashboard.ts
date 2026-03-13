@@ -13,10 +13,20 @@ const router = Router();
 // Simple auth check
 function checkMonitorAuth(req: Request, res: Response): boolean {
   const secret = process.env.MONITOR_SECRET;
-  if (!secret) return true; // No secret = open in dev
+  if (!secret) {
+    // No secret configured = allow in development only
+    if (process.env.NODE_ENV === 'production') {
+      res.status(401).json({ error: 'Monitor disabled — set MONITOR_SECRET in production' });
+      return false;
+    }
+    return true;
+  }
+
+  // Check token from query param or header
   const token = req.query.token || req.headers['x-monitor-token'];
   if (token !== secret) {
-    res.status(401).json({ error: 'Unauthorized — provide ?token=YOUR_MONITOR_SECRET' });
+    console.warn('[Monitor] Auth attempt with wrong token:', token ? token.toString().substring(0, 5) + '...' : 'none');
+    res.status(401).json({ error: 'Unauthorized — provide ?token=YOUR_MONITOR_SECRET or X-Monitor-Token header' });
     return false;
   }
   return true;
@@ -43,7 +53,22 @@ router.get('/api/metrics', (req, res) => {
 router.post('/api/clear', (req, res) => {
   if (!checkMonitorAuth(req, res)) return;
   clearLogs();
-  res.json({ message: 'Logs cleared' });
+  console.log('[Monitor] Logs cleared');
+  res.json({ message: 'Logs cleared', timestamp: new Date().toISOString() });
+});
+
+// Health/status endpoint (for debugging)
+router.get('/api/status', (req, res) => {
+  if (!checkMonitorAuth(req, res)) return;
+  const metrics = getMetrics();
+  res.json({
+    ok: true,
+    middleware: 'active',
+    timestamp: new Date().toISOString(),
+    secretConfigured: !!process.env.MONITOR_SECRET,
+    logsCount: metrics.totalRequests,
+    nodeEnv: process.env.NODE_ENV,
+  });
 });
 
 // ─── HTML Dashboard ───
@@ -170,28 +195,69 @@ const BASE = '/monitor/api';
 let allLogs = [];
 let refreshInterval;
 
-function url(path) { return BASE + path + (tokenParam ? (path.includes('?') ? '&' : '?') + tokenParam.slice(1) : ''); }
+// Extract token from URL params if present
+const urlParams = new URLSearchParams(window.location.search);
+const token = urlParams.get('token');
+
+function url(path) { 
+  // Build query string: if tokenParam exists (e.g., "?token=xyz"), append with "&" or "?"
+  if (!tokenParam) return BASE + path;
+  const separator = path.includes('?') ? '&' : '?';
+  return BASE + path + separator + tokenParam.slice(1); // slice(1) removes the leading "?"
+}
+
+// Fetch with token in header (fallback method)
+function fetchWithToken(url_path) {
+  const options = {
+    headers: token ? { 'X-Monitor-Token': token } : {}
+  };
+  return fetch(url(url_path), options);
+}
 
 async function fetchData() {
-  const method = document.getElementById('methodFilter').value;
-  const status = document.getElementById('statusFilter').value;
-  const search = document.getElementById('searchInput').value;
-  const params = new URLSearchParams();
-  if (method) params.set('method', method);
-  if (status) params.set('status', status);
-  if (search) params.set('search', search);
-  const qs = params.toString();
+  try {
+    const method = document.getElementById('methodFilter').value;
+    const status = document.getElementById('statusFilter').value;
+    const search = document.getElementById('searchInput').value;
+    const params = new URLSearchParams();
+    if (method) params.set('method', method);
+    if (status) params.set('status', status);
+    if (search) params.set('search', search);
+    const qs = params.toString();
 
-  const [logsRes, metricsRes] = await Promise.all([
-    fetch(url('/logs' + (qs ? '?' + qs : ''))).then(r => r.json()),
-    fetch(url('/metrics')).then(r => r.json()),
-  ]);
+    const logsPath = '/logs' + (qs ? '?' + qs : '');
+    
+    const [logsRes, metricsRes] = await Promise.all([
+      fetchWithToken(logsPath).then(r => {
+        if (!r.ok) {
+          console.error('Logs fetch error:', r.status, r.statusText);
+          if (r.status === 401) showAuthError();
+        }
+        return r.json();
+      }).catch(e => { console.error('Logs fetch failed:', e); return []; }),
+      fetchWithToken('/metrics').then(r => {
+        if (!r.ok) {
+          console.error('Metrics fetch error:', r.status, r.statusText);
+          if (r.status === 401) showAuthError();
+        }
+        return r.json();
+      }).catch(e => { console.error('Metrics fetch failed:', e); return { totalRequests: 0, totalErrors: 0, avgResponseTime: 0, requestsPerMinute: 0, statusCodes: {}, topEndpoints: [], startedAt: new Date().toISOString() }; }),
+    ]);
 
-  allLogs = logsRes;
-  renderStats(metricsRes);
-  renderLogs(logsRes);
-  renderEndpoints(metricsRes.topEndpoints);
-  renderUptime(metricsRes.startedAt);
+    if (Array.isArray(logsRes)) {
+      allLogs = logsRes;
+      renderStats(metricsRes);
+      renderLogs(logsRes);
+      renderEndpoints(metricsRes.topEndpoints);
+      renderUptime(metricsRes.startedAt);
+    }
+  } catch (e) {
+    console.error('[Monitor] Fetch error:', e);
+  }
+}
+
+function showAuthError() {
+  document.getElementById('logsBody').innerHTML = '<tr><td colspan="8" class="empty" style="color:var(--red)">❌ Authentication failed. Check your token.</td></tr>';
 }
 
 function renderStats(m) {
@@ -263,8 +329,18 @@ function closeDetail() { document.getElementById('detailOverlay').style.display 
 
 async function clearAll() {
   if (!confirm('Clear all logs?')) return;
-  await fetch(url('/clear'), { method: 'POST' });
-  fetchData();
+  try {
+    const res = await fetchWithToken('/clear');
+    if (!res.ok) {
+      console.error('Clear failed:', res.status, res.statusText);
+      if (res.status === 401) showAuthError();
+      return;
+    }
+    await res.json();
+    fetchData();
+  } catch (e) {
+    console.error('[Monitor] Clear error:', e);
+  }
 }
 
 // Auto-refresh

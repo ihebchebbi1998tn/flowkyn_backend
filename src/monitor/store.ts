@@ -88,6 +88,14 @@ export function addLog(log: RequestLog) {
     currentMinute = min;
   }
   minuteBuckets[minuteBuckets.length - 1] = (minuteBuckets[minuteBuckets.length - 1] || 0) + 1;
+
+  // Debug logging for slow/error requests
+  if (log.statusCode >= 400 || log.duration > 2000) {
+    console.log(
+      `[Monitor] ${log.method} ${log.path} — ${log.statusCode} (${log.duration}ms)`,
+      log.error ? `— Error: ${log.error}` : ''
+    );
+  }
 }
 
 export function getLogs(limit = 100, filter?: { method?: string; status?: string; search?: string }): RequestLog[] {
