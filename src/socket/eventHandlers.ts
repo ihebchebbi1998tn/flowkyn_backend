@@ -33,6 +33,7 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
   }
 
   // First try: match via organization_members (registered users)
+  // Allow pending members so auto-invited users can play games before clicking their email link.
   const memberRow = await queryOne<{ id: string; member_id: string | null; display_name: string; avatar_url: string | null }>(
     `SELECT p.id, p.organization_member_id as member_id,
             COALESCE(u.name, p.guest_name, 'Unknown') as display_name,
@@ -40,7 +41,7 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
      FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN users u ON u.id = om.user_id
-     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+     WHERE p.event_id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
     [eventId, userId]
   );
   if (memberRow) return { participantId: memberRow.id, memberId: memberRow.member_id, displayName: memberRow.display_name, avatarUrl: memberRow.avatar_url || null };
@@ -167,7 +168,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         }
         // Broadcast organizer message (not persisted to participant messages since they're not a participant)
         eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
-          id: `org-${Date.now()}`,
+          id: crypto.randomUUID(),
           participantId: 'organizer',
           senderName: userRow?.name || 'Organizer',
           senderAvatarUrl: userRow?.avatar_url || null,

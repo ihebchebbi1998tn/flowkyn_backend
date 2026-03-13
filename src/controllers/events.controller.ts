@@ -97,6 +97,23 @@ export class EventsController {
       const event = await eventsService.create(member.id, req.body);
       await audit.create(req.body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: req.body.title });
 
+      // Automatically invite pre-selected members/emails if provided
+      if (Array.isArray(req.body.invites) && req.body.invites.length > 0) {
+        // Run invitations in parallel, silencing errors so one failure doesn't crash the whole creation flow
+        await Promise.allSettled(
+          req.body.invites.map((email: string) =>
+            invitationsService.inviteParticipant(
+              event.id,
+              member.id,
+              email,
+              event.title,
+              event.max_participants,
+              'en' // Default to english if missing on payload
+            )
+          )
+        );
+      }
+
       // Optional: notify the creator that the event was created successfully.
       // Failure to create the notification must not break event creation.
       try {

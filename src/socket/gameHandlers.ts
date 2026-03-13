@@ -297,7 +297,7 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN game_sessions gs ON gs.event_id = p.event_id
-     WHERE gs.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+     WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
     [sessionId, userId]
   );
   return row ? { participantId: row.id } : null;
@@ -310,7 +310,7 @@ async function isEventAdmin(sessionId: string, userId: string): Promise<boolean>
      JOIN roles r ON r.id = om.role_id
      JOIN events e ON e.organization_id = om.organization_id
      JOIN game_sessions gs ON gs.event_id = e.id
-     WHERE gs.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+     WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
     [sessionId, userId]
   );
   return row && ['owner', 'admin', 'moderator'].includes(row.name);
