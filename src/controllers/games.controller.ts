@@ -59,7 +59,7 @@ export class GamesController {
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
         [req.params.eventId, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
@@ -112,7 +112,7 @@ export class GamesController {
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
@@ -175,7 +175,7 @@ export class GamesController {
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
@@ -205,7 +205,7 @@ export class GamesController {
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
@@ -227,7 +227,7 @@ export class GamesController {
         `SELECT om.id, r.name as role_name FROM organization_members om
          JOIN roles r ON r.id = om.role_id
          JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');

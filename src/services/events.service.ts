@@ -174,14 +174,14 @@ export class EventsService {
         query<EventRow>(
           `SELECT e.* FROM events e
            JOIN organization_members om ON om.organization_id = e.organization_id
-           WHERE om.user_id = $1 AND om.status = 'active'
+           WHERE om.user_id = $1 AND om.status IN ('active', 'pending')
            ORDER BY e.created_at DESC LIMIT $2 OFFSET $3`,
           [userId, limit, offset]
         ),
         query<{ count: string }>(
           `SELECT COUNT(*) as count FROM events e
            JOIN organization_members om ON om.organization_id = e.organization_id
-           WHERE om.user_id = $1 AND om.status = 'active'`,
+           WHERE om.user_id = $1 AND om.status IN ('active', 'pending')`,
           [userId]
         ),
       ]);

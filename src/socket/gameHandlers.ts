@@ -7,6 +7,7 @@ import { AuthenticatedSocket } from './types';
 import { checkRateLimit } from './index';
 import { GamesService } from '../services/games.service';
 import { query, queryOne, transaction } from '../config/database';
+import crypto from 'crypto';
 
 const gamesService = new GamesService();
 
@@ -300,7 +301,29 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
      WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
     [sessionId, userId]
   );
-  return row ? { participantId: row.id } : null;
+  if (row) return { participantId: row.id };
+
+  // FIX: Auto-join them to participants if they are an active org member.
+  const orgMember = await queryOne<{ id: string; event_id: string }>(
+    `SELECT om.id, gs.event_id
+     FROM organization_members om
+     JOIN events e ON e.organization_id = om.organization_id
+     JOIN game_sessions gs ON gs.event_id = e.id
+     WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+    [sessionId, userId]
+  );
+
+  if (orgMember) {
+    const participantId = crypto.randomUUID();
+    await query(
+      `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+       VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+      [participantId, orgMember.event_id, orgMember.id]
+    );
+    return { participantId };
+  }
+
+  return null;
 }
 
 /** Check if user has admin/moderator role in the event's org */

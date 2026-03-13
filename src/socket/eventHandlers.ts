@@ -6,8 +6,9 @@ import { Namespace } from 'socket.io';
 import { AuthenticatedSocket } from './types';
 import { addPresence, removePresence, getPresence, checkRateLimit } from './index';
 import { EventMessagesService } from '../services/events-messages.service';
-import { queryOne } from '../config/database';
+import { query, queryOne } from '../config/database';
 import { sanitizeText } from '../utils/sanitize';
+import crypto from 'crypto';
 
 const messagesService = new EventMessagesService();
 
@@ -46,6 +47,32 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
   );
   if (memberRow) return { participantId: memberRow.id, memberId: memberRow.member_id, displayName: memberRow.display_name, avatarUrl: memberRow.avatar_url || null };
 
+  // FIX: If they are an active or pending member of the organization but bypassed the Lobby, 
+  // auto-insert them into the participants table so they don't get silently blocked.
+  const orgMember = await queryOne<{ id: string; name: string; avatar_url: string | null }>(
+    `SELECT om.id, u.name, u.avatar_url
+     FROM organization_members om
+     JOIN events e ON e.organization_id = om.organization_id
+     JOIN users u ON u.id = om.user_id
+     WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+    [eventId, userId]
+  );
+
+  if (orgMember) {
+    const participantId = crypto.randomUUID();
+    await query(
+      `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+       VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+      [participantId, eventId, orgMember.id]
+    );
+    return {
+      participantId,
+      memberId: orgMember.id,
+      displayName: orgMember.name || 'Unknown',
+      avatarUrl: orgMember.avatar_url || null
+    };
+  }
+
   return null;
 }
 
@@ -66,25 +93,13 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
 
       try {
-        // Verify user is a participant in this event
+        // Verify user is a participant in this event (auto-inserts org members who bypassed the Lobby)
         const participant = await verifyParticipant(data.eventId, user.userId, socket);
-        // Also allow event creator (organizer) to join without being a participant
-        let isOrganizer = false;
         if (!participant) {
-          const eventRow = await queryOne<{ created_by_member_id: string }>(
-            `SELECT e.created_by_member_id FROM events e
-             JOIN organization_members om ON om.id = e.created_by_member_id
-             WHERE e.id = $1 AND om.user_id = $2`,
-            [data.eventId, user.userId]
-          );
-          if (eventRow) {
-            isOrganizer = true;
-          } else {
-            console.warn(`[Events] User ${user.userId} tried to join event ${data.eventId} but is not a participant or organizer`);
-            socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
-            ack?.({ ok: false, error: 'Not a participant' });
-            return;
-          }
+          console.warn(`[Events] User ${user.userId} tried to join event ${data.eventId} but is not a participant or org member`);
+          socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+          ack?.({ ok: false, error: 'Not a participant' });
+          return;
         }
 
         const roomId = `event:${data.eventId}`;
@@ -106,7 +121,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
           onlineUserIds: getPresence(data.eventId),
         });
 
-        ack?.({ ok: true, data: { participantId: participant?.participantId || 'organizer', isOrganizer } });
+        ack?.({ ok: true, data: { participantId: participant.participantId } });
       } catch (err: any) {
         console.error(`[Events] event:join error:`, err.message, err.stack);
         socket.emit('error', { message: 'Failed to join event room', code: 'INTERNAL' });
@@ -142,41 +157,11 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
 
       // Verify the user is a participant and use their ACTUAL participant ID
+      // verifyParticipant auto-inserts org members (including organizers) who bypassed the Lobby
       const participant = await verifyParticipant(data.eventId, user.userId, socket);
       if (!participant) {
-        // Allow organizer to chat too
-        const eventRow = await queryOne<{ id: string }>(
-          `SELECT e.id FROM events e
-           JOIN organization_members om ON om.id = e.created_by_member_id
-           WHERE e.id = $1 AND om.user_id = $2`,
-          [data.eventId, user.userId]
-        );
-        if (!eventRow) {
-          socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
-          ack?.({ ok: false, error: 'Not a participant' });
-          return;
-        }
-        // Organizer chatting — get their name
-        const userRow = await queryOne<{ name: string; avatar_url: string | null }>(
-          `SELECT name, avatar_url FROM users WHERE id = $1`, [user.userId]
-        );
-        const message = sanitizeText(data.message, 2000);
-        if (message.length === 0) {
-          socket.emit('error', { message: 'Message cannot be empty', code: 'VALIDATION' });
-          ack?.({ ok: false, error: 'Empty message' });
-          return;
-        }
-        // Broadcast organizer message (not persisted to participant messages since they're not a participant)
-        eventsNs.to(`event:${data.eventId}`).emit('chat:message', {
-          id: crypto.randomUUID(),
-          participantId: 'organizer',
-          senderName: userRow?.name || 'Organizer',
-          senderAvatarUrl: userRow?.avatar_url || null,
-          message,
-          userId: user.userId,
-          timestamp: new Date().toISOString(),
-        });
-        ack?.({ ok: true });
+        socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
+        ack?.({ ok: false, error: 'Not a participant' });
         return;
       }
 
