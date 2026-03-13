@@ -14,6 +14,8 @@ export interface RequestLog {
   userAgent: string;
   userId?: string;
   requestBody?: unknown;
+  queryParams?: Record<string, string>;
+  requestHeaders?: Record<string, string>;
   responseBody?: unknown;
   error?: string;
   tags: string[];         // e.g. ['auth', 'error', 'slow']
@@ -91,10 +93,32 @@ export function addLog(log: RequestLog) {
 
   // Debug logging for slow/error requests
   if (log.statusCode >= 400 || log.duration > 2000) {
+    const statusColor = log.statusCode >= 500 ? '❌ SERVER ERROR' : log.statusCode >= 400 ? '⚠️ CLIENT ERROR' : '⏱️ SLOW';
     console.log(
-      `[Monitor] ${log.method} ${log.path} — ${log.statusCode} (${log.duration}ms)`,
-      log.error ? `— Error: ${log.error}` : ''
+      `\n[Monitor] ${statusColor}`
     );
+    console.log(`  🔗 ${log.method} ${log.path}`);
+    console.log(`  📊 Status: ${log.statusCode} | Duration: ${log.duration}ms`);
+    if (log.queryParams && Object.keys(log.queryParams).length > 0) {
+      console.log(`  📥 Query Params:`, log.queryParams);
+    }
+    if (log.requestBody) {
+      console.log(`  📤 Request Body:`, log.requestBody);
+    }
+    if (log.responseBody) {
+      const bodyStr = typeof log.responseBody === 'string' 
+        ? log.responseBody 
+        : JSON.stringify(log.responseBody);
+      const display = bodyStr.length > 300 ? bodyStr.substring(0, 300) + '...' : bodyStr;
+      console.log(`  📬 Response Body:`, display);
+    }
+    if (log.userId) {
+      console.log(`  👤 User ID: ${log.userId}`);
+    }
+    if (log.error) {
+      console.log(`  ❌ Error: ${log.error}`);
+    }
+    console.log('');
   }
 }
 
