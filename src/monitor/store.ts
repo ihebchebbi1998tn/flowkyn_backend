@@ -67,6 +67,10 @@ const statusCodes: Record<string, number> = {};
 // Endpoint stats — with size limit to prevent memory leaks
 const endpointStats: Map<string, { count: number; totalMs: number }> = new Map();
 
+// Live subscribers for streaming (e.g. Server-Sent Events monitor dashboard)
+type LogSubscriber = (log: RequestLog) => void;
+const logSubscribers = new Set<LogSubscriber>();
+
 export function addLog(log: RequestLog) {
   logs.push(log);
   if (logs.length > MAX_LOGS) {
@@ -118,6 +122,19 @@ export function addLog(log: RequestLog) {
   // PROFESSIONAL FILE LOGGING - All requests logged to file
   if (ENABLE_FILE_LOGGING) {
     writeLogToFile(log);
+  }
+
+  // Notify any live subscribers (non-blocking best effort)
+  if (logSubscribers.size > 0) {
+    for (const subscriber of logSubscribers) {
+      try {
+        subscriber(log);
+      } catch (err) {
+        // Never let a bad subscriber break logging
+        // eslint-disable-next-line no-console
+        console.error('[Monitor] Subscriber error:', (err as Error)?.message || err);
+      }
+    }
   }
 }
 
@@ -186,4 +203,15 @@ export function clearLogs() {
   totalDuration = 0;
   endpointStats.clear();
   Object.keys(statusCodes).forEach(k => delete statusCodes[k]);
+}
+
+/**
+ * Subscribe to live log events.
+ * Returns an unsubscribe function that MUST be called when the consumer disconnects.
+ */
+export function subscribeLogs(subscriber: LogSubscriber): () => void {
+  logSubscribers.add(subscriber);
+  return () => {
+    logSubscribers.delete(subscriber);
+  };
 }

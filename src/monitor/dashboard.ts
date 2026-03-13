@@ -5,7 +5,7 @@
  * Protected by a simple token from MONITOR_SECRET env var.
  */
 import { Router, Request, Response } from 'express';
-import { getLogs, getMetrics, clearLogs } from './store';
+import { getLogs, getMetrics, clearLogs, subscribeLogs } from './store';
 import { env } from '../config/env';
 
 const router = Router();
@@ -68,6 +68,56 @@ router.get('/api/status', (req, res) => {
     secretConfigured: !!process.env.MONITOR_SECRET,
     logsCount: metrics.totalRequests,
     nodeEnv: process.env.NODE_ENV,
+  });
+});
+
+// ─── Server-Sent Events stream (real-time updates) ───
+
+router.get('/api/stream', (req, res) => {
+  if (!checkMonitorAuth(req, res)) return;
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+
+  // In some environments, flushHeaders is available to send headers immediately.
+  (res as any).flushHeaders?.();
+
+  const sendEvent = (event: string, data: unknown) => {
+    res.write(`event: ${event}\n`);
+    res.write(`data: ${JSON.stringify(data)}\n\n`);
+  };
+
+  // Send initial snapshot so the dashboard can render immediately
+  try {
+    const logs = getLogs(500);
+    const metrics = getMetrics();
+    sendEvent('snapshot', { logs, metrics });
+  } catch (err: any) {
+    // eslint-disable-next-line no-console
+    console.error('[Monitor] Failed to send initial snapshot:', err?.message || err);
+  }
+
+  // Stream new logs as they arrive
+  const unsubscribe = subscribeLogs((log) => {
+    try {
+      sendEvent('log', log);
+      // Optionally send lightweight metrics update alongside each log
+      const metrics = getMetrics();
+      sendEvent('metrics', metrics);
+    } catch (err: any) {
+      // If writing fails, just detach this subscriber
+      // eslint-disable-next-line no-console
+      console.error('[Monitor] SSE write error:', err?.message || err);
+      unsubscribe();
+      res.end();
+    }
+  });
+
+  // Cleanup on client disconnect
+  req.on('close', () => {
+    unsubscribe();
+    res.end();
   });
 });
 
@@ -193,7 +243,7 @@ body{background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSy
 const tokenParam = '${tokenParam}';
 const BASE = '/monitor/api';
 let allLogs = [];
-let refreshInterval;
+let sse;
 
 // Extract token from URL params if present
 const urlParams = new URLSearchParams(window.location.search);
@@ -214,50 +264,9 @@ function fetchWithToken(url_path) {
   return fetch(url(url_path), options);
 }
 
-async function fetchData() {
-  try {
-    const method = document.getElementById('methodFilter').value;
-    const status = document.getElementById('statusFilter').value;
-    const search = document.getElementById('searchInput').value;
-    const params = new URLSearchParams();
-    if (method) params.set('method', method);
-    if (status) params.set('status', status);
-    if (search) params.set('search', search);
-    const qs = params.toString();
-
-    const logsPath = '/logs' + (qs ? '?' + qs : '');
-    
-    const [logsRes, metricsRes] = await Promise.all([
-      fetchWithToken(logsPath).then(r => {
-        if (!r.ok) {
-          console.error('Logs fetch error:', r.status, r.statusText);
-          if (r.status === 401) showAuthError();
-        }
-        return r.json();
-      }).catch(e => { console.error('Logs fetch failed:', e); return []; }),
-      fetchWithToken('/metrics').then(r => {
-        if (!r.ok) {
-          console.error('Metrics fetch error:', r.status, r.statusText);
-          if (r.status === 401) showAuthError();
-        }
-        return r.json();
-      }).catch(e => { console.error('Metrics fetch failed:', e); return { totalRequests: 0, totalErrors: 0, avgResponseTime: 0, requestsPerMinute: 0, statusCodes: {}, topEndpoints: [], startedAt: new Date().toISOString() }; }),
-    ]);
-
-    if (Array.isArray(logsRes)) {
-      allLogs = logsRes;
-      renderStats(metricsRes);
-      renderLogs(logsRes);
-      renderEndpoints(metricsRes.topEndpoints);
-      renderUptime(metricsRes.startedAt);
-    }
-  } catch (e) {
-    console.error('[Monitor] Fetch error:', e);
-  }
-}
-
 function showAuthError() {
   document.getElementById('logsBody').innerHTML = '<tr><td colspan="8" class="empty" style="color:var(--red)">❌ Authentication failed. Check your token.</td></tr>';
+  document.getElementById('liveDot').style.background = 'var(--red)';
 }
 
 function renderStats(m) {
@@ -272,9 +281,33 @@ function renderStats(m) {
   \`;
 }
 
+function getActiveFilters() {
+  return {
+    method: document.getElementById('methodFilter').value,
+    status: document.getElementById('statusFilter').value,
+    search: document.getElementById('searchInput').value.trim().toLowerCase(),
+  };
+}
+
+function applyFilters(logs) {
+  const { method, status, search } = getActiveFilters();
+  return logs.filter(l => {
+    if (method && l.method !== method) return false;
+    if (status === 'error' && l.statusCode < 400) return false;
+    if (status === 'slow' && l.duration <= 1000) return false;
+    if (search) {
+      const path = (l.path || '').toLowerCase();
+      const err = (l.error || '').toLowerCase();
+      if (!path.includes(search) && !err.includes(search)) return false;
+    }
+    return true;
+  });
+}
+
 function renderLogs(logs) {
-  if (!logs.length) { document.getElementById('logsBody').innerHTML = '<tr><td colspan="8" class="empty">No requests captured yet. Make some API calls!</td></tr>'; return; }
-  document.getElementById('logsBody').innerHTML = logs.map(l => \`
+  const filtered = applyFilters(logs);
+  if (!filtered.length) { document.getElementById('logsBody').innerHTML = '<tr><td colspan="8" class="empty">No matching requests. Try clearing filters.</td></tr>'; return; }
+  document.getElementById('logsBody').innerHTML = filtered.map(l => \`
     <tr class="\${l.statusCode>=400?'error':''} \${l.duration>1000?'slow':''}" onclick='showDetail("\${l.id}")' style="cursor:pointer">
       <td class="time">\${new Date(l.timestamp).toLocaleTimeString()}</td>
       <td><span class="method \${l.method}">\${l.method}</span></td>
@@ -337,37 +370,114 @@ async function clearAll() {
       return;
     }
     await res.json();
-    fetchData();
+    // After clear, reload a fresh snapshot
+    fetchSnapshot();
   } catch (e) {
     console.error('[Monitor] Clear error:', e);
   }
 }
 
-// Auto-refresh
-function startAutoRefresh() {
-  if (refreshInterval) clearInterval(refreshInterval);
-  refreshInterval = setInterval(() => {
-    if (document.getElementById('autoRefresh').checked) fetchData();
-  }, 2000);
+// Fallback one-off fetch (used on clear / error)
+async function fetchSnapshot() {
+  try {
+    const [logsRes, metricsRes] = await Promise.all([
+      fetchWithToken('/logs').then(r => {
+        if (!r.ok) {
+          console.error('Logs fetch error:', r.status, r.statusText);
+          if (r.status === 401) showAuthError();
+        }
+        return r.json();
+      }).catch(e => { console.error('Logs fetch failed:', e); return []; }),
+      fetchWithToken('/metrics').then(r => {
+        if (!r.ok) {
+          console.error('Metrics fetch error:', r.status, r.statusText);
+          if (r.status === 401) showAuthError();
+        }
+        return r.json();
+      }).catch(e => { console.error('Metrics fetch failed:', e); return { totalRequests: 0, totalErrors: 0, avgResponseTime: 0, requestsPerMinute: 0, statusCodes: {}, topEndpoints: [], startedAt: new Date().toISOString() }; }),
+    ]);
+
+    if (Array.isArray(logsRes)) {
+      allLogs = logsRes;
+      renderStats(metricsRes);
+      renderLogs(allLogs);
+      renderEndpoints(metricsRes.topEndpoints);
+      renderUptime(metricsRes.startedAt);
+    }
+  } catch (e) {
+    console.error('[Monitor] Snapshot fetch error:', e);
+  }
 }
 
-document.getElementById('autoRefresh').addEventListener('change', () => {
-  if (!document.getElementById('autoRefresh').checked && refreshInterval) clearInterval(refreshInterval);
-  else startAutoRefresh();
-});
+// Real-time SSE stream
+function startStream() {
+  if (sse) {
+    sse.close();
+  }
+  try {
+    const streamUrl = url('/stream');
+    sse = new EventSource(streamUrl);
 
-document.getElementById('methodFilter').addEventListener('change', fetchData);
-document.getElementById('statusFilter').addEventListener('change', fetchData);
+    sse.onopen = () => {
+      document.getElementById('liveDot').style.background = 'var(--green)';
+    };
+
+    sse.onerror = (err) => {
+      console.error('[Monitor] SSE error:', err);
+      document.getElementById('liveDot').style.background = 'var(--orange)';
+    };
+
+    sse.addEventListener('snapshot', (event) => {
+      try {
+        const payload = JSON.parse(event.data);
+        allLogs = Array.isArray(payload.logs) ? payload.logs : [];
+        renderStats(payload.metrics);
+        renderLogs(allLogs);
+        renderEndpoints(payload.metrics.topEndpoints || []);
+        renderUptime(payload.metrics.startedAt);
+      } catch (e) {
+        console.error('[Monitor] Snapshot parse error:', e);
+      }
+    });
+
+    sse.addEventListener('log', (event) => {
+      try {
+        const log = JSON.parse(event.data);
+        allLogs.unshift(log);
+        if (allLogs.length > 1000) allLogs.pop();
+        renderLogs(allLogs);
+      } catch (e) {
+        console.error('[Monitor] Log event parse error:', e);
+      }
+    });
+
+    sse.addEventListener('metrics', (event) => {
+      try {
+        const metrics = JSON.parse(event.data);
+        renderStats(metrics);
+        renderEndpoints(metrics.topEndpoints || []);
+        renderUptime(metrics.startedAt);
+      } catch (e) {
+        console.error('[Monitor] Metrics event parse error:', e);
+      }
+    });
+  } catch (e) {
+    console.error('[Monitor] Failed to start SSE stream:', e);
+  }
+}
+
+// Toolbar interactions — now just re-render from local logs
+document.getElementById('methodFilter').addEventListener('change', () => renderLogs(allLogs));
+document.getElementById('statusFilter').addEventListener('change', () => renderLogs(allLogs));
 let searchTimeout;
 document.getElementById('searchInput').addEventListener('input', () => {
   clearTimeout(searchTimeout);
-  searchTimeout = setTimeout(fetchData, 300);
+  searchTimeout = setTimeout(() => renderLogs(allLogs), 250);
 });
 
 document.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
 
-fetchData();
-startAutoRefresh();
+startStream();
 </script>
 </body>
 </html>`;

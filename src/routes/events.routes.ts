@@ -21,6 +21,9 @@
  *   GET    /events/:eventId/messages      — Get chat messages
  *   POST   /events/:eventId/posts         — Create activity post
  *   GET    /events/:eventId/posts         — List activity posts
+ *   GET    /events/:eventId/me            — Get current participant identity for this event
+ *   GET    /events/:eventId/profile       — Get current user's per-event profile
+ *   PUT    /events/:eventId/profile       — Upsert current user's per-event profile
  *
  * Post reactions:
  *   POST /posts/:postId/reactions         — React to a post
@@ -59,6 +62,9 @@ router.post('/:eventId/messages', authenticate, validate(eventIdParam, 'params')
 router.get('/:eventId/messages', authenticate, validate(eventIdParam, 'params'), ctrl.getMessages);
 router.post('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), validate(createPostSchema), ctrl.createPost);
 router.get('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), ctrl.getPosts);
+router.get('/:eventId/me', authenticate, validate(eventIdParam, 'params'), ctrl.getMyParticipant);
+router.get('/:eventId/profile', authenticate, validate(eventIdParam, 'params'), ctrl.getMyProfile);
+router.put('/:eventId/profile', authenticate, validate(eventIdParam, 'params'), ctrl.upsertMyProfile);
 
 // Post reactions (nested under /posts)
 const postsRouter = Router();

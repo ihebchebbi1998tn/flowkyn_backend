@@ -483,7 +483,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
-      if (!checkRateLimit(socket, 'game:action')) return;
+      if (!(await checkRateLimit(socket, 'game:action'))) return;
 
       try {
         // BUG FIX: Resolve participant ID from authenticated user instead of trusting client

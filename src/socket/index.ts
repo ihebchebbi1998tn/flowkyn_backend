@@ -12,19 +12,45 @@ import { AuthenticatedSocket } from './types';
 
 let io: Server;
 
-// ─── In-memory presence tracker ───
+// ─── Presence tracking: Redis (if configured) with in-memory fallback ───
 const presenceMap = new Map<string, Set<string>>(); // eventId -> Set<userId>
+let presenceClient: any | null = null;
+let rateClient: any | null = null;
 
-export function getPresence(roomId: string): string[] {
+export async function getPresence(roomId: string): Promise<string[]> {
+  if (presenceClient) {
+    try {
+      const members = await presenceClient.sMembers(`presence:${roomId}`);
+      return members || [];
+    } catch {
+      // Fallback to in-memory map if Redis fails
+    }
+  }
   return Array.from(presenceMap.get(roomId) || []);
 }
 
-export function addPresence(roomId: string, userId: string) {
+export async function addPresence(roomId: string, userId: string) {
+  if (presenceClient) {
+    try {
+      await presenceClient.sAdd(`presence:${roomId}`, userId);
+      return;
+    } catch {
+      // Fallback to in-memory
+    }
+  }
   if (!presenceMap.has(roomId)) presenceMap.set(roomId, new Set());
   presenceMap.get(roomId)!.add(userId);
 }
 
-export function removePresence(roomId: string, userId: string) {
+export async function removePresence(roomId: string, userId: string) {
+  if (presenceClient) {
+    try {
+      await presenceClient.sRem(`presence:${roomId}`, userId);
+      return;
+    } catch {
+      // Fallback to in-memory
+    }
+  }
   presenceMap.get(roomId)?.delete(userId);
   if (presenceMap.get(roomId)?.size === 0) presenceMap.delete(roomId);
 }
@@ -72,12 +98,38 @@ const RATE_LIMITS: Record<string, { max: number; windowMs: number }> = {
   default: { max: 50, windowMs: 10000 },
 };
 
-export function checkRateLimit(socket: any, eventName: string): boolean {
-  if (!rateLimitMap.has(socket)) rateLimitMap.set(socket, new Map());
-  const socketLimits = rateLimitMap.get(socket)!;
-
+export async function checkRateLimit(socket: any, eventName: string): Promise<boolean> {
   const config = RATE_LIMITS[eventName] || RATE_LIMITS.default;
   const now = Date.now();
+
+  // Prefer Redis-based rate limiting when available
+  if (rateClient && socket.user?.userId) {
+    try {
+      const key = `rate:${eventName}:${socket.user.userId}`;
+      const windowMs = config.windowMs;
+      const cutoff = now - windowMs;
+
+      // Use a sorted set of timestamps
+      const multi = rateClient.multi();
+      multi.zRemRangeByScore(key, 0, cutoff);
+      multi.zAdd(key, { score: now, value: String(now) });
+      multi.zCard(key);
+      multi.expire(key, Math.ceil(windowMs / 1000) + 1);
+      const [, , countResult] = await multi.exec();
+      const count = Number(countResult?.[1] ?? 0);
+
+      if (count > config.max) {
+        socket.emit('error', { message: 'Rate limit exceeded', code: 'RATE_LIMIT' });
+        return false;
+      }
+      return true;
+    } catch {
+      // Fallback to in-memory limiter if Redis fails
+    }
+  }
+
+  if (!rateLimitMap.has(socket)) rateLimitMap.set(socket, new Map());
+  const socketLimits = rateLimitMap.get(socket)!;
 
   if (!socketLimits.has(eventName)) socketLimits.set(eventName, []);
   const timestamps = socketLimits.get(eventName)!;
@@ -113,6 +165,39 @@ export function initializeSocket(server: HttpServer) {
       skipMiddlewares: false,
     },
   });
+
+  // Adapter-ready: if a Redis URL is configured, set up the Redis adapter
+  // so that rooms and presence work across multiple Node.js instances.
+  // This is entirely optional; if not configured, Socket.io will run in single-node mode.
+  const redisUrl = process.env.REDIS_URL || process.env.SOCKET_REDIS_URL;
+  if (redisUrl) {
+    // Dynamically import to avoid hard dependency when Redis is not used.
+    Promise.all([
+      import('@socket.io/redis-adapter'),
+      import('redis'),
+    ])
+      .then(([{ createAdapter }, redis]) => {
+        const { createClient } = redis as any;
+        const pubClient = createClient({ url: redisUrl });
+        const subClient = pubClient.duplicate();
+
+        // Separate client for presence + rate limiting
+        presenceClient = createClient({ url: redisUrl });
+        rateClient = presenceClient;
+
+        return Promise.all([
+          pubClient.connect(),
+          subClient.connect(),
+          presenceClient.connect(),
+        ]).then(() => {
+          io.adapter(createAdapter(pubClient, subClient));
+          console.log('🔁 Socket.io Redis adapter attached (rooms + presence + rate limits)');
+        });
+      })
+      .catch((err) => {
+        console.warn('Failed to initialize Socket.io Redis adapter:', err?.message || err);
+      });
+  }
 
   // Default namespace auth
   io.use(socketAuthMiddleware);

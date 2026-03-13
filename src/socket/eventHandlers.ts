@@ -105,7 +105,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         const roomId = `event:${data.eventId}`;
         socket.join(roomId);
         joinedRooms.add(data.eventId);
-        addPresence(data.eventId, user.userId);
+        await addPresence(data.eventId, user.userId);
 
         console.log(`[Events] User ${user.userId} joined event ${data.eventId} in room ${roomId}`);
 
@@ -136,7 +136,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
       const roomId = `event:${data.eventId}`;
       socket.leave(roomId);
       joinedRooms.delete(data.eventId);
-      removePresence(data.eventId, user.userId);
+      void removePresence(data.eventId, user.userId);
 
       socket.to(roomId).emit('event:user_left', {
         userId: user.userId,
@@ -151,7 +151,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         ack?.({ ok: false, error: 'Invalid data' });
         return;
       }
-      if (!checkRateLimit(socket, 'chat:message')) {
+      if (!(await checkRateLimit(socket, 'chat:message'))) {
         ack?.({ ok: false, error: 'Rate limited' });
         return;
       }
@@ -207,7 +207,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
     socket.on('chat:typing', async (data: { eventId: string; isTyping: boolean }) => {
       if (!validateFields(data, ['eventId'])) return;
-      if (!checkRateLimit(socket, 'chat:typing')) return;
+      if (!(await checkRateLimit(socket, 'chat:typing'))) return;
 
       // Resolve display name once per connection
       if (!cachedDisplayName) {
@@ -223,11 +223,12 @@ export function setupEventHandlers(eventsNs: Namespace) {
     });
 
     // ─── Request current presence ───
-    socket.on('event:presence', (data: { eventId: string }) => {
+    socket.on('event:presence', async (data: { eventId: string }) => {
       if (!validateFields(data, ['eventId'])) return;
+      const onlineUserIds = await getPresence(data.eventId);
       socket.emit('event:presence', {
         eventId: data.eventId,
-        onlineUserIds: getPresence(data.eventId),
+        onlineUserIds,
       });
     });
 
@@ -237,7 +238,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
       // Remove from all joined rooms' presence
       for (const eventId of joinedRooms) {
-        removePresence(eventId, user.userId);
+        void removePresence(eventId, user.userId);
         socket.to(`event:${eventId}`).emit('event:user_left', {
           userId: user.userId,
           timestamp: new Date().toISOString(),

@@ -195,6 +195,19 @@ CREATE INDEX idx_participants_active_range ON participants(event_id, left_at, jo
 -- Prevent duplicate active participants
 CREATE UNIQUE INDEX idx_participants_active ON participants(event_id, organization_member_id) WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
 
+-- ─── Event Profiles (per-event nickname + avatar) ───
+CREATE TABLE event_profiles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  display_name VARCHAR(100) NOT NULL,
+  avatar_url TEXT,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (event_id, participant_id)
+);
+CREATE INDEX idx_event_profiles_event ON event_profiles(event_id);
+
 -- ─── Event Messages ───
 CREATE TABLE event_messages (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

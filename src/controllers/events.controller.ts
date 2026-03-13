@@ -20,6 +20,7 @@ import { EventMessagesService } from '../services/events-messages.service';
 import { OrganizationsService } from '../services/organizations.service';
 import { AuditLogsService } from '../services/auditLogs.service';
 import { NotificationsService } from '../services/notifications.service';
+import { EventProfilesService } from '../services/events-profiles.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { emitEventUpdate, emitEventNotification } from '../socket/emitter';
@@ -31,6 +32,7 @@ const messagesService = new EventMessagesService();
 const orgsService = new OrganizationsService();
 const notificationsService = new NotificationsService();
 const audit = new AuditLogsService();
+const profilesService = new EventProfilesService();
 
 // ─── Authorization Helpers ────────────────────────────────────────────────────
 
@@ -82,6 +84,36 @@ async function verifyParticipantOwnership(participantId: string, userPayload: an
 
   // No match — user doesn't own this participant
   throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
+}
+
+/**
+ * Resolve the current participant_id for this event based on the authenticated user or guest token.
+ */
+async function requireCurrentParticipantId(eventId: string, userPayload: any): Promise<string> {
+  // Guest: participant id is encoded in the guest token payload
+  if (userPayload.isGuest) {
+    if (userPayload.eventId !== eventId) {
+      throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
+    }
+    return userPayload.participantId;
+  }
+
+  // Authenticated org member participant
+  const row = await queryOne<{ id: string }>(
+    `SELECT p.id
+     FROM participants p
+     JOIN organization_members om ON om.id = p.organization_member_id
+     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL
+     ORDER BY p.joined_at ASC NULLS LAST
+     LIMIT 1`,
+    [eventId, userPayload.userId],
+  );
+
+  if (!row) {
+    throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
+  }
+
+  return row.id;
 }
 
 // ─── Controller ───────────────────────────────────────────────────────────────
@@ -369,6 +401,138 @@ export class EventsController {
       emitEventNotification(req.params.eventId, 'participant:left', { userId: req.user!.userId });
       res.json(result);
     } catch (err) { next(err); }
+  }
+
+  /** GET /events/:eventId/me — Get the current participant identity for this event */
+  async getMyParticipant(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const event = await eventsService.getById(req.params.eventId);
+      const userPayload: any = req.user!;
+
+      // Guest: ensure they belong to this event via guest token payload
+      if (userPayload.isGuest) {
+        if (userPayload.eventId !== req.params.eventId) {
+          throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
+        }
+
+        const row = await queryOne<{
+          id: string;
+          participant_type: string;
+          guest_name: string | null;
+          guest_avatar: string | null;
+        }>(
+          `SELECT id, participant_type, guest_name, guest_avatar
+           FROM participants
+           WHERE id = $1 AND event_id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
+          [userPayload.participantId, req.params.eventId]
+        );
+
+        if (!row) {
+          throw new AppError('Participant not found', 404, 'NOT_FOUND');
+        }
+
+        return res.json({
+          id: row.id,
+          type: row.participant_type,
+          name: row.guest_name,
+          avatar: row.guest_avatar,
+          isGuest: true,
+        });
+      }
+
+      // Authenticated member: ensure they belong to the event's organization
+      const member = await orgsService.getMemberByUserId(event.organization_id, userPayload.userId);
+      if (!member) {
+        throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
+      }
+
+      const participant = await queryOne<{
+        id: string;
+        participant_type: string;
+        name: string;
+        avatar: string | null;
+      }>(
+        `SELECT p.id, p.participant_type,
+                COALESCE(u.name, p.guest_name, 'Unknown') as name,
+                COALESCE(u.avatar_url, p.guest_avatar) as avatar
+         FROM participants p
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL
+         ORDER BY p.joined_at ASC NULLS LAST
+         LIMIT 1`,
+        [req.params.eventId, userPayload.userId]
+      );
+
+      if (!participant) {
+        // Not a participant yet — return a 404 but with a clear semantic code
+        throw new AppError('You are not a participant in this event', 404, 'NOT_PARTICIPANT');
+      }
+
+      return res.json({
+        id: participant.id,
+        type: participant.participant_type,
+        name: participant.name,
+        avatar: participant.avatar,
+        isGuest: false,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /** GET /events/:eventId/profile — Get current user's per-event profile (display name + avatar) */
+  async getMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const participantId = await requireCurrentParticipantId(req.params.eventId, req.user!);
+      try {
+        const profile = await profilesService.getForParticipant(req.params.eventId, participantId);
+        res.json({
+          participant_id: participantId,
+          id: profile.id,
+          display_name: profile.display_name,
+          avatar_url: profile.avatar_url,
+        });
+      } catch (err: any) {
+        if (err?.code === 'PROFILE_NOT_FOUND') {
+          // If no profile exists yet, return a sensible default without 404
+          return res.json({
+            participant_id: participantId,
+            id: null,
+            display_name: '',
+            avatar_url: null,
+          });
+        }
+        throw err;
+      }
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /** PUT /events/:eventId/profile — Upsert current user's per-event profile */
+  async upsertMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { display_name, avatar_url } = req.body;
+      if (!display_name || typeof display_name !== 'string') {
+        throw new AppError('display_name is required', 400, 'VALIDATION_FAILED');
+      }
+      const participantId = await requireCurrentParticipantId(req.params.eventId, req.user!);
+      const profile = await profilesService.upsertForParticipant(
+        req.params.eventId,
+        participantId,
+        display_name.trim(),
+        avatar_url || null,
+      );
+      res.json({
+        participant_id: participantId,
+        id: profile.id,
+        display_name: profile.display_name,
+        avatar_url: profile.avatar_url,
+      });
+    } catch (err) {
+      next(err);
+    }
   }
 
   // ── Messages & Posts ──────────────────────────────────────────────────────
