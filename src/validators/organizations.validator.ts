@@ -20,7 +20,7 @@ export const updateOrgSchema = z.object({
 
 export const inviteMemberSchema = z.object({
   email: z.string().email('Invalid email'),
-  role_id: z.string().uuid('Invalid role ID'),
+  role_id: z.string().min(1, 'Role ID or name is required'),
   lang: z.string().max(10).optional(),
 });
 

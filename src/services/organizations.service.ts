@@ -70,13 +70,21 @@ export class OrganizationsService {
     );
   }
 
-  async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleId: string, lang?: string) {
+  async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleIdOrName: string, lang?: string) {
     const rawToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
     const org = await this.getById(orgId);
 
     const invitee = await queryOne<{ language: string }>('SELECT language FROM users WHERE email = $1', [email]);
     const emailLang = invitee?.language || lang || 'en';
+
+    let roleId = roleIdOrName;
+    const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(roleIdOrName);
+    if (!isUuid) {
+      const role = await queryOne<{ id: string }>('SELECT id FROM roles WHERE name = $1', [roleIdOrName.toLowerCase()]);
+      if (!role) throw new AppError('Invalid role specified', 400, 'VALIDATION_FAILED');
+      roleId = role.id;
+    }
 
     await query(
       `INSERT INTO organization_invitations (id, organization_id, email, role_id, invited_by_member_id, token, status, expires_at, created_at)
