@@ -62,13 +62,21 @@ function requireAdminRole(member: { role_name: string }, action: string) {
  * Supports both org-member participants and guest participants.
  * Prevents impersonation in message/post/action endpoints.
  */
-async function verifyParticipantOwnership(participantId: string, userId: string): Promise<void> {
+async function verifyParticipantOwnership(participantId: string, userPayload: any): Promise<void> {
+  // Check guest participant
+  if (userPayload.isGuest) {
+    if (userPayload.participantId !== participantId) {
+      throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
+    }
+    return;
+  }
+
   // Check org-member participant
   const memberRow = await queryOne(
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      WHERE p.id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
-    [participantId, userId]
+    [participantId, userPayload.userId]
   );
   if (memberRow) return;
 
@@ -351,7 +359,7 @@ export class EventsController {
   /** POST /events/:eventId/messages — Send a chat message */
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
+      await verifyParticipantOwnership(req.body.participant_id, req.user!);
       const result = await messagesService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
       await audit.create(null, req.user!.userId, 'EVENT_SEND_MESSAGE', { eventId: req.params.eventId, messageId: result.id });
       res.status(201).json(result);
@@ -362,8 +370,17 @@ export class EventsController {
   async getMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const event = await eventsService.getById(req.params.eventId);
-      const member = await orgsService.getMemberByUserId(event.organization_id, req.user!.userId);
-      if (!member) throw new AppError('You must be an organization member to view messages', 403, 'NOT_A_MEMBER');
+      const userPayload: any = req.user!;
+      
+      if (userPayload.isGuest) {
+        if (userPayload.eventId !== req.params.eventId) {
+          throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
+        }
+      } else {
+        const member = await orgsService.getMemberByUserId(event.organization_id, userPayload.userId);
+        if (!member) throw new AppError('You must be an organization member to view messages', 403, 'NOT_A_MEMBER');
+      }
+      
       const result = await messagesService.getMessages(req.params.eventId, req.query as any);
       res.json(result);
     } catch (err) { next(err); }
@@ -372,12 +389,12 @@ export class EventsController {
   /** POST /events/:eventId/posts — Create an activity post */
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
+      await verifyParticipantOwnership(req.body.participant_id, req.user!);
       const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
       await audit.create(null, req.user!.userId, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
       emitEventNotification(req.params.eventId, 'post:created', {
         postId: result.id,
-        authorId: req.user!.userId,
+        authorId: (req.user as any).userId || (req.user as any).participantId,
       });
       res.status(201).json(result);
     } catch (err) { next(err); }
@@ -386,7 +403,7 @@ export class EventsController {
   /** POST /posts/:postId/reactions — React to a post */
   async reactToPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!.userId);
+      await verifyParticipantOwnership(req.body.participant_id, req.user!);
       const result = await messagesService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
       await audit.create(null, req.user!.userId, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
       res.status(201).json(result);
