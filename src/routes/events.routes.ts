@@ -20,6 +20,7 @@
  *   POST   /events/:eventId/messages      — Send chat message
  *   GET    /events/:eventId/messages      — Get chat messages
  *   POST   /events/:eventId/posts         — Create activity post
+ *   GET    /events/:eventId/posts         — List activity posts
  *
  * Post reactions:
  *   POST /posts/:postId/reactions         — React to a post
@@ -57,6 +58,7 @@ router.post('/:eventId/leave', authenticate, validate(eventIdParam, 'params'), c
 router.post('/:eventId/messages', authenticate, validate(eventIdParam, 'params'), validate(sendMessageSchema), ctrl.sendMessage);
 router.get('/:eventId/messages', authenticate, validate(eventIdParam, 'params'), ctrl.getMessages);
 router.post('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), validate(createPostSchema), ctrl.createPost);
+router.get('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), ctrl.getPosts);
 
 // Post reactions (nested under /posts)
 const postsRouter = Router();

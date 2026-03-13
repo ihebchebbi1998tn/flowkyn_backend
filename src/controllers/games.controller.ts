@@ -80,6 +80,29 @@ export class GamesController {
     } catch (err) { next(err); }
   }
 
+  /**
+   * GET /events/:eventId/game-sessions/active
+   *
+   * Resolve the currently active game session for a given event + game type key.
+   * Supports both authenticated users and guests (via authenticateOrGuest).
+   * Returns null if no active session exists.
+   */
+  async getActiveSessionForEvent(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const gameKey = (req.query.game_key as string | undefined)?.trim();
+      if (!gameKey) {
+        throw new AppError('game_key query parameter is required', 400, 'VALIDATION_FAILED');
+      }
+
+      const session = await gamesService.getActiveSessionByEventAndKey(req.params.eventId, gameKey);
+
+      // For easier client handling, always return 200 with either a session object or null.
+      res.json(session || null);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async startRound(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       if (!req.user) throw new AppError('Only authenticated users can start rounds', 403, 'FORBIDDEN');

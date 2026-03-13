@@ -8,6 +8,25 @@ export class GamesService {
     return query('SELECT * FROM game_types ORDER BY name ASC');
   }
 
+  /**
+   * Find the most recent active game session for a given event + game type key.
+   * Returns null if no active session exists.
+   */
+  async getActiveSessionByEventAndKey(eventId: string, gameKey: string) {
+    const session = await queryOne<GameSessionRow>(
+      `SELECT gs.*
+       FROM game_sessions gs
+       JOIN game_types gt ON gt.id = gs.game_type_id
+       WHERE gs.event_id = $1
+         AND gt.key = $2
+         AND gs.status = 'active'
+       ORDER BY gs.started_at DESC
+       LIMIT 1`,
+      [eventId, gameKey]
+    );
+    return session || null;
+  }
+
   async startSession(eventId: string, gameTypeId: string) {
     const event = await queryOne('SELECT id, status FROM events WHERE id = $1', [eventId]);
     if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
@@ -17,18 +36,55 @@ export class GamesService {
     if (!gameType) throw new AppError('Game type not found', 404, 'NOT_FOUND');
 
     const sessionId = uuid();
-    const [session] = await query<GameSessionRow>(
-      `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, started_at)
-       VALUES ($1, $2, $3, 'active', 0, 30, NOW()) RETURNING *`,
-      [sessionId, eventId, gameTypeId]
-    );
-    return session;
+    // Create the session and an initial active round so clients can immediately
+    // submit actions without needing an admin-only "start round" step.
+    const result = await transaction(async (client) => {
+      const { rows: [session] } = await client.query(
+        `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, started_at)
+         VALUES ($1, $2, $3, 'active', 1, 30, NOW()) RETURNING *`,
+        [sessionId, eventId, gameTypeId]
+      );
+
+      const roundId = uuid();
+      await client.query(
+        `INSERT INTO game_rounds (id, game_session_id, round_number, round_duration_seconds, status, started_at)
+         VALUES ($1, $2, 1, 60, 'active', NOW())`,
+        [roundId, sessionId]
+      );
+
+      return { session, roundId };
+    });
+
+    // Include roundId for convenience to callers that need it.
+    return { ...result.session, active_round_id: result.roundId } as any;
   }
 
   async getSession(sessionId: string) {
     const session = await queryOne<GameSessionRow>('SELECT * FROM game_sessions WHERE id = $1', [sessionId]);
     if (!session) throw new AppError('Game session not found', 404, 'NOT_FOUND');
     return session;
+  }
+
+  async getActiveRound(sessionId: string) {
+    const round = await queryOne<GameRoundRow>(
+      `SELECT * FROM game_rounds
+       WHERE game_session_id = $1 AND status = 'active'
+       ORDER BY started_at DESC
+       LIMIT 1`,
+      [sessionId]
+    );
+    return round || null;
+  }
+
+  async getLatestSnapshot(sessionId: string) {
+    const snapshot = await queryOne<{ id: string; game_session_id: string; state: any; created_at: Date }>(
+      `SELECT * FROM game_state_snapshots
+       WHERE game_session_id = $1
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [sessionId]
+    );
+    return snapshot || null;
   }
 
   async startRound(sessionId: string) {

@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
 import { checkRateLimit } from './index';
 import { GamesService } from '../services/games.service';
-import { queryOne, transaction } from '../config/database';
+import { query, queryOne, transaction } from '../config/database';
 
 const gamesService = new GamesService();
 
@@ -26,7 +26,7 @@ const gameRoundNumberSchema = z.object({
 
 const gameActionSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
-  roundId: z.string().uuid('Invalid round ID'),
+  roundId: z.string().uuid('Invalid round ID').optional(),
   actionType: z.string().trim().min(1).max(50).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid action type'),
   payload: z.record(z.unknown()).refine(
     (val) => JSON.stringify(val).length <= 10000,
@@ -46,6 +46,210 @@ const gameEndSchema = z.object({
 const gameStateSyncSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
 });
+
+function isTwoTruthsAction(actionType: string) {
+  return actionType.startsWith('two_truths:');
+}
+
+function isCoffeeAction(actionType: string) {
+  return actionType.startsWith('coffee:');
+}
+
+async function getSessionGameKey(sessionId: string): Promise<string | null> {
+  const row = await queryOne<{ key: string }>(
+    `SELECT gt.key
+     FROM game_sessions gs
+     JOIN game_types gt ON gt.id = gs.game_type_id
+     WHERE gs.id = $1`,
+    [sessionId]
+  );
+  return row?.key || null;
+}
+
+type TwoTruthsState = {
+  kind: 'two-truths';
+  phase: 'waiting' | 'submit' | 'vote' | 'reveal' | 'results';
+  round: number;
+  totalRounds: number;
+  presenterParticipantId: string | null;
+  statements: { id: 's0' | 's1' | 's2'; text: string }[] | null;
+  votes: Record<string, 's0' | 's1' | 's2'>;
+  revealedLie: 's0' | 's1' | 's2' | null;
+};
+
+async function reduceTwoTruthsState(args: {
+  eventId: string;
+  participantId: string;
+  actionType: string;
+  payload: any;
+  prev: TwoTruthsState | null;
+}): Promise<TwoTruthsState> {
+  const { eventId, participantId, actionType, payload, prev } = args;
+
+  const base: TwoTruthsState = prev || {
+    kind: 'two-truths',
+    phase: 'waiting',
+    round: 1,
+    totalRounds: 4,
+    presenterParticipantId: null,
+    statements: null,
+    votes: {},
+    revealedLie: null,
+  };
+
+  if (actionType === 'two_truths:start') {
+    return {
+      ...base,
+      phase: 'submit',
+      presenterParticipantId: participantId,
+      totalRounds: Number(payload?.totalRounds) || base.totalRounds,
+      statements: null,
+      votes: {},
+      revealedLie: null,
+    };
+  }
+
+  if (actionType === 'two_truths:submit') {
+    const statements: string[] = Array.isArray(payload?.statements) ? payload.statements : [];
+    const normalized = [
+      { id: 's0' as const, text: String(statements[0] || '').slice(0, 300) },
+      { id: 's1' as const, text: String(statements[1] || '').slice(0, 300) },
+      { id: 's2' as const, text: String(statements[2] || '').slice(0, 300) },
+    ];
+    const ready = normalized.every(s => s.text.trim().length > 0);
+    if (!ready) return base;
+    return {
+      ...base,
+      phase: 'vote',
+      presenterParticipantId: participantId,
+      statements: normalized,
+      votes: {},
+      revealedLie: null,
+    };
+  }
+
+  if (actionType === 'two_truths:vote') {
+    const choice = payload?.statementId;
+    if (!['s0', 's1', 's2'].includes(choice)) return base;
+    if (base.presenterParticipantId && participantId === base.presenterParticipantId) return base;
+    return { ...base, votes: { ...base.votes, [participantId]: choice } };
+  }
+
+  if (actionType === 'two_truths:reveal') {
+    const lie: 's0' | 's1' | 's2' = (['s0', 's1', 's2'].includes(payload?.lieId) ? payload.lieId : 's2');
+    return { ...base, phase: 'reveal', revealedLie: lie };
+  }
+
+  if (actionType === 'two_truths:next_round') {
+    const nextRound = base.round + 1;
+    if (nextRound > base.totalRounds) return { ...base, phase: 'results' };
+
+    const row = await queryOne<{ next_id: string }>(
+      `WITH ordered AS (
+         SELECT p.id,
+                LEAD(p.id) OVER (ORDER BY p.created_at ASC) AS next_id
+         FROM participants p
+         WHERE p.event_id = $1 AND p.left_at IS NULL
+       )
+       SELECT COALESCE(
+         (SELECT next_id FROM ordered WHERE id = $2),
+         (SELECT id FROM participants WHERE event_id = $1 AND left_at IS NULL ORDER BY created_at ASC LIMIT 1)
+       ) AS next_id`,
+      [eventId, base.presenterParticipantId || participantId]
+    );
+
+    return {
+      ...base,
+      round: nextRound,
+      phase: 'submit',
+      presenterParticipantId: row?.next_id || null,
+      statements: null,
+      votes: {},
+      revealedLie: null,
+    };
+  }
+
+  return base;
+}
+
+type CoffeeState = {
+  kind: 'coffee-roulette';
+  phase: 'waiting' | 'matching' | 'chatting' | 'complete';
+  pairs: Array<{
+    id: string;
+    person1: { participantId: string; name: string; avatar: string };
+    person2: { participantId: string; name: string; avatar: string };
+    topic: string;
+  }>;
+  startedChatAt: string | null;
+};
+
+const COFFEE_TOPICS = [
+  "What's the most interesting thing you've learned recently?",
+  "If you could have dinner with anyone (alive or dead), who would it be?",
+  "What's a hobby or skill you'd love to pick up?",
+  "What was your first job? What did you learn from it?",
+  "If you could live anywhere in the world for a year, where would you go?",
+  "What's the best piece of advice you've ever received?",
+  "What's a book or movie that completely changed your perspective?",
+  "If you had to eat one meal for the rest of your life, what would it be?",
+  "What's the most spontaneous thing you've ever done?",
+  "Which fictional character do you relate to the most?",
+  "What's something you're surprisingly good at?",
+];
+
+async function reduceCoffeeState(args: {
+  eventId: string;
+  actionType: string;
+  payload: any;
+  prev: CoffeeState | null;
+}): Promise<CoffeeState> {
+  const { eventId, actionType, prev } = args;
+
+  const base: CoffeeState = prev || { kind: 'coffee-roulette', phase: 'waiting', pairs: [], startedChatAt: null };
+
+  if (actionType === 'coffee:shuffle') {
+    const participants = await query<{ id: string; name: string; avatar: string | null }>(
+      `SELECT p.id,
+              COALESCE(u.name, p.guest_name, 'Unknown') AS name,
+              COALESCE(u.avatar_url, p.guest_avatar) AS avatar
+       FROM participants p
+       LEFT JOIN organization_members om ON om.id = p.organization_member_id
+       LEFT JOIN users u ON u.id = om.user_id
+       WHERE p.event_id = $1 AND p.left_at IS NULL
+       ORDER BY p.created_at ASC`,
+      [eventId]
+    );
+    const shuffled = [...participants].sort(() => Math.random() - 0.5);
+    const pairs: CoffeeState['pairs'] = [];
+    for (let i = 0; i < shuffled.length; i += 2) {
+      if (i + 1 >= shuffled.length) break;
+      const p1 = shuffled[i];
+      const p2 = shuffled[i + 1];
+      pairs.push({
+        id: String(i / 2),
+        person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase() },
+        person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase() },
+        topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
+      });
+    }
+    return { ...base, phase: 'matching', pairs, startedChatAt: null };
+  }
+
+  if (actionType === 'coffee:start_chat') {
+    return { ...base, phase: 'chatting', startedChatAt: new Date().toISOString() };
+  }
+
+  if (actionType === 'coffee:end') {
+    return { ...base, phase: 'complete' };
+  }
+
+  if (actionType === 'coffee:reset') {
+    return { kind: 'coffee-roulette', phase: 'waiting', pairs: [], startedChatAt: null };
+  }
+
+  return base;
+}
 
 /** Verify the user is a participant in the game session's event and return their participant ID */
 async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
@@ -111,6 +315,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         const session = await gamesService.getSession(data.sessionId);
+        const activeRound = await gamesService.getActiveRound(data.sessionId);
+        const snapshot = await gamesService.getLatestSnapshot(data.sessionId);
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
         joinedSessions.add(data.sessionId);
@@ -123,7 +329,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
           timestamp: new Date().toISOString(),
         });
 
-        ack?.({ ok: true, data: { status: session.status, currentRound: session.current_round, participantId: participant.participantId } });
+        ack?.({
+          ok: true,
+          data: {
+            status: session.status,
+            currentRound: session.current_round,
+            activeRoundId: activeRound?.id || null,
+            participantId: participant.participantId,
+            snapshot: snapshot?.state || null,
+          },
+        });
       } catch (err: any) {
         console.error(`[Games] game:join error:`, err.message);
         socket.emit('error', { message: err.message, code: 'JOIN_ERROR' });
@@ -211,7 +426,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
     });
 
     // ─── Player action (persisted to DB, broadcast) ───
-    socket.on('game:action', async (data: { sessionId: string; roundId: string; actionType: string; payload: any }) => {
+    socket.on('game:action', async (data: { sessionId: string; roundId?: string; actionType: string; payload: any }) => {
       const validation = gameActionSchema.safeParse(data);
       if (!validation.success) {
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
@@ -227,9 +442,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
+        const activeRound = await gamesService.getActiveRound(data.sessionId);
+        const roundId = data.roundId || activeRound?.id;
+        if (!roundId) {
+          socket.emit('error', { message: 'No active round for this session', code: 'ROUND_NOT_ACTIVE' });
+          return;
+        }
+
         // Persist action to DB using server-resolved participant ID
         const action = await gamesService.submitAction(
-          data.sessionId, data.roundId, participant.participantId, data.actionType, data.payload || {}
+          data.sessionId, roundId, participant.participantId, data.actionType, data.payload || {}
         );
 
         // Broadcast to all players in session
@@ -240,6 +462,34 @@ export function setupGameHandlers(gamesNs: Namespace) {
           payload: data.payload,
           timestamp: action.created_at,
         });
+
+        // Shared game snapshots for supported games
+        const gameKey = await getSessionGameKey(data.sessionId);
+        const latest = await gamesService.getLatestSnapshot(data.sessionId);
+        const session = await gamesService.getSession(data.sessionId);
+
+        if (gameKey === 'two-truths' && isTwoTruthsAction(data.actionType)) {
+          const next = await reduceTwoTruthsState({
+            eventId: session.event_id,
+            participantId: participant.participantId,
+            actionType: data.actionType,
+            payload: data.payload,
+            prev: (latest?.state as any) || null,
+          });
+          await gamesService.saveSnapshot(data.sessionId, next);
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+        }
+
+        if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
+          const next = await reduceCoffeeState({
+            eventId: session.event_id,
+            actionType: data.actionType,
+            payload: data.payload,
+            prev: (latest?.state as any) || null,
+          });
+          await gamesService.saveSnapshot(data.sessionId, next);
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+        }
       } catch (err: any) {
         console.error(`[Games] game:action error:`, err.message);
         socket.emit('error', { message: err.message, code: 'ACTION_ERROR' });
@@ -329,6 +579,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         const session = await gamesService.getSession(data.sessionId);
+        const activeRound = await gamesService.getActiveRound(data.sessionId);
+        const snapshot = await gamesService.getLatestSnapshot(data.sessionId);
         socket.emit('game:state', {
           sessionId: data.sessionId,
           state: {
@@ -336,6 +588,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
             currentRound: session.current_round,
             startedAt: session.started_at,
             endedAt: session.ended_at,
+            activeRoundId: activeRound?.id || null,
+            snapshot: snapshot?.state || null,
           },
         });
       } catch (err: any) {

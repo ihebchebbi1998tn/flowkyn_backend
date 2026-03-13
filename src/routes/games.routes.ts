@@ -24,6 +24,8 @@ router.get('/game-types', authenticate, ctrl.listGameTypes);
 
 // Game sessions (under events) — admin-only operations
 router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
+// Resolve currently active session for an event + game key (supports guests)
+router.get('/events/:eventId/game-sessions/active', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getActiveSessionForEvent);
 router.post('/game-sessions/:id/rounds', authenticate, validate(uuidParam, 'params'), ctrl.startRound);
 router.post('/game-sessions/:id/finish', authenticate, validate(uuidParam, 'params'), ctrl.finishSession);
 

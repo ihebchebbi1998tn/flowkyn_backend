@@ -73,6 +73,82 @@ export class EventMessagesService {
   }
 
   /**
+   * Retrieve paginated activity posts for an event, including basic reaction aggregates.
+   *
+   * This powers async, wall-style games like "Wins of the Week" where posts
+   * should be shared across all participants instead of kept in local UI state.
+   */
+  async getPosts(eventId: string, pagination: { page?: number; limit?: number }) {
+    const { page, limit, offset } = parsePagination(pagination);
+
+    // Fetch posts with author display info
+    const [posts, [{ count }]] = await Promise.all([
+      query(
+        `SELECT ap.*,
+                COALESCE(u.name, p.guest_name, 'Unknown') AS author_name,
+                COALESCE(u.avatar_url, p.guest_avatar) AS author_avatar
+         FROM activity_posts ap
+         JOIN participants p ON p.id = ap.author_participant_id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE ap.event_id = $1
+         ORDER BY ap.created_at DESC
+         LIMIT $2 OFFSET $3`,
+        [eventId, limit, offset]
+      ),
+      query<{ count: string }>(
+        'SELECT COUNT(*) as count FROM activity_posts WHERE event_id = $1',
+        [eventId]
+      ),
+    ]);
+
+    if (posts.length === 0) {
+      return buildPaginatedResponse([], 0, page, limit);
+    }
+
+    // Aggregate reactions per post/type
+    const postIds = posts.map((p: any) => p.id);
+    const reactions = await query<{
+      post_id: string;
+      reaction_type: string;
+      count: string;
+    }>(
+      `SELECT post_id, reaction_type, COUNT(*)::text AS count
+       FROM post_reactions
+       WHERE post_id = ANY($1::uuid[])
+       GROUP BY post_id, reaction_type`,
+      [postIds]
+    );
+
+    const reactionsByPost = new Map<string, { type: string; count: number }[]>();
+    for (const r of reactions) {
+      if (!reactionsByPost.has(r.post_id)) reactionsByPost.set(r.post_id, []);
+      reactionsByPost.get(r.post_id)!.push({
+        type: r.reaction_type,
+        count: parseInt(r.count, 10),
+      });
+    }
+
+    const dataWithReactions = posts.map((p: any) => ({
+      id: p.id,
+      event_id: p.event_id,
+      author_participant_id: p.author_participant_id,
+      content: p.content,
+      created_at: p.created_at,
+      author_name: p.author_name,
+      author_avatar: p.author_avatar,
+      reactions: reactionsByPost.get(p.id) || [],
+    }));
+
+    return buildPaginatedResponse(
+      dataWithReactions,
+      parseInt(count, 10),
+      page,
+      limit
+    );
+  }
+
+  /**
    * Create an activity post in an event.
    * Posts are longer-form content (up to 5000 chars) displayed in the activity feed.
    *

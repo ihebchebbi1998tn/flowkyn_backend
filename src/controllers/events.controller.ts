@@ -386,6 +386,26 @@ export class EventsController {
     } catch (err) { next(err); }
   }
 
+  /** GET /events/:eventId/posts — Get paginated activity posts */
+  async getPosts(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const event = await eventsService.getById(req.params.eventId);
+      const userPayload: any = req.user!;
+
+      if (userPayload.isGuest) {
+        if (userPayload.eventId !== req.params.eventId) {
+          throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
+        }
+      } else {
+        const member = await orgsService.getMemberByUserId(event.organization_id, userPayload.userId);
+        if (!member) throw new AppError('You must be an organization member to view posts', 403, 'NOT_A_MEMBER');
+      }
+
+      const result = await messagesService.getPosts(req.params.eventId, req.query as any);
+      res.json(result);
+    } catch (err) { next(err); }
+  }
+
   /** POST /events/:eventId/posts — Create an activity post */
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
