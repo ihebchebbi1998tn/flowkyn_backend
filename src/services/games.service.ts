@@ -87,6 +87,29 @@ export class GamesService {
     return snapshot || null;
   }
 
+  async getSessionActions(sessionId: string) {
+    return query(
+      `SELECT ga.*, 
+              COALESCE(u.name, p.guest_name, 'Unknown') as participant_name
+       FROM game_actions ga
+       JOIN participants p ON p.id = ga.participant_id
+       LEFT JOIN organization_members om ON om.id = p.organization_member_id
+       LEFT JOIN users u ON u.id = om.user_id
+       WHERE ga.game_session_id = $1
+       ORDER BY ga.created_at ASC`,
+      [sessionId]
+    );
+  }
+
+  async getSessionSnapshots(sessionId: string) {
+    return query(
+      `SELECT * FROM game_state_snapshots
+       WHERE game_session_id = $1
+       ORDER BY created_at ASC`,
+      [sessionId]
+    );
+  }
+
   async startRound(sessionId: string) {
     const round = await transaction(async (client) => {
       const { rows: [session] } = await client.query(
@@ -142,7 +165,7 @@ export class GamesService {
     return action;
   }
 
-  async finishSession(sessionId: string) {
+  async finishSession(sessionId: string, customScores?: Record<string, number>) {
     const results = await transaction(async (client) => {
       const { rows: [session] } = await client.query(
         'SELECT * FROM game_sessions WHERE id = $1 FOR UPDATE',
@@ -170,30 +193,52 @@ export class GamesService {
       );
 
       if (actions.length > 0) {
-        // Build individual INSERT rows with correct, self-contained parameter lists.
-        // Each row: (id, game_session_id, participant_id, score, rank)
-        // score  = total action count for this participant (used as engagement score)
-        // rank   = ordinal position (1 = most actions)
-        const valueParts: string[] = [];
-        const params: any[] = [];
-        let paramIdx = 1;
+        let rowsToInsert: Array<{ participantId: string; score: number }> = [];
 
-        for (let i = 0; i < actions.length; i++) {
-          const rowId = uuid();
-          const score = Number(actions[i].action_count);
-          const rank = i + 1;
-          valueParts.push(
-            `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`
-          );
-          params.push(rowId, sessionId, actions[i].participant_id, score, rank);
+        if (customScores) {
+          // Flatten custom scores into an array, sorted by score descending
+          rowsToInsert = Object.entries(customScores)
+            .map(([pid, sc]) => ({ participantId: pid, score: sc }))
+            .sort((a, b) => b.score - a.score);
+            
+          // Include participants who might have 0 score but had actions
+          const matchedIds = new Set(rowsToInsert.map(r => r.participantId));
+          for (const action of actions) {
+            if (!matchedIds.has(action.participant_id)) {
+              rowsToInsert.push({ participantId: action.participant_id, score: 0 });
+            }
+          }
+        } else {
+          // Default: rank by number of actions
+          rowsToInsert = actions.map(a => ({
+            participantId: a.participant_id,
+            score: Number(a.action_count)
+          }));
         }
 
-        await client.query(
-          `INSERT INTO game_results (id, game_session_id, participant_id, score, rank, created_at)
-           VALUES ${valueParts.join(', ')}
-           ON CONFLICT (game_session_id, participant_id) DO UPDATE SET score = EXCLUDED.score, rank = EXCLUDED.rank`,
-          params
-        );
+        if (rowsToInsert.length > 0) {
+          const valueParts: string[] = [];
+          const params: any[] = [];
+          let paramIdx = 1;
+
+          for (let i = 0; i < rowsToInsert.length; i++) {
+            const rowId = uuid();
+            const score = rowsToInsert[i].score;
+            // Rank logic (handle ties if we want, but simple index based works for now)
+            const rank = i + 1;
+            valueParts.push(
+              `($${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, $${paramIdx++}, NOW())`
+            );
+            params.push(rowId, sessionId, rowsToInsert[i].participantId, score, rank);
+          }
+
+          await client.query(
+            `INSERT INTO game_results (id, game_session_id, participant_id, score, rank, created_at)
+             VALUES ${valueParts.join(', ')}
+             ON CONFLICT (game_session_id, participant_id) DO UPDATE SET score = EXCLUDED.score, rank = EXCLUDED.rank`,
+            params
+          );
+        }
       }
 
       return actions;

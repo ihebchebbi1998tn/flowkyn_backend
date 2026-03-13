@@ -2,7 +2,8 @@
  * Auto-migration — creates all tables IF NOT EXISTS on startup.
  * Uses a migrations tracking table to run incremental migrations.
  */
-import { pool } from './database';
+import { pool, stopPoolMonitor } from './database';
+
 
 /**
  * All migrations in order. Each runs exactly once (tracked by version).
@@ -534,6 +535,17 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE UNIQUE INDEX IF NOT EXISTS idx_game_actions_unique ON game_actions(round_id, participant_id, action_type);
     `,
   },
+  {
+    version: 8,
+    name: 'relax_game_actions_unique_constraint',
+    sql: `
+      -- Remove the overly strict unique index that prevents a participant from
+      -- submitting the same action type more than once per round.
+      -- This blocked game retries (e.g. re-submitting vote after reconnect) and
+      -- snapshot-based state machines that process repeated actions.
+      DROP INDEX IF EXISTS idx_game_actions_unique;
+    `,
+  },
 ];
 
 /**
@@ -580,4 +592,28 @@ export async function runMigrations(): Promise<void> {
   } finally {
     client.release();
   }
+}
+
+/**
+ * When this file is executed directly as a standalone script (e.g. via
+ * `tsx src/config/migrate.ts` in the postbuild step), run migrations and
+ * then shut down the connection pool so the process exits cleanly.
+ *
+ * When imported by the HTTP server (src/index.ts), this block is skipped.
+ */
+// require.main === module is the CommonJS equivalent of import.meta.url detection.
+// tsx honours it correctly even when transpiling TypeScript directly.
+if (require.main === module) {
+  runMigrations()
+    .then(() => {
+      console.log('Migration script finished — closing pool.');
+    })
+    .catch((err) => {
+      console.error('Migration script failed:', err);
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      stopPoolMonitor();
+      await pool.end();
+    });
 }

@@ -28,6 +28,8 @@ router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdPara
 router.get('/events/:eventId/game-sessions/active', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getActiveSessionForEvent);
 router.post('/game-sessions/:id/rounds', authenticate, validate(uuidParam, 'params'), ctrl.startRound);
 router.post('/game-sessions/:id/finish', authenticate, validate(uuidParam, 'params'), ctrl.finishSession);
+router.get('/game-sessions/:id/actions', authenticate, validate(uuidParam, 'params'), ctrl.getSessionActions);
+router.get('/game-sessions/:id/snapshots', authenticate, validate(uuidParam, 'params'), ctrl.getSessionSnapshots);
 
 // Game actions — supports BOTH authenticated users AND guests via authenticateOrGuest
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);

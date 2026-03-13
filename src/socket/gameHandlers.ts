@@ -75,6 +75,9 @@ type TwoTruthsState = {
   statements: { id: 's0' | 's1' | 's2'; text: string }[] | null;
   votes: Record<string, 's0' | 's1' | 's2'>;
   revealedLie: 's0' | 's1' | 's2' | null;
+  scores: Record<string, number>;
+  submitEndsAt?: string;
+  voteEndsAt?: string;
 };
 
 async function reduceTwoTruthsState(args: {
@@ -95,6 +98,7 @@ async function reduceTwoTruthsState(args: {
     statements: null,
     votes: {},
     revealedLie: null,
+    scores: {},
   };
 
   if (actionType === 'two_truths:start') {
@@ -106,6 +110,7 @@ async function reduceTwoTruthsState(args: {
       statements: null,
       votes: {},
       revealedLie: null,
+      submitEndsAt: new Date(Date.now() + 30000).toISOString(),
     };
   }
 
@@ -125,6 +130,7 @@ async function reduceTwoTruthsState(args: {
       statements: normalized,
       votes: {},
       revealedLie: null,
+      voteEndsAt: new Date(Date.now() + 20000).toISOString(),
     };
   }
 
@@ -137,7 +143,21 @@ async function reduceTwoTruthsState(args: {
 
   if (actionType === 'two_truths:reveal') {
     const lie: 's0' | 's1' | 's2' = (['s0', 's1', 's2'].includes(payload?.lieId) ? payload.lieId : 's2');
-    return { ...base, phase: 'reveal', revealedLie: lie };
+    
+    // Calculate new scores
+    const updatedScores = { ...base.scores };
+    for (const [voterId, vote] of Object.entries(base.votes)) {
+      if (vote === lie) {
+        updatedScores[voterId] = (updatedScores[voterId] || 0) + 100;
+      }
+    }
+
+    return { 
+      ...base, 
+      phase: 'reveal', 
+      revealedLie: lie,
+      scores: updatedScores 
+    };
   }
 
   if (actionType === 'two_truths:next_round') {
@@ -166,6 +186,7 @@ async function reduceTwoTruthsState(args: {
       statements: null,
       votes: {},
       revealedLie: null,
+      submitEndsAt: new Date(Date.now() + 30000).toISOString(),
     };
   }
 
@@ -182,6 +203,7 @@ type CoffeeState = {
     topic: string;
   }>;
   startedChatAt: string | null;
+  chatEndsAt?: string;
 };
 
 const COFFEE_TOPICS = [
@@ -237,7 +259,13 @@ async function reduceCoffeeState(args: {
   }
 
   if (actionType === 'coffee:start_chat') {
-    return { ...base, phase: 'chatting', startedChatAt: new Date().toISOString() };
+    const chatDurationMinutes = 30; // Using 30 minutes chat limit
+    return { 
+      ...base, 
+      phase: 'chatting', 
+      startedChatAt: new Date().toISOString(),
+      chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString()
+    };
   }
 
   if (actionType === 'coffee:end') {
@@ -549,7 +577,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const { results } = await gamesService.finishSession(data.sessionId);
+        // Fetch the latest snapshot to see if we have custom scores (e.g., Two Truths)
+        const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+        const state = latestSnapshot?.state as any;
+        let finalScores: Record<string, number> | undefined;
+
+        if (state?.kind === 'two-truths' && state.scores) {
+          finalScores = state.scores;
+        }
+
+        const { results } = await gamesService.finishSession(data.sessionId, finalScores);
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
           sessionId: data.sessionId,

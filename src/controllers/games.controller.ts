@@ -195,4 +195,48 @@ export class GamesController {
       res.json(result);
     } catch (err) { next(err); }
   }
+
+  async getSessionActions(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can view actions', 403, 'FORBIDDEN');
+      
+      const session = await gamesService.getSession(req.params.id);
+      const member = await queryOne<{ id: string; role_name: string }>(
+        `SELECT om.id, r.name as role_name FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+        [session.event_id, req.user.userId]
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can view actions', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const actions = await gamesService.getSessionActions(req.params.id);
+      res.json(actions);
+    } catch (err) { next(err); }
+  }
+
+  async getSessionSnapshots(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can view snapshots', 403, 'FORBIDDEN');
+      
+      const session = await gamesService.getSession(req.params.id);
+      const member = await queryOne<{ id: string; role_name: string }>(
+        `SELECT om.id, r.name as role_name FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status = 'active'`,
+        [session.event_id, req.user.userId]
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can view snapshots', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const snapshots = await gamesService.getSessionSnapshots(req.params.id);
+      res.json(snapshots);
+    } catch (err) { next(err); }
+  }
 }
