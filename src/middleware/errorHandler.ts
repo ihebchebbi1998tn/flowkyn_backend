@@ -30,6 +30,7 @@ export type ErrorCode =
   | 'INVALID_FORMAT'
   // Resources
   | 'NOT_FOUND'
+  | 'PROFILE_NOT_FOUND'
   | 'ALREADY_EXISTS'
   | 'CONFLICT'
   | 'REFERENCED_NOT_FOUND'
