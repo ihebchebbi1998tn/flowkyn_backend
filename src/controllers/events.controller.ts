@@ -414,7 +414,7 @@ export class EventsController {
   async getMyParticipant(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       const event = await eventsService.getById(req.params.eventId);
       const userPayload: any = auth;
 
@@ -494,7 +494,7 @@ export class EventsController {
   async getMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       const participantId = await requireCurrentParticipantId(req.params.eventId, auth);
       try {
         const profile = await profilesService.getForParticipant(req.params.eventId, participantId);
@@ -525,7 +525,7 @@ export class EventsController {
   async upsertMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       const { display_name, avatar_url } = req.body;
       if (!display_name || typeof display_name !== 'string') {
         throw new AppError('display_name is required', 400, 'VALIDATION_FAILED');
@@ -554,7 +554,7 @@ export class EventsController {
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
       await audit.create(null, auth.userId ?? null, 'EVENT_SEND_MESSAGE', { eventId: req.params.eventId, messageId: result.id });
@@ -566,7 +566,7 @@ export class EventsController {
   async getMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       const event = await eventsService.getById(req.params.eventId);
       const userPayload: any = auth;
       
@@ -588,7 +588,7 @@ export class EventsController {
   async getPosts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       const event = await eventsService.getById(req.params.eventId);
       const userPayload: any = auth;
 
@@ -612,7 +612,7 @@ export class EventsController {
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
       await audit.create(null, auth.userId ?? null, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
@@ -628,7 +628,7 @@ export class EventsController {
   async reactToPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const auth = getEventAuthPayload(req);
-      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
       await audit.create(null, auth.userId ?? null, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
