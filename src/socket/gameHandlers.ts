@@ -28,11 +28,20 @@ const gameRoundNumberSchema = z.object({
 const gameActionSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
   roundId: z.string().uuid('Invalid round ID').optional(),
-  actionType: z.string().trim().min(1).max(50).regex(/^[a-zA-Z0-9_-]+$/, 'Invalid action type'),
-  payload: z.record(z.unknown()).refine(
-    (val) => JSON.stringify(val).length <= 10000,
-    { message: 'Payload too large (max 10KB)' }
-  ).optional(),
+  // Allow simple keys plus colon separators so actions like "two_truths:start" are valid.
+  actionType: z
+    .string()
+    .trim()
+    .min(1)
+    .max(50)
+    .regex(/^[a-zA-Z0-9_:-]+$/, 'Invalid action type'),
+  payload: z
+    .record(z.unknown())
+    .refine(
+      (val) => JSON.stringify(val).length <= 10000,
+      { message: 'Payload too large (max 10KB)' }
+    )
+    .optional(),
 });
 
 const gameRoundEndSchema = z.object({
