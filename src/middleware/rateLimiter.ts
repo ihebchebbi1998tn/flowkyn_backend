@@ -52,7 +52,7 @@ export const authRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => env.nodeEnv === 'test',
+  skip: () => true, // Disabled by user request
 });
 
 /**
@@ -68,7 +68,7 @@ export const uploadRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => env.nodeEnv === 'test',
+  skip: () => true, // Disabled by user request
 });
 
 /**
@@ -84,5 +84,5 @@ export const publicRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => env.nodeEnv === 'test',
+  skip: () => true, // Disabled by user request
 });
