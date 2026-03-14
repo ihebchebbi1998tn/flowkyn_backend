@@ -57,6 +57,13 @@ export class EventsService {
          VALUES ($1, $2, true, false, 5)`,
         [eventId, allowGuests]
       );
+      // Auto-join creator so they can use /me, messages, posts, etc. when landing on play
+      const participantId = uuid();
+      await client.query(
+        `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+         VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+        [participantId, eventId, memberId]
+      );
       return ev;
     });
 

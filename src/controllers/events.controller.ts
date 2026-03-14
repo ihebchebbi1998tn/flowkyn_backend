@@ -303,6 +303,7 @@ export class EventsController {
   async getPinnedMessage(req: Request, res: Response, next: NextFunction) {
     try {
       const eventId = req.params.eventId;
+      // Only query when there is a pinned message (LEFT JOIN + WHERE filters out NULL safely)
       const row = await queryOne<any>(
         `SELECT em.*,
                 p.guest_name,
@@ -312,15 +313,15 @@ export class EventsController {
                 COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as user_name,
                 COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) as avatar_url
          FROM events e
-         JOIN event_messages em ON em.id = e.pinned_message_id
+         LEFT JOIN event_messages em ON em.id = e.pinned_message_id
          LEFT JOIN participants p ON p.id = em.participant_id
          LEFT JOIN event_profiles ep ON ep.event_id = em.event_id AND ep.participant_id = em.participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
-         WHERE e.id = $1`,
+         WHERE e.id = $1 AND e.pinned_message_id IS NOT NULL`,
         [eventId]
       );
-      if (!row) {
+      if (!row || !row.id) {
         res.json(null);
         return;
       }
