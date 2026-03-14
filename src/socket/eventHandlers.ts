@@ -101,6 +101,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
 
       try {
+        console.log(`[Events] User ${user.userId} attempting to join event ${data.eventId}`);
         // Verify user is a participant in this event (auto-inserts org members who bypassed the Lobby)
         const participant = await verifyParticipant(data.eventId, user.userId, socket);
         if (!participant) {
@@ -115,7 +116,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         joinedRooms.add(data.eventId);
         await addPresence(data.eventId, user.userId);
 
-        console.log(`[Events] User ${user.userId} joined event ${data.eventId} in room ${roomId}`);
+        console.log(`[Events] User ${user.userId} joined event ${data.eventId} in room ${roomId}. Socket ID: ${socket.id}`);
 
         // Notify others
         socket.to(roomId).emit('event:user_joined', {
@@ -131,7 +132,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
         ack?.({ ok: true, data: { participantId: participant.participantId } });
       } catch (err: any) {
-        console.error(`[Events] event:join error:`, err.message, err.stack);
+        console.error(`[Events] event:join error for user ${user.userId} in event ${data.eventId}:`, err.message, err.stack);
         socket.emit('error', { message: 'Failed to join event room', code: 'INTERNAL' });
         ack?.({ ok: false, error: 'Server error' });
       }
@@ -151,15 +152,19 @@ export function setupEventHandlers(eventsNs: Namespace) {
         timestamp: new Date().toISOString(),
       });
     });
-
     // ─── Chat message (persisted to DB) ───
     socket.on('chat:message', async (data: { eventId: string; message: string }, ack) => {
+      console.log(`[Events] chat:message received from user ${user.userId}:`, data);
+      
       if (!validateFields(data, ['eventId', 'message'])) {
+        console.warn(`[Events] Invalid chat:message data from user ${user.userId}`);
         socket.emit('error', { message: 'Invalid chat message data', code: 'VALIDATION' });
         ack?.({ ok: false, error: 'Invalid data' });
         return;
       }
+      
       if (!(await checkRateLimit(socket, 'chat:message'))) {
+        console.warn(`[Events] Rate limit hit for chat:message from user ${user.userId}`);
         ack?.({ ok: false, error: 'Rate limited' });
         return;
       }
@@ -168,6 +173,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
       // verifyParticipant auto-inserts org members (including organizers) who bypassed the Lobby
       const participant = await verifyParticipant(data.eventId, user.userId, socket);
       if (!participant) {
+        console.warn(`[Events] User ${user.userId} is not a participant in event ${data.eventId}`);
         socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
         ack?.({ ok: false, error: 'Not a participant' });
         return;
@@ -186,11 +192,11 @@ export function setupEventHandlers(eventsNs: Namespace) {
         const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
 
         const roomId = `event:${data.eventId}`;
-        console.log(`[Events] Broadcasting message from ${participant.displayName} (${user.userId}) to room ${roomId}`);
+        console.log(`[Events] Broadcasting message from ${participant.displayName} (${user.userId}) to room ${roomId}. Message ID: ${saved.id}`);
 
         // Broadcast to all in room (including sender for confirmation)
         // Include senderName and senderAvatarUrl for proper display
-        eventsNs.to(roomId).emit('chat:message', {
+        const broadcastData = {
           id: saved.id,
           participantId: participant.participantId,
           senderName: participant.displayName,
@@ -198,9 +204,11 @@ export function setupEventHandlers(eventsNs: Namespace) {
           message,
           userId: user.userId,
           timestamp: saved.created_at,
-        });
+        };
+        
+        eventsNs.to(roomId).emit('chat:message', broadcastData);
 
-        console.log(`[Events] Message broadcast complete to room ${roomId}`);
+        console.log(`[Events] Message broadcast complete to room ${roomId}. Sent to all members.`);
         ack?.({ ok: true }); // Send acknowledgment after broadcasting
       } catch (err: any) {
         console.error(`[Events] chat:message error:`, err.message, err.stack);
@@ -208,6 +216,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         ack?.({ ok: false, error: err.message });
       }
     });
+
 
     // ─── Typing indicator (not persisted) ───
     // Cache user display name for typing events to avoid DB lookups
