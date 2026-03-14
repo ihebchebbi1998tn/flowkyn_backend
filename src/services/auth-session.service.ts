@@ -66,6 +66,16 @@ export class AuthSessionService {
       );
     });
 
+    // Fetch user with organization_id
+    const userWithOrg = await queryOne<UserRow & { organization_id?: string }>(
+      `SELECT u.*, om.organization_id
+       FROM users u
+       LEFT JOIN organization_members om ON om.user_id = u.id AND om.status = 'active'
+       WHERE u.id = $1
+       ORDER BY om.created_at DESC LIMIT 1`,
+      [user.id]
+    );
+
     return {
       access_token: accessToken,
       refresh_token: refreshToken,
@@ -77,6 +87,7 @@ export class AuthSessionService {
         language: user.language,
         status: user.status,
         onboarding_completed: user.onboarding_completed,
+        organization_id: userWithOrg?.organization_id,
         created_at: user.created_at,
         updated_at: user.updated_at,
       },

@@ -132,10 +132,15 @@ export class AuthService {
     return this.sessions.logout(userId, refreshToken);
   }
 
-  /** Get current user profile (excluding password_hash) */
+  /** Get current user profile (including organization_id) */
   async getMe(userId: string) {
-    const user = await queryOne<Omit<UserRow, 'password_hash'>>(
-      `SELECT id, email, name, avatar_url, language, status, onboarding_completed, created_at, updated_at FROM users WHERE id = $1`,
+    const user = await queryOne<Omit<UserRow, 'password_hash'> & { organization_id?: string }>(
+      `SELECT u.id, u.email, u.name, u.avatar_url, u.language, u.status, u.onboarding_completed, u.created_at, u.updated_at,
+              om.organization_id
+       FROM users u
+       LEFT JOIN organization_members om ON om.user_id = u.id AND om.status = 'active'
+       WHERE u.id = $1
+       ORDER BY om.created_at DESC LIMIT 1`,
       [userId]
     );
     if (!user) throw new AppError('User not found', 404, 'NOT_FOUND');
