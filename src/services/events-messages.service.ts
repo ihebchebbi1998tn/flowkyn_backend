@@ -66,7 +66,9 @@ export class EventMessagesService {
          LEFT JOIN event_profiles ep ON ep.event_id = em.event_id AND ep.participant_id = em.participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
-         WHERE em.event_id = $1 ORDER BY em.created_at ASC LIMIT $2 OFFSET $3`,
+         WHERE em.event_id = $1
+         ORDER BY em.created_at ASC
+         LIMIT $2 OFFSET $3`,
         [eventId, limit, offset]
       ),
       query<{ count: string }>('SELECT COUNT(*) as count FROM event_messages WHERE event_id = $1', [eventId]),
@@ -90,7 +92,7 @@ export class EventMessagesService {
                 COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') AS author_name,
                 COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) AS author_avatar
          FROM activity_posts ap
-         JOIN participants p ON p.id = ap.author_participant_id
+         LEFT JOIN participants p ON p.id = ap.author_participant_id
          LEFT JOIN event_profiles ep ON ep.event_id = ap.event_id AND ep.participant_id = ap.author_participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id

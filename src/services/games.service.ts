@@ -30,6 +30,13 @@ export class GamesService {
   async startSession(eventId: string, gameTypeId: string) {
     const event = await queryOne('SELECT id, status FROM events WHERE id = $1', [eventId]);
     if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
+    
+    // Auto-activate event if it's in draft status
+    if (event.status === 'draft') {
+      await query('UPDATE events SET status = $1, updated_at = NOW() WHERE id = $2', ['active', eventId]);
+      event.status = 'active';
+    }
+
     if (event.status !== 'active') throw new AppError('Cannot start a game — event is not active (current status: ' + event.status + ')', 400, 'SESSION_NOT_ACTIVE');
 
     const gameType = await queryOne('SELECT id FROM game_types WHERE id = $1', [gameTypeId]);

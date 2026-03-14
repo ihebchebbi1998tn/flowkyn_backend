@@ -47,7 +47,7 @@ export class EventsService {
     const event = await transaction(async (client) => {
       const { rows: [ev] } = await client.query(
         `INSERT INTO events (id, organization_id, created_by_member_id, title, description, event_mode, visibility, max_participants, start_time, end_time, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', NOW(), NOW()) RETURNING *`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', NOW(), NOW()) RETURNING *`,
         [eventId, data.organization_id, memberId, data.title, data.description || '',
          data.event_mode || 'sync', data.visibility || 'private', data.max_participants || 50,
          data.start_time || null, data.end_time || null]
@@ -85,7 +85,7 @@ export class EventsService {
    */
   async getPublicInfo(eventId: string) {
     const event = await queryOne<any>(
-      `SELECT e.id, e.title, e.description, e.event_mode, e.visibility,
+      `SELECT e.id, e.organization_id, e.title, e.description, e.event_mode, e.visibility,
               e.max_participants, e.start_time, e.end_time, e.status,
               e.created_at, es.allow_guests,
               o.name as organization_name, o.logo_url as organization_logo,
