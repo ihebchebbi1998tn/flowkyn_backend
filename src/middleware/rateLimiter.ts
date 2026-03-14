@@ -36,7 +36,7 @@ export const apiRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => env.nodeEnv === 'test', // Skip in test environment
+  skip: () => true, // Disabled by user request
 });
 
 /**
