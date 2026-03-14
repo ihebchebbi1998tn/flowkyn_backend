@@ -118,7 +118,7 @@ export function setupEventHandlers(eventsNs: Namespace) {
         // Send current presence to the joining user
         socket.emit('event:presence', {
           eventId: data.eventId,
-          onlineUserIds: getPresence(data.eventId),
+          onlineUserIds: await getPresence(data.eventId),
         });
 
         ack?.({ ok: true, data: { participantId: participant.participantId } });

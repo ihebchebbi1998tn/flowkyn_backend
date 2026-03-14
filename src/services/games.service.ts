@@ -35,10 +35,30 @@ export class GamesService {
     const gameType = await queryOne('SELECT id FROM game_types WHERE id = $1', [gameTypeId]);
     if (!gameType) throw new AppError('Game type not found', 404, 'NOT_FOUND');
 
-    const sessionId = uuid();
-    // Create the session and an initial active round so clients can immediately
-    // submit actions without needing an admin-only "start round" step.
     const result = await transaction(async (client) => {
+      // Lock the event row to serialize session creation for this event
+      await client.query('SELECT id FROM events WHERE id = $1 FOR UPDATE', [eventId]);
+
+      // Concurrency check: prevent multiple active sessions for the same game
+      const { rows: [existing] } = await client.query(
+        `SELECT gs.id
+         FROM game_sessions gs
+         WHERE gs.event_id = $1 AND gs.game_type_id = $2 AND gs.status = 'active'`,
+         [eventId, gameTypeId]
+      );
+
+      if (existing) {
+        // Return existing session ID and fetch its active round
+        const { rows: [activeRound] } = await client.query(
+           `SELECT id FROM game_rounds WHERE game_session_id = $1 AND status = 'active' ORDER BY started_at DESC LIMIT 1`,
+           [existing.id]
+        );
+        return { session: existing, roundId: activeRound?.id || null, isNew: false };
+      }
+
+      const sessionId = uuid();
+      // Create the session and an initial active round so clients can immediately
+      // submit actions without needing an admin-only "start round" step.
       const { rows: [session] } = await client.query(
         `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, started_at)
          VALUES ($1, $2, $3, 'active', 1, 30, NOW()) RETURNING *`,
@@ -52,8 +72,14 @@ export class GamesService {
         [roundId, sessionId]
       );
 
-      return { session, roundId };
+      return { session, roundId, isNew: true };
     });
+
+    if (!result.isNew) {
+      // Just fetch the full existing session to return it
+      const fullExistingSession = await queryOne('SELECT * FROM game_sessions WHERE id = $1', [result.session.id]);
+      return { ...fullExistingSession, active_round_id: result.roundId } as any;
+    }
 
     // Include roundId for convenience to callers that need it.
     return { ...result.session, active_round_id: result.roundId } as any;
