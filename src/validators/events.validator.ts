@@ -9,6 +9,7 @@ export const createEventSchema = z.object({
   max_participants: z.number().int().min(2).max(500).optional(),
   start_time: z.string().datetime().optional(),
   end_time: z.string().datetime().optional(),
+  allow_guests: z.boolean().optional(),
 });
 
 export const updateEventSchema = z.object({

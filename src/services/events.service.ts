@@ -39,9 +39,10 @@ export class EventsService {
   async create(memberId: string, data: {
     organization_id: string; title: string; description?: string;
     event_mode?: string; visibility?: string; max_participants?: number;
-    start_time?: string; end_time?: string;
+    start_time?: string; end_time?: string; allow_guests?: boolean;
   }) {
     const eventId = uuid();
+    const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
 
     const event = await transaction(async (client) => {
       const { rows: [ev] } = await client.query(
@@ -53,8 +54,8 @@ export class EventsService {
       );
       await client.query(
         `INSERT INTO event_settings (event_id, allow_guests, allow_chat, auto_start_games, max_rounds)
-         VALUES ($1, true, true, false, 5)`,
-        [eventId]
+         VALUES ($1, $2, true, false, 5)`,
+        [eventId, allowGuests]
       );
       return ev;
     });
@@ -121,10 +122,18 @@ export class EventsService {
 
     const [data, [{ count }]] = await Promise.all([
       query<any>(
-        `SELECT p.id, p.participant_type, p.guest_name, p.guest_avatar, p.joined_at, p.created_at,
-                u.name as user_name, u.avatar_url as user_avatar, u.email as user_email,
-                om.id as member_id
+        `SELECT p.id,
+                p.participant_type,
+                p.guest_name,
+                p.guest_avatar,
+                p.joined_at,
+                p.created_at,
+                u.name as user_name,
+                u.avatar_url as user_avatar,
+                om.id as member_id,
+                e.created_by_member_id
          FROM participants p
+         JOIN events e ON e.id = p.event_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
          WHERE p.event_id = $1 AND p.left_at IS NULL
@@ -143,7 +152,8 @@ export class EventsService {
       type: p.participant_type,
       name: p.participant_type === 'guest' ? p.guest_name : p.user_name,
       avatar: p.participant_type === 'guest' ? p.guest_avatar : p.user_avatar,
-      email: p.participant_type === 'guest' ? null : p.user_email,
+      email: null,
+      is_host: !!p.member_id && p.member_id === p.created_by_member_id,
       joined_at: p.joined_at,
     }));
 

@@ -24,7 +24,7 @@ import { EventProfilesService } from '../services/events-profiles.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { emitEventUpdate, emitEventNotification } from '../socket/emitter';
-import { queryOne } from '../config/database';
+import { query, queryOne } from '../config/database';
 
 const eventsService = new EventsService();
 const invitationsService = new EventInvitationsService();
@@ -297,6 +297,37 @@ export class EventsController {
     } catch (err) { next(err); }
   }
 
+  /**
+   * GET /events/:eventId/pinned-message — Get the currently pinned chat message for an event, if any.
+   */
+  async getPinnedMessage(req: Request, res: Response, next: NextFunction) {
+    try {
+      const eventId = req.params.eventId;
+      const row = await queryOne<any>(
+        `SELECT em.*,
+                p.guest_name,
+                p.participant_type,
+                p.guest_avatar,
+                u.id as user_id,
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as user_name,
+                COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) as avatar_url
+         FROM events e
+         JOIN event_messages em ON em.id = e.pinned_message_id
+         LEFT JOIN participants p ON p.id = em.participant_id
+         LEFT JOIN event_profiles ep ON ep.event_id = em.event_id AND ep.participant_id = em.participant_id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE e.id = $1`,
+        [eventId]
+      );
+      if (!row) {
+        res.json(null);
+        return;
+      }
+      res.json(row);
+    } catch (err) { next(err); }
+  }
+
   // ── Participation ─────────────────────────────────────────────────────────
 
   /** POST /events/:eventId/accept-invitation — Accept invitation (auth required) */
@@ -394,6 +425,58 @@ export class EventsController {
       }
 
       res.json(result);
+    } catch (err) { next(err); }
+  }
+
+  /**
+   * POST /events/:eventId/pin-message — Pin a chat message (host/admin only).
+   */
+  async pinMessage(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can pin messages', 403, 'FORBIDDEN');
+
+      const eventId = req.params.eventId;
+      const { message_id } = req.body as { message_id: string };
+      if (!message_id) throw new AppError('message_id is required', 400, 'VALIDATION_FAILED');
+
+      const event = await eventsService.getById(eventId);
+      const member = await requireOrgMember(event.organization_id, req.user.userId);
+      requireAdminRole(member, 'pin messages');
+
+      // Ensure message belongs to this event
+      const messageRow = await queryOne<{ id: string }>(
+        `SELECT id FROM event_messages WHERE id = $1 AND event_id = $2`,
+        [message_id, eventId]
+      );
+      if (!messageRow) throw new AppError('Message not found for this event', 404, 'NOT_FOUND');
+
+      await query(
+        `UPDATE events SET pinned_message_id = $1, updated_at = NOW() WHERE id = $2`,
+        [message_id, eventId]
+      );
+
+      res.status(204).send();
+    } catch (err) { next(err); }
+  }
+
+  /**
+   * DELETE /events/:eventId/pin-message — Unpin the current pinned message (host/admin only).
+   */
+  async unpinMessage(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can unpin messages', 403, 'FORBIDDEN');
+
+      const eventId = req.params.eventId;
+      const event = await eventsService.getById(eventId);
+      const member = await requireOrgMember(event.organization_id, req.user.userId);
+      requireAdminRole(member, 'unpin messages');
+
+      await query(
+        `UPDATE events SET pinned_message_id = NULL, updated_at = NOW() WHERE id = $1`,
+        [eventId]
+      );
+
+      res.status(204).send();
     } catch (err) { next(err); }
   }
 

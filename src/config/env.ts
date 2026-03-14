@@ -46,10 +46,9 @@ export const env = {
   /** Local upload directory — auto-created if missing */
   uploadsDir: process.env.UPLOADS_DIR || path.resolve(process.cwd(), 'flowkyn_uploads'),
 
+  /** Optional — CORS allows all origins; this is for logging only */
   cors: {
-    origin: process.env.NODE_ENV === 'production'
-      ? (process.env.CORS_ORIGIN || (() => { throw new Error('CORS_ORIGIN required in production'); })())
-      : process.env.CORS_ORIGIN || 'http://localhost:5173',
+    origin: process.env.CORS_ORIGIN || '*',
   },
 
   rateLimit: {

@@ -2,6 +2,7 @@
  * @fileoverview Games Routes
  *
  * GET  /game-types                          — List available game types
+ * GET  /game-types/:id/prompts              — List prompts for a game type
  * POST /events/:eventId/game-sessions       — Start a new game session
  * POST /game-sessions/:id/rounds            — Start next round
  * POST /game-sessions/:id/finish            — Finish session
@@ -21,6 +22,7 @@ const ctrl = new GamesController();
 
 // Game types (authenticated users only)
 router.get('/game-types', authenticate, ctrl.listGameTypes);
+router.get('/game-types/:id/prompts', authenticate, ctrl.listPrompts);
 
 // Game sessions (under events) — admin-only operations
 router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);

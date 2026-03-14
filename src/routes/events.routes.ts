@@ -6,6 +6,7 @@
  *   GET  /events/:eventId/validate-token — Validate invitation token
  *   POST /events/:eventId/join-guest     — Guest join (no auth)
  *   GET  /events/:eventId/participants   — List participants
+ *   GET  /events/:eventId/pinned-message — Get pinned chat message
  *
  * Authenticated:
  *   GET    /events                        — List events
@@ -24,6 +25,8 @@
  *   GET    /events/:eventId/me            — Get current participant identity for this event
  *   GET    /events/:eventId/profile       — Get current user's per-event profile
  *   PUT    /events/:eventId/profile       — Upsert current user's per-event profile
+ *   POST   /events/:eventId/pin-message   — Pin a chat message
+ *   DELETE /events/:eventId/pin-message   — Unpin chat message
  *
  * Post reactions:
  *   POST /posts/:postId/reactions         — React to a post
@@ -48,6 +51,7 @@ router.get('/:eventId/public', validate(eventIdParam, 'params'), ctrl.getPublicI
 router.get('/:eventId/validate-token', validate(eventIdParam, 'params'), ctrl.validateToken);
 router.post('/:eventId/join-guest', validate(eventIdParam, 'params'), validate(guestJoinSchema), ctrl.joinAsGuest);
 router.get('/:eventId/participants', validate(eventIdParam, 'params'), ctrl.getParticipants);
+router.get('/:eventId/pinned-message', validate(eventIdParam, 'params'), ctrl.getPinnedMessage);
 
 // ─── Authenticated routes ───
 router.get('/', authenticate, ctrl.list);
@@ -66,6 +70,8 @@ router.get('/:eventId/posts', authenticateOrGuest, validate(eventIdParam, 'param
 router.get('/:eventId/me', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyParticipant);
 router.get('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyProfile);
 router.put('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.upsertMyProfile);
+router.post('/:eventId/pin-message', authenticate, validate(eventIdParam, 'params'), ctrl.pinMessage);
+router.delete('/:eventId/pin-message', authenticate, validate(eventIdParam, 'params'), ctrl.unpinMessage);
 
 // Post reactions (nested under /posts)
 const postsRouter = Router();

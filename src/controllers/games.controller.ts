@@ -50,6 +50,20 @@ export class GamesController {
     } catch (err) { next(err); }
   }
 
+  /**
+   * GET /game-types/:id/prompts — List prompts for a game type.
+   */
+  async listPrompts(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const gameTypeId = req.params.id;
+      const category = (req.query.category as string | undefined) || undefined;
+      const prompts = await gamesService.getPrompts(gameTypeId, category);
+      res.json(prompts);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       // Authorization: only admins/moderators can start game sessions

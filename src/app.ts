@@ -113,8 +113,10 @@ app.use('/v1', routes);
 // ─── 404 handler ───
 app.use((req, res) => {
   const requestId = (req.headers['x-request-id'] as string) || 'unknown';
+  const msg = `The requested resource was not found: ${req.method} ${req.path}`;
   res.status(404).json({
-    error: `Route not found: ${req.method} ${req.path}`,
+    error: msg,
+    message: msg,
     code: 'NOT_FOUND',
     statusCode: 404,
     requestId,

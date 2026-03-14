@@ -15,7 +15,13 @@ export function signRefreshToken(payload: AuthPayload): string {
 }
 
 export function verifyAccessToken(token: string): AuthPayload {
-  return jwt.verify(token, env.jwt.accessSecret) as AuthPayload;
+  const decoded = jwt.verify(token, env.jwt.accessSecret) as any;
+  // Guest tokens are signed with the same secret but must not be accepted
+  // as authenticated user access tokens.
+  if (decoded?.isGuest) {
+    throw new Error('Guest token is not a user access token');
+  }
+  return decoded as AuthPayload;
 }
 
 export function verifyRefreshToken(token: string): AuthPayload {

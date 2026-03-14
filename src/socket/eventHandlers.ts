@@ -235,6 +235,43 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
     });
 
+    // ─── Lobby/game countdown (host-triggered, broadcast to room) ───
+    socket.on('event:start_countdown', async (data: { eventId: string; durationSeconds?: number }, ack) => {
+      if (!validateFields(data, ['eventId'])) {
+        ack?.({ ok: false, error: 'Invalid data' });
+        return;
+      }
+      const duration = typeof data.durationSeconds === 'number' && data.durationSeconds > 0
+        ? Math.min(Math.max(data.durationSeconds, 3), 30)
+        : 5;
+      try {
+        // Verify caller is an event admin/host
+        const member = await queryOne<{ role_name: string }>(
+          `SELECT r.name as role_name
+           FROM organization_members om
+           JOIN roles r ON r.id = om.role_id
+           JOIN events e ON e.organization_id = om.organization_id
+           WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+          [data.eventId, user.userId]
+        );
+        if (!member || !['owner', 'admin', 'moderator'].includes(member.role_name)) {
+          ack?.({ ok: false, error: 'INSUFFICIENT_PERMISSIONS' });
+          return;
+        }
+
+        const roomId = `event:${data.eventId}`;
+        eventsNs.to(roomId).emit('event:countdown', {
+          eventId: data.eventId,
+          durationSeconds: duration,
+          startedAt: new Date().toISOString(),
+        });
+        ack?.({ ok: true });
+      } catch (err: any) {
+        console.error('[Events] event:start_countdown error:', err?.message || err);
+        ack?.({ ok: false, error: 'INTERNAL' });
+      }
+    });
+
     // ─── Request current presence ───
     socket.on('event:presence', async (data: { eventId: string }) => {
       if (!validateFields(data, ['eventId'])) return;

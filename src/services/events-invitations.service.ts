@@ -80,7 +80,7 @@ export class EventInvitationsService {
     await this.validateInvitationToken(eventId, token);
 
     return await transaction(async (client) => {
-      // Check participant limit
+      // Check participant limit (use client for transaction consistency)
       const { rows: [{ count }] } = await client.query(
         'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
         [eventId]
@@ -89,11 +89,12 @@ export class EventInvitationsService {
         throw new AppError(`Event has reached its maximum of ${event.max_participants} participants`, 400, 'EVENT_FULL');
       }
 
-      // Find or create org membership
-      let member = await queryOne<{ id: string }>(
+      // Find or create org membership (use client to stay within transaction)
+      const memberRows = await client.query<{ id: string }>(
         `SELECT om.id FROM organization_members om WHERE om.organization_id = $1 AND om.user_id = $2 AND om.status = 'active'`,
         [event.organization_id, userId]
       );
+      let member = memberRows.rows[0] || null;
 
       if (!member) {
         // Lookup the default 'member' role inside the transaction for atomicity
@@ -112,11 +113,12 @@ export class EventInvitationsService {
         member = { id: memberId };
       }
 
-      // Check if already participating
-      const existing = await queryOne(
+      // Check if already participating (use client for transaction consistency)
+      const existingRows = await client.query<{ id: string }>(
         'SELECT id FROM participants WHERE event_id = $1 AND organization_member_id = $2 AND left_at IS NULL',
         [eventId, member.id]
       );
+      const existing = existingRows.rows[0] || null;
       if (existing) {
         await client.query(
           `UPDATE event_invitations SET status = 'accepted' WHERE event_id = $1 AND token = $2`,

@@ -1,11 +1,14 @@
 import cors from 'cors';
 
 /**
- * CORS configuration.
- * Allow all origins to support preview environments, mobile apps, etc.
+ * CORS configuration — allow ALL origins without restriction.
+ * No origin checks: supports app.flowkyn.com, localhost, preview deployments, mobile apps.
  */
 export const corsOptions: cors.CorsOptions = {
-  origin: true, // Allow all origins
+  origin: (origin, callback) => {
+    // Always allow — no origin validation
+    callback(null, true);
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: [

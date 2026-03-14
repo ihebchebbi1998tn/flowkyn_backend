@@ -185,7 +185,7 @@ export class GamesService {
       const { rows: [newAction] } = await client.query(
         `INSERT INTO game_actions (id, game_session_id, round_id, participant_id, action_type, payload, created_at)
          VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
-        [uuid(), sessionId, roundId, participantId, actionType, JSON.stringify(payload)]
+        [uuid(), sessionId, roundId, participantId, actionType, payload]
       );
       return newAction;
     });
@@ -279,7 +279,7 @@ export class GamesService {
     const [snapshot] = await query(
       `INSERT INTO game_state_snapshots (id, game_session_id, state, created_at)
        VALUES ($1, $2, $3, NOW()) RETURNING *`,
-      [uuid(), sessionId, JSON.stringify(state)]
+      [uuid(), sessionId, state]
     );
     return snapshot;
   }

@@ -55,9 +55,11 @@ export type ErrorCode =
 
 /**
  * Structured error response — consistent shape for all API errors.
+ * Frontend uses: error/message (display text), code (for i18n), details (field-level).
  */
 export interface ErrorResponse {
   error: string;
+  message: string; // Alias for frontend display
   code: ErrorCode;
   statusCode: number;
   requestId: string;
@@ -100,7 +102,7 @@ function statusCodeToErrorCode(status: number): ErrorCode {
   }
 }
 
-/** Build a consistent error response object */
+/** Build a consistent error response object for frontend consumption */
 function buildErrorResponse(
   statusCode: number,
   error: string,
@@ -110,6 +112,7 @@ function buildErrorResponse(
 ): ErrorResponse {
   return {
     error,
+    message: error,
     code,
     statusCode,
     requestId,
@@ -126,19 +129,31 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
 
   // ─── Multer file size error ───
   if (err.message?.includes('File too large') || (err as any).code === 'LIMIT_FILE_SIZE') {
-    res.status(413).json(buildErrorResponse(413, 'File exceeds maximum allowed size', 'FILE_TOO_LARGE', requestId));
+    res.status(413).json(buildErrorResponse(413, 'File exceeds maximum allowed size (5MB for logos). Please choose a smaller image.', 'FILE_TOO_LARGE', requestId, [
+      { field: 'logo', message: 'Maximum file size is 5MB' },
+    ]));
+    return;
+  }
+
+  // ─── Multer no file / missing field ───
+  if (err.message?.includes('No file') || (err as any).code === 'LIMIT_UNEXPECTED_FILE' || err.message?.includes('Unexpected field')) {
+    res.status(400).json(buildErrorResponse(400, 'No file was uploaded. Please select an image (JPEG, PNG, GIF, or WebP).', 'FILE_MISSING', requestId, [
+      { field: 'logo', message: 'A logo file is required' },
+    ]));
     return;
   }
 
   // ─── Multer file type error ───
-  if (err.message?.includes('Only image files') || err.message?.includes('not allowed')) {
-    res.status(400).json(buildErrorResponse(400, err.message, 'FILE_TYPE_NOT_ALLOWED', requestId));
+  if (err.message?.includes('Only image files') || err.message?.includes('not allowed') || err.message?.includes('file type')) {
+    res.status(400).json(buildErrorResponse(400, 'Invalid file type. Only JPEG, PNG, GIF, and WebP images are allowed.', 'FILE_TYPE_NOT_ALLOWED', requestId, [
+      { field: 'logo', message: 'Accepted formats: JPEG, PNG, GIF, WebP' },
+    ]));
     return;
   }
 
-  // ─── CORS error ───
+  // ─── CORS error (should not occur with allow-all config) ───
   if (err.message?.includes('Not allowed by CORS')) {
-    res.status(403).json(buildErrorResponse(403, 'Origin not allowed by CORS policy', 'CORS_BLOCKED', requestId));
+    res.status(403).json(buildErrorResponse(403, 'Request blocked by CORS policy. Please check that the API allows your origin.', 'CORS_BLOCKED', requestId));
     return;
   }
 
@@ -205,17 +220,24 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
   // ─── Connection pool exhaustion / DB connection errors ───
   if (err.message?.includes('timeout exceeded') || err.message?.includes('Connection terminated')) {
     console.error(`[${requestId}] Database connection error:`, err.message);
-    res.status(503).json(buildErrorResponse(503, 'Service temporarily unavailable — please retry shortly', 'SERVICE_UNAVAILABLE', requestId));
+    res.status(503).json(buildErrorResponse(503, 'Service temporarily unavailable. Please try again in a few moments.', 'SERVICE_UNAVAILABLE', requestId));
+    return;
+  }
+
+  // ─── ECONNREFUSED / ENOTFOUND (e.g. DB unreachable) ───
+  if ((err as any).code === 'ECONNREFUSED' || (err as any).code === 'ENOTFOUND') {
+    console.error(`[${requestId}] Connection error:`, err.message);
+    res.status(503).json(buildErrorResponse(503, 'Unable to reach the service. Please try again later.', 'SERVICE_UNAVAILABLE', requestId));
     return;
   }
 
   // ─── JWT errors (from jsonwebtoken library) ───
   if (err.name === 'TokenExpiredError') {
-    res.status(401).json(buildErrorResponse(401, 'Token has expired', 'AUTH_TOKEN_EXPIRED', requestId));
+    res.status(401).json(buildErrorResponse(401, 'Your session has expired. Please sign in again.', 'AUTH_TOKEN_EXPIRED', requestId));
     return;
   }
   if (err.name === 'JsonWebTokenError' || err.name === 'NotBeforeError') {
-    res.status(401).json(buildErrorResponse(401, 'Invalid token', 'AUTH_TOKEN_INVALID', requestId));
+    res.status(401).json(buildErrorResponse(401, 'Invalid or missing authentication. Please sign in again.', 'AUTH_TOKEN_INVALID', requestId));
     return;
   }
 
@@ -227,8 +249,8 @@ export function errorHandler(err: Error, req: Request, res: Response, _next: Nex
 
   // ─── Fallback — never leak internal details in production ───
   console.error(`[${requestId}] Unhandled error:`, err);
-  const message = env.nodeEnv === 'development'
-    ? `Internal error: ${err.message}`
-    : 'Internal server error';
-  res.status(500).json(buildErrorResponse(500, message, 'INTERNAL_ERROR', requestId));
+  const userMessage = env.nodeEnv === 'development'
+    ? `An unexpected error occurred: ${err.message}`
+    : 'An unexpected error occurred. Please try again. If the problem persists, contact support.';
+  res.status(500).json(buildErrorResponse(500, userMessage, 'INTERNAL_ERROR', requestId));
 }
