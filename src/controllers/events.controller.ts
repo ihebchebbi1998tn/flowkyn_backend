@@ -59,6 +59,13 @@ function requireAdminRole(member: { role_name: string }, action: string) {
   }
 }
 
+/** Get unified auth payload for event endpoints (supports both user JWT and guest token) */
+function getEventAuthPayload(req: AuthRequest): { isGuest: boolean; userId?: string; participantId?: string; eventId?: string } | null {
+  if (req.user) return { ...req.user, isGuest: false };
+  if (req.guest) return { isGuest: true, participantId: req.guest.participantId, eventId: req.guest.eventId };
+  return null;
+}
+
 /**
  * Verify the authenticated user owns a given participant_id.
  * Supports both org-member participants and guest participants.
@@ -406,8 +413,10 @@ export class EventsController {
   /** GET /events/:eventId/me — Get the current participant identity for this event */
   async getMyParticipant(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
       const event = await eventsService.getById(req.params.eventId);
-      const userPayload: any = req.user!;
+      const userPayload: any = auth;
 
       // Guest: ensure they belong to this event via guest token payload
       if (userPayload.isGuest) {
@@ -484,7 +493,9 @@ export class EventsController {
   /** GET /events/:eventId/profile — Get current user's per-event profile (display name + avatar) */
   async getMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const participantId = await requireCurrentParticipantId(req.params.eventId, req.user!);
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      const participantId = await requireCurrentParticipantId(req.params.eventId, auth);
       try {
         const profile = await profilesService.getForParticipant(req.params.eventId, participantId);
         res.json({
@@ -513,11 +524,13 @@ export class EventsController {
   /** PUT /events/:eventId/profile — Upsert current user's per-event profile */
   async upsertMyProfile(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
       const { display_name, avatar_url } = req.body;
       if (!display_name || typeof display_name !== 'string') {
         throw new AppError('display_name is required', 400, 'VALIDATION_FAILED');
       }
-      const participantId = await requireCurrentParticipantId(req.params.eventId, req.user!);
+      const participantId = await requireCurrentParticipantId(req.params.eventId, auth);
       const profile = await profilesService.upsertForParticipant(
         req.params.eventId,
         participantId,
@@ -540,9 +553,11 @@ export class EventsController {
   /** POST /events/:eventId/messages — Send a chat message */
   async sendMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!);
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.sendMessage(req.params.eventId, req.body.participant_id, req.body.message);
-      await audit.create(null, req.user!.userId, 'EVENT_SEND_MESSAGE', { eventId: req.params.eventId, messageId: result.id });
+      await audit.create(null, auth.userId ?? null, 'EVENT_SEND_MESSAGE', { eventId: req.params.eventId, messageId: result.id });
       res.status(201).json(result);
     } catch (err) { next(err); }
   }
@@ -550,8 +565,10 @@ export class EventsController {
   /** GET /events/:eventId/messages — Get paginated chat messages */
   async getMessages(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
       const event = await eventsService.getById(req.params.eventId);
-      const userPayload: any = req.user!;
+      const userPayload: any = auth;
       
       if (userPayload.isGuest) {
         if (userPayload.eventId !== req.params.eventId) {
@@ -570,8 +587,10 @@ export class EventsController {
   /** GET /events/:eventId/posts — Get paginated activity posts */
   async getPosts(req: AuthRequest, res: Response, next: NextFunction) {
     try {
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
       const event = await eventsService.getById(req.params.eventId);
-      const userPayload: any = req.user!;
+      const userPayload: any = auth;
 
       if (userPayload.isGuest) {
         if (userPayload.eventId !== req.params.eventId) {
@@ -582,7 +601,9 @@ export class EventsController {
         if (!member) throw new AppError('You must be an organization member to view posts', 403, 'NOT_A_MEMBER');
       }
 
-      const result = await messagesService.getPosts(req.params.eventId, req.query as any);
+      // Resolve the current participant so we can mark which reactions they have already added
+      const participantId = await requireCurrentParticipantId(req.params.eventId, userPayload);
+      const result = await messagesService.getPosts(req.params.eventId, req.query as any, participantId);
       res.json(result);
     } catch (err) { next(err); }
   }
@@ -590,12 +611,14 @@ export class EventsController {
   /** POST /events/:eventId/posts — Create an activity post */
   async createPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!);
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content);
-      await audit.create(null, req.user!.userId, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
+      await audit.create(null, auth.userId ?? null, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
       emitEventNotification(req.params.eventId, 'post:created', {
         postId: result.id,
-        authorId: (req.user as any).userId || (req.user as any).participantId,
+        authorId: auth.userId || auth.participantId,
       });
       res.status(201).json(result);
     } catch (err) { next(err); }
@@ -604,9 +627,29 @@ export class EventsController {
   /** POST /posts/:postId/reactions — React to a post */
   async reactToPost(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await verifyParticipantOwnership(req.body.participant_id, req.user!);
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'UNAUTHORIZED');
+      await verifyParticipantOwnership(req.body.participant_id, auth);
       const result = await messagesService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
-      await audit.create(null, req.user!.userId, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
+      await audit.create(null, auth.userId ?? null, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
+
+      // Best-effort real-time notification so async boards can refresh reactions
+      try {
+        const row = await queryOne<{ event_id: string }>(
+          'SELECT event_id FROM activity_posts WHERE id = $1',
+          [req.params.postId]
+        );
+        if (row?.event_id) {
+          emitEventNotification(row.event_id, 'post:reacted', {
+            postId: req.params.postId,
+            participantId: req.body.participant_id,
+            reactionType: req.body.reaction_type,
+          });
+        }
+      } catch {
+        // Non-fatal — API should still succeed even if socket emit fails
+      }
+
       res.status(201).json(result);
     } catch (err) { next(err); }
   }

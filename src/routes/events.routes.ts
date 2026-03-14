@@ -32,6 +32,7 @@
 import { Router } from 'express';
 import { EventsController } from '../controllers/events.controller';
 import { authenticate } from '../middleware/auth';
+import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
 import {
   createEventSchema, updateEventSchema, inviteParticipantSchema,
@@ -58,16 +59,16 @@ router.post('/:eventId/invitations', authenticate, validate(eventIdParam, 'param
 router.post('/:eventId/accept-invitation', authenticate, validate(eventIdParam, 'params'), ctrl.acceptInvitation);
 router.post('/:eventId/join', authenticate, validate(eventIdParam, 'params'), ctrl.join);
 router.post('/:eventId/leave', authenticate, validate(eventIdParam, 'params'), ctrl.leave);
-router.post('/:eventId/messages', authenticate, validate(eventIdParam, 'params'), validate(sendMessageSchema), ctrl.sendMessage);
-router.get('/:eventId/messages', authenticate, validate(eventIdParam, 'params'), ctrl.getMessages);
-router.post('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), validate(createPostSchema), ctrl.createPost);
-router.get('/:eventId/posts', authenticate, validate(eventIdParam, 'params'), ctrl.getPosts);
-router.get('/:eventId/me', authenticate, validate(eventIdParam, 'params'), ctrl.getMyParticipant);
-router.get('/:eventId/profile', authenticate, validate(eventIdParam, 'params'), ctrl.getMyProfile);
-router.put('/:eventId/profile', authenticate, validate(eventIdParam, 'params'), ctrl.upsertMyProfile);
+router.post('/:eventId/messages', authenticateOrGuest, validate(eventIdParam, 'params'), validate(sendMessageSchema), ctrl.sendMessage);
+router.get('/:eventId/messages', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMessages);
+router.post('/:eventId/posts', authenticateOrGuest, validate(eventIdParam, 'params'), validate(createPostSchema), ctrl.createPost);
+router.get('/:eventId/posts', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getPosts);
+router.get('/:eventId/me', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyParticipant);
+router.get('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyProfile);
+router.put('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.upsertMyProfile);
 
 // Post reactions (nested under /posts)
 const postsRouter = Router();
-postsRouter.post('/:postId/reactions', authenticate, validate(postIdParam, 'params'), validate(reactToPostSchema), ctrl.reactToPost);
+postsRouter.post('/:postId/reactions', authenticateOrGuest, validate(postIdParam, 'params'), validate(reactToPostSchema), ctrl.reactToPost);
 
 export { router as eventsRoutes, postsRouter as postsRoutes };

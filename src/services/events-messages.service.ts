@@ -58,10 +58,12 @@ export class EventMessagesService {
     const [data, [{ count }]] = await Promise.all([
       query(
         `SELECT em.*, p.guest_name, p.participant_type, p.guest_avatar,
-                u.name as user_name, u.id as user_id,
-                COALESCE(u.avatar_url, p.guest_avatar) as avatar_url
+                u.id as user_id,
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as user_name,
+                COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) as avatar_url
          FROM event_messages em
          LEFT JOIN participants p ON p.id = em.participant_id
+         LEFT JOIN event_profiles ep ON ep.event_id = em.event_id AND ep.participant_id = em.participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
          WHERE em.event_id = $1 ORDER BY em.created_at ASC LIMIT $2 OFFSET $3`,
@@ -78,17 +80,18 @@ export class EventMessagesService {
    * This powers async, wall-style games like "Wins of the Week" where posts
    * should be shared across all participants instead of kept in local UI state.
    */
-  async getPosts(eventId: string, pagination: { page?: number; limit?: number }) {
+  async getPosts(eventId: string, pagination: { page?: number; limit?: number }, currentParticipantId?: string) {
     const { page, limit, offset } = parsePagination(pagination);
 
     // Fetch posts with author display info
     const [posts, [{ count }]] = await Promise.all([
       query(
         `SELECT ap.*,
-                COALESCE(u.name, p.guest_name, 'Unknown') AS author_name,
-                COALESCE(u.avatar_url, p.guest_avatar) AS author_avatar
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') AS author_name,
+                COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) AS author_avatar
          FROM activity_posts ap
          JOIN participants p ON p.id = ap.author_participant_id
+         LEFT JOIN event_profiles ep ON ep.event_id = ap.event_id AND ep.participant_id = ap.author_participant_id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
          WHERE ap.event_id = $1
@@ -120,6 +123,23 @@ export class EventMessagesService {
       [postIds]
     );
 
+    // Optional: which reactions has the current participant added?
+    const reactedSet = new Set<string>();
+    if (currentParticipantId) {
+      const reactedRows = await query<{
+        post_id: string;
+        reaction_type: string;
+      }>(
+        `SELECT post_id, reaction_type
+         FROM post_reactions
+         WHERE post_id = ANY($1::uuid[]) AND participant_id = $2`,
+        [postIds, currentParticipantId]
+      );
+      for (const r of reactedRows) {
+        reactedSet.add(`${r.post_id}:${r.reaction_type}`);
+      }
+    }
+
     const reactionsByPost = new Map<string, { type: string; count: number }[]>();
     for (const r of reactions) {
       if (!reactionsByPost.has(r.post_id)) reactionsByPost.set(r.post_id, []);
@@ -137,7 +157,10 @@ export class EventMessagesService {
       created_at: p.created_at,
       author_name: p.author_name,
       author_avatar: p.author_avatar,
-      reactions: reactionsByPost.get(p.id) || [],
+      reactions: (reactionsByPost.get(p.id) || []).map(r => ({
+        ...r,
+        reacted: currentParticipantId ? reactedSet.has(`${p.id}:${r.type}`) : false,
+      })),
     }));
 
     return buildPaginatedResponse(

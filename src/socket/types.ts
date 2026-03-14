@@ -26,7 +26,7 @@ export interface EventsClientToServer {
 export interface EventsServerToClient {
   'event:user_joined': (data: { userId: string; timestamp: string }) => void;
   'event:user_left': (data: { userId: string; timestamp: string }) => void;
-  'chat:message': (data: { id: string; participantId: string; senderName: string; message: string; userId: string; timestamp: string }) => void;
+  'chat:message': (data: { id: string; participantId: string; senderName: string; senderAvatarUrl?: string | null; message: string; userId: string; timestamp: string }) => void;
   'chat:typing': (data: { userId: string; userName: string; isTyping: boolean }) => void;
   'event:presence': (data: { eventId: string; onlineUserIds: string[] }) => void;
   'event:updated': (data: { eventId: string; changes: Record<string, any> }) => void;
@@ -41,7 +41,8 @@ export interface GamesClientToServer {
   'game:start': (data: { sessionId: string }) => void;
   'game:round_start': (data: { sessionId: string; roundNumber: number }) => void;
   // SECURITY: participantId removed — server resolves from auth
-  'game:action': (data: { sessionId: string; roundId: string; actionType: string; payload: any }) => void;
+  // roundId is optional — server falls back to active round if omitted
+  'game:action': (data: { sessionId: string; roundId?: string; actionType: string; payload: any }) => void;
   'game:round_end': (data: { sessionId: string; roundId: string }) => void;
   'game:end': (data: { sessionId: string }) => void;
   'game:state_sync': (data: { sessionId: string }) => void;

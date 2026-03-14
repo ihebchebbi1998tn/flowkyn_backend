@@ -20,28 +20,36 @@ function validateFields(data: any, fields: string[]): boolean {
 
 /** Verify a user is an active participant in an event and return their participant ID + display name + avatar */
 async function verifyParticipant(eventId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string; memberId: string | null; displayName: string; avatarUrl: string | null } | null> {
-  // If this is a guest socket, use the guest payload directly
+  // If this is a guest socket, use the guest payload directly (prefer event profile if set)
   if (socket?.isGuest && socket.guestPayload) {
-    const guestRow = await queryOne<{ id: string; guest_name: string; guest_avatar: string | null }>(
-      `SELECT p.id, p.guest_name, p.guest_avatar FROM participants p
+    const guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
+      `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
+       FROM participants p
+       LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
        WHERE p.event_id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
       [eventId, socket.guestPayload.participantId]
     );
     if (guestRow) {
-      return { participantId: guestRow.id, memberId: null, displayName: guestRow.guest_name || 'Guest', avatarUrl: guestRow.guest_avatar || null };
+      return {
+        participantId: guestRow.id,
+        memberId: null,
+        displayName: guestRow.display_name || guestRow.guest_name || 'Guest',
+        avatarUrl: guestRow.avatar_url || guestRow.guest_avatar || null
+      };
     }
     return null;
   }
 
   // First try: match via organization_members (registered users)
-  // Allow pending members so auto-invited users can play games before clicking their email link.
+  // Prefer event_profiles display_name/avatar_url when set (per-event profile from lobby)
   const memberRow = await queryOne<{ id: string; member_id: string | null; display_name: string; avatar_url: string | null }>(
     `SELECT p.id, p.organization_member_id as member_id,
-            COALESCE(u.name, p.guest_name, 'Unknown') as display_name,
-            u.avatar_url
+            COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as display_name,
+            COALESCE(ep.avatar_url, u.avatar_url) as avatar_url
      FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN users u ON u.id = om.user_id
+     LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
      WHERE p.event_id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
     [eventId, userId]
   );
@@ -207,29 +215,39 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
     socket.on('chat:typing', async (data: { eventId: string; isTyping: boolean }) => {
       if (!validateFields(data, ['eventId'])) return;
-      if (!(await checkRateLimit(socket, 'chat:typing'))) return;
+      try {
+        if (!(await checkRateLimit(socket, 'chat:typing'))) return;
 
-      // Resolve display name once per connection
-      if (!cachedDisplayName) {
-        const participant = await verifyParticipant(data.eventId, user.userId, socket);
-        cachedDisplayName = participant?.displayName || 'Someone';
+        // Resolve display name once per connection
+        if (!cachedDisplayName) {
+          const participant = await verifyParticipant(data.eventId, user.userId, socket);
+          cachedDisplayName = participant?.displayName || 'Someone';
+        }
+
+        socket.to(`event:${data.eventId}`).emit('chat:typing', {
+          userId: user.userId,
+          userName: cachedDisplayName,
+          isTyping: !!data.isTyping,
+        });
+      } catch (err: any) {
+        console.error('[Events] chat:typing error:', err?.message || err);
+        socket.emit('error', { message: 'Failed to process typing event', code: 'INTERNAL' });
       }
-
-      socket.to(`event:${data.eventId}`).emit('chat:typing', {
-        userId: user.userId,
-        userName: cachedDisplayName,
-        isTyping: !!data.isTyping,
-      });
     });
 
     // ─── Request current presence ───
     socket.on('event:presence', async (data: { eventId: string }) => {
       if (!validateFields(data, ['eventId'])) return;
-      const onlineUserIds = await getPresence(data.eventId);
-      socket.emit('event:presence', {
-        eventId: data.eventId,
-        onlineUserIds,
-      });
+      try {
+        const onlineUserIds = await getPresence(data.eventId);
+        socket.emit('event:presence', {
+          eventId: data.eventId,
+          onlineUserIds,
+        });
+      } catch (err: any) {
+        console.error('[Events] event:presence error:', err?.message || err);
+        socket.emit('error', { message: 'Failed to load presence', code: 'INTERNAL' });
+      }
     });
 
     // ─── Disconnect cleanup ───

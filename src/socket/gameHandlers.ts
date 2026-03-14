@@ -199,8 +199,8 @@ type CoffeeState = {
   phase: 'waiting' | 'matching' | 'chatting' | 'complete';
   pairs: Array<{
     id: string;
-    person1: { participantId: string; name: string; avatar: string };
-    person2: { participantId: string; name: string; avatar: string };
+    person1: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
+    person2: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
     topic: string;
   }>;
   startedChatAt: string | null;
@@ -234,9 +234,10 @@ async function reduceCoffeeState(args: {
   if (actionType === 'coffee:shuffle') {
     const participants = await query<{ id: string; name: string; avatar: string | null }>(
       `SELECT p.id,
-              COALESCE(u.name, p.guest_name, 'Unknown') AS name,
-              COALESCE(u.avatar_url, p.guest_avatar) AS avatar
+              COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') AS name,
+              COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) AS avatar
        FROM participants p
+       LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
        LEFT JOIN organization_members om ON om.id = p.organization_member_id
        LEFT JOIN users u ON u.id = om.user_id
        WHERE p.event_id = $1 AND p.left_at IS NULL
@@ -251,8 +252,8 @@ async function reduceCoffeeState(args: {
       const p2 = shuffled[i + 1];
       pairs.push({
         id: String(i / 2),
-        person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase() },
-        person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase() },
+        person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
+        person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p2.avatar || null },
         topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
       });
     }
