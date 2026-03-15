@@ -348,7 +348,7 @@ export class GamesController {
 
         // Fetch participant + user details for assignments
         const participantIds = assignments.map(a => a.participantId);
-        const { rows: participantRows } = await query<{
+        const participantRows = await query<{
           id: string;
           name: string | null;
           email: string | null;
@@ -366,7 +366,7 @@ export class GamesController {
           [participantIds]
         );
 
-        const byId = new Map(participantRows.map(r => [r.id, r]));
+        const byId = new Map(participantRows.map((r: typeof participantRows[0]) => [r.id, r]));
 
         // For now, use simple role content keys; frontend/localization can map roleKey to details.
         for (const a of assignments) {
