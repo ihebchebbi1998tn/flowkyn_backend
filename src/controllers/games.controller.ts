@@ -408,6 +408,30 @@ export class GamesController {
         );
       }
 
+      // Update strategic snapshot so frontends see the new phase/flag even if no socket action is sent
+      try {
+        const latest = await gamesService.getLatestSnapshot(req.params.sessionId);
+        const state = latest?.state as any;
+
+        if (state && state.kind === 'strategic-escape') {
+          const nextState = {
+            ...state,
+            rolesAssigned: true,
+            phase: 'roles_assignment',
+          };
+
+          await gamesService.saveSnapshot(req.params.sessionId, nextState);
+          emitGameUpdate(req.params.sessionId, 'game:data', {
+            sessionId: req.params.sessionId,
+            gameData: nextState,
+          });
+        }
+      } catch (snapshotErr) {
+        // Non-fatal: log and continue
+        // eslint-disable-next-line no-console
+        console.error('[GamesController] Failed to update strategic snapshot after role assignment', snapshotErr);
+      }
+
       await audit.create(null, req.user.userId, 'GAME_ASSIGN_STRATEGIC_ROLES', {
         sessionId: req.params.sessionId,
         assignmentsCount: assignments.length,
