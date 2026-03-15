@@ -4,7 +4,9 @@ import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { emitGameUpdate } from '../socket/emitter';
-import { queryOne } from '../config/database';
+import { query, queryOne } from '../config/database';
+import { sendEmail } from '../services/email.service';
+import { env } from '../config/env';
 
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
@@ -256,5 +258,203 @@ export class GamesController {
       const snapshots = await gamesService.getSessionSnapshots(req.params.id, limit, offset);
       res.json(snapshots);
     } catch (err) { next(err); }
+  }
+
+  /**
+   * Strategic Escape Challenge — create a configured session for an event.
+   */
+  async createStrategicSession(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can create strategic sessions', 403, 'FORBIDDEN');
+
+      // Ensure caller is admin/moderator/owner for this event's organization
+      const member = await queryOne<{ role_name: string }>(
+        `SELECT r.name as role_name
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+        [req.params.eventId, req.user.userId]
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can create strategic sessions', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const session = await gamesService.createStrategicSession(req.params.eventId, {
+        industry: req.body.industry,
+        crisisType: req.body.crisisType,
+        difficulty: req.body.difficulty,
+      });
+
+      await audit.create(null, req.user.userId, 'GAME_CREATE_STRATEGIC_SESSION', {
+        eventId: req.params.eventId,
+        sessionId: session.id,
+        config: req.body,
+      });
+
+      res.status(201).json({
+        sessionId: session.id,
+        eventId: session.event_id,
+        config: req.body,
+      });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — assign roles to participants and send emails.
+   */
+  async assignStrategicRolesForSession(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can assign roles', 403, 'FORBIDDEN');
+
+      const session = await gamesService.getSession(req.params.sessionId);
+      const member = await queryOne<{ role_name: string }>(
+        `SELECT r.name as role_name
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+        [session.event_id, req.user.userId]
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can assign roles', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const assignments = await gamesService.assignStrategicRoles(req.params.sessionId);
+
+      if (assignments.length > 0) {
+        // Load context for emails: event + organization and scenario info from latest snapshot
+        const eventRow = await queryOne<{ title: string; organization_name: string }>(
+          `SELECT e.title, o.name as organization_name
+           FROM events e
+           JOIN organizations o ON o.id = e.organization_id
+           WHERE e.id = $1`,
+          [session.event_id]
+        );
+
+        const snapshot = await gamesService.getLatestSnapshot(req.params.sessionId);
+        const state = snapshot?.state as any;
+
+        const industryLabel = state?.industry || 'strategic.industries.generic';
+        const crisisLabel = state?.crisisType || 'strategic.crises.generic';
+        const difficultyLabel = state?.difficulty || 'strategic.difficulties.medium';
+
+        const frontendBase = env.frontendUrl;
+        const eventLink = `${frontendBase}/join/${session.event_id}`;
+
+        // Fetch participant + user details for assignments
+        const participantIds = assignments.map(a => a.participantId);
+        const { rows: participantRows } = await query<{
+          id: string;
+          name: string | null;
+          email: string | null;
+          language: string | null;
+        }>(
+          `SELECT p.id,
+                  COALESCE(ep.display_name, p.guest_name, u.name) as name,
+                  COALESCE(u.email, NULL) as email,
+                  u.language as language
+           FROM participants p
+           LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+           LEFT JOIN organization_members om ON om.id = p.organization_member_id
+           LEFT JOIN users u ON u.id = om.user_id
+           WHERE p.id = ANY($1::uuid[])`,
+          [participantIds]
+        );
+
+        const byId = new Map(participantRows.map(r => [r.id, r]));
+
+        // For now, use simple role content keys; frontend/localization can map roleKey to details.
+        for (const a of assignments) {
+          const row = byId.get(a.participantId);
+          if (!row || !row.email) continue;
+
+          // Basic role text keys; actual human-readable content handled via translations.
+          const roleNameKey = `strategic.roles.${a.roleKey}.name`;
+          const roleBriefKey = `strategic.roles.${a.roleKey}.brief`;
+          const roleSecretKey = `strategic.roles.${a.roleKey}.secret`;
+
+          await sendEmail({
+            to: row.email,
+            type: 'strategic_role_assignment',
+            data: {
+              name: row.name || '',
+              orgName: eventRow?.organization_name || 'Flowkyn',
+              eventTitle: eventRow?.title || 'Strategic Escape Challenge',
+              industryLabel,
+              crisisLabel,
+              difficultyLabel,
+              roleName: roleNameKey,
+              roleBrief: roleBriefKey,
+              roleSecretInstructions: roleSecretKey,
+              eventLink,
+            },
+            lang: row.language || 'en',
+          });
+        }
+
+        // Mark email_sent_at for all newly assigned rows
+        await query(
+          `UPDATE strategic_roles
+           SET email_sent_at = NOW()
+           WHERE game_session_id = $1
+             AND participant_id = ANY($2::uuid[])
+             AND email_sent_at IS NULL`,
+          [req.params.sessionId, participantIds]
+        );
+      }
+
+      await audit.create(null, req.user.userId, 'GAME_ASSIGN_STRATEGIC_ROLES', {
+        sessionId: req.params.sessionId,
+        assignmentsCount: assignments.length,
+      });
+
+      res.status(200).json({ assignments });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — get current caller's role for a session.
+   */
+  async getMyStrategicRole(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+
+      let participantId: string | null = null;
+
+      if (req.guest) {
+        participantId = req.guest.participantId;
+      } else if (req.user) {
+        const row = await queryOne<{ id: string }>(
+          `SELECT p.id
+           FROM participants p
+           JOIN organization_members om ON om.id = p.organization_member_id
+           WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+          [session.event_id, req.user.userId]
+        );
+        participantId = row?.id || null;
+      }
+
+      if (!participantId) {
+        throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+      }
+
+      const roleRow = await queryOne<{ role_key: string }>(
+        `SELECT role_key
+         FROM strategic_roles
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+
+      res.json(roleRow ? { roleKey: roleRow.role_key } : null);
+    } catch (err) {
+      next(err);
+    }
   }
 }

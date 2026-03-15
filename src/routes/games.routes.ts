@@ -14,7 +14,7 @@ import { GamesController } from '../controllers/games.controller';
 import { authenticate } from '../middleware/auth';
 import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
-import { startSessionSchema, submitActionSchema } from '../validators/games.validator';
+import { startSessionSchema, submitActionSchema, createStrategicSessionSchema } from '../validators/games.validator';
 import { eventIdParam, uuidParam } from '../validators/common.validator';
 
 const router = Router();
@@ -26,12 +26,24 @@ router.get('/game-types/:id/prompts', authenticate, ctrl.listPrompts);
 
 // Game sessions (under events) — admin-only operations
 router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
+// Strategic Escape Challenge sessions
+router.post(
+  '/events/:eventId/strategic-sessions',
+  authenticate,
+  validate(eventIdParam, 'params'),
+  validate(createStrategicSessionSchema),
+  ctrl.createStrategicSession
+);
 // Resolve currently active session for an event + game key (supports guests)
 router.get('/events/:eventId/game-sessions/active', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getActiveSessionForEvent);
 router.post('/game-sessions/:id/rounds', authenticate, validate(uuidParam, 'params'), ctrl.startRound);
 router.post('/game-sessions/:id/finish', authenticate, validate(uuidParam, 'params'), ctrl.finishSession);
 router.get('/game-sessions/:id/actions', authenticate, validate(uuidParam, 'params'), ctrl.getSessionActions);
 router.get('/game-sessions/:id/snapshots', authenticate, validate(uuidParam, 'params'), ctrl.getSessionSnapshots);
+
+// Strategic Escape Challenge helpers
+router.post('/strategic-sessions/:sessionId/assign-roles', authenticate, validate(uuidParam, 'params'), ctrl.assignStrategicRolesForSession);
+router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(uuidParam, 'params'), ctrl.getMyStrategicRole);
 
 // Game actions — supports BOTH authenticated users AND guests via authenticateOrGuest
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);

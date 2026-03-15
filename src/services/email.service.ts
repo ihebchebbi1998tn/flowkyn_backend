@@ -8,6 +8,7 @@ import {
   resetPasswordTemplate,
   organizationInvitationTemplate,
   eventInvitationTemplate,
+  strategicRoleAssignmentTemplate,
 } from '../emails';
 
 const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
@@ -52,7 +53,7 @@ verifySMTPWithRetry().catch(err => {
 // Export flag for testing
 export const isSMTPVerified = () => smtpVerified;
 
-type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation';
+type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation' | 'strategic_role_assignment';
 
 interface EmailOptions {
   to: string;
@@ -75,6 +76,20 @@ function buildEmail(type: EmailType, data: Record<string, string>, lang?: string
       return organizationInvitationTemplate({ link: data.link, orgName: data.orgName, lang });
     case 'event_invitation':
       return eventInvitationTemplate({ link: data.link, eventTitle: data.eventTitle, lang });
+    case 'strategic_role_assignment':
+      return strategicRoleAssignmentTemplate({
+        lang,
+        name: data.name,
+        orgName: data.orgName,
+        eventTitle: data.eventTitle,
+        industryLabel: data.industryLabel,
+        crisisLabel: data.crisisLabel,
+        difficultyLabel: data.difficultyLabel,
+        roleName: data.roleName,
+        roleBrief: data.roleBrief,
+        roleSecretInstructions: data.roleSecretInstructions,
+        eventLink: data.eventLink,
+      });
   }
 }
 

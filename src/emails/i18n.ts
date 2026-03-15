@@ -3,7 +3,7 @@
  */
 
 export type SupportedLang = 'en' | 'fr' | 'de';
-export type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation';
+export type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation' | 'strategic_role_assignment';
 
 interface EmailTranslation {
   subject: string;
@@ -62,6 +62,17 @@ export const translations: TranslationMap = {
       cta: 'Join event',
       footer: '© 2026 Flowkyn. All rights reserved.',
     },
+    strategic_role_assignment: {
+      subject: 'Your secret role for the Strategic Escape Challenge',
+      greeting: (name) => name ? `Hi ${name},` : 'Hi there,',
+      body: {
+        intro: 'You have been assigned a secret role for an upcoming Strategic Escape Challenge.',
+        instruction: 'Read your role and unique perspective carefully before joining the session. Your role is:',
+        noAction: 'If you were not expecting this, you can safely ignore this email.',
+      },
+      cta: 'View event and join discussion',
+      footer: '© 2026 Flowkyn. All rights reserved.',
+    },
   },
 
   // ─── French ───
@@ -110,6 +121,17 @@ export const translations: TranslationMap = {
       cta: 'Rejoindre l\'événement',
       footer: '© 2026 Flowkyn. Tous droits réservés.',
     },
+    strategic_role_assignment: {
+      subject: 'Votre rôle secret pour le Strategic Escape Challenge',
+      greeting: (name) => name ? `Bonjour ${name},` : 'Bonjour,',
+      body: {
+        intro: 'Vous avez reçu un rôle secret pour un prochain Strategic Escape Challenge.',
+        instruction: 'Lisez attentivement votre rôle et votre point de vue unique avant de rejoindre la session. Votre rôle est :',
+        noAction: 'Si vous ne vous attendiez pas à ce message, vous pouvez ignorer cet e-mail.',
+      },
+      cta: 'Voir l’événement et rejoindre la discussion',
+      footer: '© 2026 Flowkyn. Tous droits réservés.',
+    },
   },
 
   // ─── German ───
@@ -156,6 +178,17 @@ export const translations: TranslationMap = {
         noAction: 'Wenn Sie diese Einladung nicht erwartet haben, können Sie diese E-Mail ignorieren.',
       },
       cta: 'Am Event teilnehmen',
+      footer: '© 2026 Flowkyn. Alle Rechte vorbehalten.',
+    },
+    strategic_role_assignment: {
+      subject: 'Ihre geheime Rolle für die Strategic Escape Challenge',
+      greeting: (name) => name ? `Hallo ${name},` : 'Hallo,',
+      body: {
+        intro: 'Sie haben eine geheime Rolle für eine bevorstehende Strategic Escape Challenge erhalten.',
+        instruction: 'Lesen Sie Ihre Rolle und Ihre einzigartige Perspektive sorgfältig, bevor Sie an der Sitzung teilnehmen. Ihre Rolle ist:',
+        noAction: 'Wenn Sie diese Nachricht nicht erwartet haben, können Sie diese E-Mail ignorieren.',
+      },
+      cta: 'Event ansehen und Diskussion beitreten',
       footer: '© 2026 Flowkyn. Alle Rechte vorbehalten.',
     },
   },

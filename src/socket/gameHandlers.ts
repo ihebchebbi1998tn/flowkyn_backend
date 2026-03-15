@@ -65,6 +65,10 @@ function isCoffeeAction(actionType: string) {
   return actionType.startsWith('coffee:');
 }
 
+function isStrategicAction(actionType: string) {
+  return actionType.startsWith('strategic:');
+}
+
 async function getSessionGameKey(sessionId: string): Promise<string | null> {
   const row = await queryOne<{ key: string }>(
     `SELECT gt.key
@@ -285,6 +289,70 @@ async function reduceCoffeeState(args: {
 
   if (actionType === 'coffee:reset') {
     return { kind: 'coffee-roulette', phase: 'waiting', pairs: [], startedChatAt: null };
+  }
+
+  return base;
+}
+
+type StrategicState = {
+  kind: 'strategic-escape';
+  phase: 'setup' | 'roles_assignment' | 'pre_discussion' | 'discussion' | 'debrief';
+  industry: string;
+  crisisType: string;
+  difficulty: string;
+  rolesAssigned: boolean;
+  discussionEndsAt?: string;
+};
+
+async function reduceStrategicState(args: {
+  eventId: string;
+  actionType: string;
+  payload: any;
+  prev: StrategicState | null;
+}): Promise<StrategicState> {
+  const { actionType, payload, prev } = args;
+
+  const base: StrategicState = prev || {
+    kind: 'strategic-escape',
+    phase: 'setup',
+    industry: payload?.industry || 'strategic.industries.tech_saas',
+    crisisType: payload?.crisisType || 'strategic.crises.product_launch_crisis',
+    difficulty: payload?.difficulty || 'medium',
+    rolesAssigned: false,
+  };
+
+  if (actionType === 'strategic:configure') {
+    return {
+      ...base,
+      industry: payload?.industry || base.industry,
+      crisisType: payload?.crisisType || base.crisisType,
+      difficulty: payload?.difficulty || base.difficulty,
+      phase: 'setup',
+    };
+  }
+
+  if (actionType === 'strategic:assign_roles') {
+    return {
+      ...base,
+      rolesAssigned: true,
+      phase: 'roles_assignment',
+    };
+  }
+
+  if (actionType === 'strategic:start_discussion') {
+    const minutes = typeof payload?.durationMinutes === 'number' ? payload.durationMinutes : 45;
+    return {
+      ...base,
+      phase: 'discussion',
+      discussionEndsAt: new Date(Date.now() + minutes * 60000).toISOString(),
+    };
+  }
+
+  if (actionType === 'strategic:end_discussion') {
+    return {
+      ...base,
+      phase: 'debrief',
+    };
   }
 
   return base;
@@ -543,6 +611,17 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
           const next = await reduceCoffeeState({
+            eventId: session.event_id,
+            actionType: data.actionType,
+            payload: data.payload,
+            prev: (latest?.state as any) || null,
+          });
+          await gamesService.saveSnapshot(data.sessionId, next);
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+        }
+
+        if (gameKey === 'strategic-escape' && isStrategicAction(data.actionType)) {
+          const next = await reduceStrategicState({
             eventId: session.event_id,
             actionType: data.actionType,
             payload: data.payload,

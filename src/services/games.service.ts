@@ -8,6 +8,14 @@ export class GamesService {
     return query('SELECT * FROM game_types ORDER BY name ASC');
   }
 
+  /** Helper to resolve a game type row by key. */
+  async getGameTypeByKey(key: string) {
+    return queryOne<{ id: string; key: string }>(
+      'SELECT id, key FROM game_types WHERE key = $1',
+      [key]
+    );
+  }
+
   /**
    * Find the most recent active game session for a given event + game type key.
    * Returns null if no active session exists.
@@ -289,6 +297,96 @@ export class GamesService {
       [uuid(), sessionId, state]
     );
     return snapshot;
+  }
+
+  /**
+   * Create a Strategic Escape session for an event with initial configuration snapshot.
+   */
+  async createStrategicSession(eventId: string, config: {
+    industry: string;
+    crisisType: string;
+    difficulty: string;
+  }) {
+    const gameType = await this.getGameTypeByKey('strategic-escape');
+    if (!gameType) throw new AppError('Strategic Escape game type not found', 404, 'NOT_FOUND');
+
+    const session = await this.startSession(eventId, gameType.id);
+
+    const initialState = {
+      kind: 'strategic-escape',
+      phase: 'setup',
+      industry: config.industry,
+      crisisType: config.crisisType,
+      difficulty: config.difficulty,
+      rolesAssigned: false,
+    };
+
+    await this.saveSnapshot(session.id, initialState);
+    return session;
+  }
+
+  /**
+   * Assign strategic roles to all active participants for the session's event.
+   * Inserts rows into strategic_roles and returns mapping of participant_id -> role_key.
+   */
+  async assignStrategicRoles(sessionId: string) {
+    // Simple fixed catalog of roles; frontend will localize labels by role_key.
+    const ROLE_KEYS = ['product_lead', 'marketing_lead', 'cfo', 'ops_lead', 'customer_success_lead'] as const;
+
+    const session = await this.getSession(sessionId);
+
+    // Fetch all active participants for this event
+    const participants = await query<{ id: string; organization_member_id: string | null }>(
+      `SELECT id, organization_member_id
+       FROM participants
+       WHERE event_id = $1 AND left_at IS NULL
+       ORDER BY created_at ASC`,
+      [session.event_id]
+    );
+
+    if (participants.length === 0) {
+      throw new AppError('No active participants found for this event', 400, 'NOT_PARTICIPANT');
+    }
+
+    // Fetch any existing strategic_roles so we don't duplicate
+    const existing = await query<{ participant_id: string }>(
+      `SELECT participant_id
+       FROM strategic_roles
+       WHERE game_session_id = $1`,
+      [sessionId]
+    );
+    const existingIds = new Set(existing.map(r => r.participant_id));
+
+    // Deterministic role assignment: cycle through ROLE_KEYS
+    const assignments: { participantId: string; roleKey: string }[] = [];
+    let roleIndex = 0;
+    for (const p of participants) {
+      if (existingIds.has(p.id)) continue;
+      const roleKey = ROLE_KEYS[roleIndex % ROLE_KEYS.length];
+      assignments.push({ participantId: p.id, roleKey });
+      roleIndex += 1;
+    }
+
+    if (assignments.length === 0) {
+      // Nothing new to assign; simply return
+      return [];
+    }
+
+    // Insert new strategic_roles rows
+    const values: string[] = [];
+    const params: any[] = [];
+    let idx = 1;
+    for (const a of assignments) {
+      values.push(`(uuid_generate_v4(), $${idx++}, $${idx++}, $${idx++}, NULL, NOW())`);
+      params.push(sessionId, a.participantId, a.roleKey);
+    }
+    await query(
+      `INSERT INTO strategic_roles (id, game_session_id, participant_id, role_key, email_sent_at, created_at)
+       VALUES ${values.join(', ')}`,
+      params
+    );
+
+    return assignments;
   }
 
   async getPrompts(gameTypeId: string, category?: string) {

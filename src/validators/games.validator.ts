@@ -15,3 +15,11 @@ export const submitActionSchema = z.object({
     { message: 'Payload too large (max 10KB)' }
   ),
 });
+
+// Strategic Escape Challenge: configuration payload for creating a session
+export const createStrategicSessionSchema = z.object({
+  industry: z.string().min(1).max(50),
+  crisisType: z.string().min(1).max(50),
+  difficulty: z.enum(['easy', 'medium', 'hard']),
+});
+
