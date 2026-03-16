@@ -257,14 +257,26 @@ async function reduceCoffeeState(args: {
        ORDER BY p.created_at ASC`,
       [eventId]
     );
-    const shuffled = [...participants].sort(() => Math.random() - 0.5);
+
+    // Guard: need at least 2 participants to form pairs
+    if (participants.length < 2) {
+      return { ...base, phase: 'waiting', pairs: [], startedChatAt: null };
+    }
+
+    // Fisher-Yates shuffle for unbiased randomisation
+    const shuffled = [...participants];
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+
     const pairs: CoffeeState['pairs'] = [];
     for (let i = 0; i < shuffled.length; i += 2) {
       if (i + 1 >= shuffled.length) break;
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
       pairs.push({
-        id: String(i / 2),
+        id: crypto.randomUUID(),
         person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
         person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p2.avatar || null },
         topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
@@ -443,9 +455,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const session = await gamesService.getSession(data.sessionId);
-        const activeRound = await gamesService.getActiveRound(data.sessionId);
-        const snapshot = await gamesService.getLatestSnapshot(data.sessionId);
+        const [session, activeRound, snapshot] = await Promise.all([
+          gamesService.getSession(data.sessionId),
+          gamesService.getActiveRound(data.sessionId),
+          gamesService.getLatestSnapshot(data.sessionId),
+        ]);
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
         joinedSessions.add(data.sessionId);
@@ -592,10 +606,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
           timestamp: action.created_at,
         });
 
-        // Shared game snapshots for supported games
-        const gameKey = await getSessionGameKey(data.sessionId);
-        const latest = await gamesService.getLatestSnapshot(data.sessionId);
-        const session = await gamesService.getSession(data.sessionId);
+        // Shared game snapshots for supported games — parallelise DB reads
+        const [gameKey, latest, session] = await Promise.all([
+          getSessionGameKey(data.sessionId),
+          gamesService.getLatestSnapshot(data.sessionId),
+          gamesService.getSession(data.sessionId),
+        ]);
 
         if (gameKey === 'two-truths' && isTwoTruthsAction(data.actionType)) {
           const next = await reduceTwoTruthsState({
@@ -727,9 +743,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const session = await gamesService.getSession(data.sessionId);
-        const activeRound = await gamesService.getActiveRound(data.sessionId);
-        const snapshot = await gamesService.getLatestSnapshot(data.sessionId);
+        const [session, activeRound, snapshot] = await Promise.all([
+          gamesService.getSession(data.sessionId),
+          gamesService.getActiveRound(data.sessionId),
+          gamesService.getLatestSnapshot(data.sessionId),
+        ]);
         socket.emit('game:state', {
           sessionId: data.sessionId,
           state: {
