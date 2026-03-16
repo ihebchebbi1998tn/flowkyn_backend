@@ -68,13 +68,23 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
 
   if (orgMember) {
     const participantId = crypto.randomUUID();
-    await query(
-      `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
-       VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+    const result = await query(
+      `WITH existing AS (
+         SELECT id FROM participants 
+         WHERE event_id = $2 AND organization_member_id = $3 AND left_at IS NULL
+       ),
+       inserted AS (
+         INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+         SELECT $1, $2, $3, 'member', NOW(), NOW()
+         WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       )
+       SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
       [participantId, eventId, orgMember.id]
     );
+    
     return {
-      participantId,
+      participantId: result[0]?.id || participantId,
       memberId: orgMember.id,
       displayName: orgMember.name || 'Unknown',
       avatarUrl: orgMember.avatar_url || null

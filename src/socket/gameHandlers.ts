@@ -405,12 +405,27 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
 
   if (orgMember) {
     const participantId = crypto.randomUUID();
-    await query(
-      `INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
-       VALUES ($1, $2, $3, 'member', NOW(), NOW())`,
+    // Use an UPSERT-like approach or handle conflict if a unique constraint exists, 
+    // but the safest generic way without relying on a strict DB schema constraint 
+    // (since organization_member_id + event_id isn't always strictly unique at DB level) 
+    // is to use a transaction or an INSERT ... ON CONFLICT if the constraint exists.
+    // Assuming a unique constraint might not exist, we'll do an idempotent insert using a CTE.
+    const result = await query(
+      `WITH existing AS (
+         SELECT id FROM participants 
+         WHERE event_id = $2 AND organization_member_id = $3 AND left_at IS NULL
+       ),
+       inserted AS (
+         INSERT INTO participants (id, event_id, organization_member_id, participant_type, joined_at, created_at)
+         SELECT $1, $2, $3, 'member', NOW(), NOW()
+         WHERE NOT EXISTS (SELECT 1 FROM existing)
+         RETURNING id
+       )
+       SELECT id FROM inserted UNION ALL SELECT id FROM existing LIMIT 1`,
       [participantId, orgMember.event_id, orgMember.id]
     );
-    return { participantId };
+    
+    return { participantId: result[0]?.id || participantId };
   }
 
   return null;
