@@ -13,6 +13,7 @@ import { adminRoutes } from './admin.routes';
 import { contactRoutes } from './contact.routes';
 import { smtpTestRoutes } from './smtpTest.routes';
 import { bugReportsRoutes } from './bugReports.routes';
+import { earlyAccessRoutes } from './earlyAccess.routes';
 
 const router = Router();
 
@@ -31,5 +32,6 @@ router.use('/admin', adminRoutes);
 router.use('/contact', contactRoutes);
 router.use('/bug-reports', bugReportsRoutes);
 router.use('/smtp-test', smtpTestRoutes);
+router.use('/early-access', earlyAccessRoutes);
 
 export { router as routes };

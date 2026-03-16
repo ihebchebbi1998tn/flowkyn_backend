@@ -1,12 +1,14 @@
 import { Router } from 'express';
 import { AdminController } from '../controllers/admin.controller';
 import { ContactController } from '../controllers/contact.controller';
+import { EarlyAccessController } from '../controllers/earlyAccess.controller';
 import { authenticate } from '../middleware/auth';
 import { requireSuperAdmin } from '../config/superAdmin';
 
 const router = Router();
 const ctrl = new AdminController();
 const contactCtrl = new ContactController();
+const earlyAccessCtrl = new EarlyAccessController();
 
 // All admin routes require authentication + super-admin role
 router.use(authenticate);
@@ -38,5 +40,8 @@ router.get('/contact', contactCtrl.list);
 router.get('/contact/:id', contactCtrl.getById);
 router.patch('/contact/:id', contactCtrl.updateStatus);
 router.delete('/contact/:id', contactCtrl.delete);
+
+// Early access submissions
+router.get('/early-access', earlyAccessCtrl.list);
 
 export { router as adminRoutes };
