@@ -58,12 +58,10 @@ export function saveFile(
 
   fs.writeFileSync(filePath, fileBuffer);
 
-  // URL is relative — served via express.static
-  // Normalize base URL:
-  // - Prevent misconfig like BASE_URL=https://api.flowkyn.com/v1 (uploads are served at /uploads, not /v1/uploads)
-  // - Avoid double slashes
-  const base = env.baseUrl.replace(/\/v1\/?$/, '').replace(/\/$/, '');
-  const url = `${base}/uploads/${sanitizedSubDir}/${fileName}`;
+  // Build the public URL for the file.
+  // Always use the full base URL so stored URLs work across environments
+  // (avoids saving http://localhost:3000 when developing).
+  const url = `https://api.flowkyn.com/uploads/${sanitizedSubDir}/${fileName}`;
 
   return { filePath, fileName, url };
 }
