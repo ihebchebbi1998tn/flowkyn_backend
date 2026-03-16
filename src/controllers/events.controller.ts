@@ -131,16 +131,17 @@ export class EventsController {
   /** POST /events — Create a new event */
   async create(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      const member = await requireOrgMember(req.body.organization_id, req.user!.userId);
+      const body = req.body as any;
+      const member = await requireOrgMember(body.organization_id, req.user!.userId);
       requireAdminRole(member, 'create events');
-      const event = await eventsService.create(member.id, req.body);
-      await audit.create(req.body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: req.body.title });
+      const event = await eventsService.create(member.id, body);
+      await audit.create(body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: body.title });
 
       // Automatically invite pre-selected members/emails if provided
-      if (Array.isArray(req.body.invites) && req.body.invites.length > 0) {
+      if (Array.isArray(body.invites) && body.invites.length > 0) {
         // Run invitations in parallel, silencing errors so one failure doesn't crash the whole creation flow
         await Promise.allSettled(
-          req.body.invites.map((email: string) =>
+          body.invites.map((email: string) =>
             invitationsService.inviteParticipant(
               event.id,
               member.id,
@@ -312,12 +313,39 @@ export class EventsController {
   /** POST /events/:eventId/join-guest — Guest join (no auth) */
   async joinAsGuest(req: Request, res: Response, next: NextFunction) {
     try {
-      const event = await eventsService.getById(req.params.eventId);
+      const _req = req as any;
+      const event = await eventsService.getById(_req.params.eventId);
       if (!event.allow_guests) {
         throw new AppError('Guests are not allowed for this event', 403, 'GUESTS_NOT_ALLOWED');
       }
 
-      const result = await invitationsService.joinAsGuest(req.params.eventId, req.body, event);
+      // Idempotency: If the client already has a valid active guest token, just return it.
+      const authHeader = _req.headers.authorization;
+      if (authHeader && authHeader.startsWith('Bearer ')) {
+        const token = authHeader.replace('Bearer ', '');
+        try {
+          const { verifyGuestToken } = await import('../utils/jwt');
+          const guestPayload = verifyGuestToken(token);
+          if (guestPayload.eventId === _req.params.eventId) {
+            const pt = await queryOne<{ id: string; guest_name: string }>(
+              'SELECT id, guest_name FROM participants WHERE id = $1 AND left_at IS NULL',
+              [guestPayload.participantId]
+            );
+            if (pt) {
+              return res.status(200).json({
+                participant_id: pt.id,
+                guest_name: pt.guest_name || guestPayload.guestName,
+                guest_token: token,
+                already_joined: true
+              });
+            }
+          }
+        } catch (e) {
+          // Ignore invalid/expired tokens and proceed to create a new one
+        }
+      }
+
+      const result = await invitationsService.joinAsGuest(_req.params.eventId, _req.body, event);
       await audit.create(event.organization_id, null, 'EVENT_GUEST_JOIN', { eventId: req.params.eventId, guestName: result.guest_name, ip: req.ip });
       emitEventNotification(req.params.eventId, 'participant:joined', {
         guestName: result.guest_name,
