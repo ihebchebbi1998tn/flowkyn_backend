@@ -106,11 +106,13 @@ export class GamesController {
   async getActiveSessionForEvent(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const gameKey = (req.query.game_key as string | undefined)?.trim();
-      if (!gameKey) {
-        throw new AppError('game_key query parameter is required', 400, 'VALIDATION_FAILED');
+      
+      let session;
+      if (gameKey) {
+        session = await gamesService.getActiveSessionByEventAndKey(req.params.eventId, gameKey);
+      } else {
+        session = await gamesService.getLatestActiveSessionForEvent(req.params.eventId);
       }
-
-      const session = await gamesService.getActiveSessionByEventAndKey(req.params.eventId, gameKey);
 
       // For easier client handling, always return 200 with either a session object or null.
       res.json(session || null);

@@ -17,6 +17,23 @@ export class GamesService {
   }
 
   /**
+   * Find the most recent active game session for a given event, regardless of game type.
+   */
+  async getLatestActiveSessionForEvent(eventId: string) {
+    const session = await queryOne<GameSessionRow & { game_key: string }>(
+      `SELECT gs.*, gt.key as game_key
+       FROM game_sessions gs
+       JOIN game_types gt ON gt.id = gs.game_type_id
+       WHERE gs.event_id = $1
+         AND gs.status = 'active'
+       ORDER BY gs.started_at DESC
+       LIMIT 1`,
+      [eventId]
+    );
+    return session || null;
+  }
+
+  /**
    * Find the most recent active game session for a given event + game type key.
    * Returns null if no active session exists.
    */
