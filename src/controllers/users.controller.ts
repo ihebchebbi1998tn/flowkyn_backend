@@ -85,12 +85,21 @@ export class UsersController {
       }
 
       // User must be the organization owner to invite during onboarding
-      const isMember = await queryOne<{ role: string }>(
-        `SELECT role FROM organization_members WHERE organization_id = $1 AND user_id = $2`,
+      const member = await queryOne<{ member_id: string; role_name: string }>(
+        `SELECT om.id as member_id, r.name as role_name
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         WHERE om.organization_id = $1
+           AND om.user_id = $2
+           AND om.status = 'active'
+         LIMIT 1`,
         [orgId, userId]
       );
 
-      if (!isMember) throw new AppError('Not a member of this organization', 403, 'FORBIDDEN');
+      if (!member) throw new AppError('Not a member of this organization', 403, 'FORBIDDEN');
+      if (member.role_name !== 'owner') {
+        throw new AppError('Only the organization owner can invite during onboarding', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
 
       const result = await usersService.sendOnboardingInvites(orgId, userId, invites, lang);
       await audit.create(orgId, userId, 'ONBOARDING_SEND_INVITES', { count: invites.length });
