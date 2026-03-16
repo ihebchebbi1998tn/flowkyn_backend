@@ -109,6 +109,11 @@ export interface EventRow {
   end_time: Date;
   expires_at: Date;
   status: string;
+  // Optional event_settings fields (present when joined in queries like EventsService.getById)
+  allow_guests?: boolean;
+  allow_chat?: boolean;
+  auto_start_games?: boolean;
+  max_rounds?: number;
   created_at: Date;
   updated_at: Date;
 }

@@ -42,6 +42,7 @@ export type ErrorCode =
   | 'FILE_MISSING'
   // Events / Games
   | 'EVENT_FULL'
+  | 'GUESTS_NOT_ALLOWED'
   | 'ALREADY_PARTICIPANT'
   | 'NOT_PARTICIPANT'
   | 'SESSION_NOT_ACTIVE'
