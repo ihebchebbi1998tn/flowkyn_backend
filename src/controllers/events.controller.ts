@@ -202,7 +202,58 @@ export class EventsController {
       if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
         throw new AppError('You need owner, admin, or moderator role to update this event', 403, 'INSUFFICIENT_PERMISSIONS');
       }
-      const updated = await eventsService.update(req.params.eventId, req.body);
+
+      const {
+        allow_guests,
+        allow_chat,
+        auto_start_games,
+        max_rounds,
+        ...eventUpdates
+      } = req.body as any;
+
+      // Update core event fields (title, times, status, etc.)
+      const updated = Object.keys(eventUpdates).length
+        ? await eventsService.update(req.params.eventId, eventUpdates)
+        : event;
+
+      // Update event_settings if any setting fields were provided
+      if (
+        allow_guests !== undefined ||
+        allow_chat !== undefined ||
+        auto_start_games !== undefined ||
+        max_rounds !== undefined
+      ) {
+        const fields: string[] = [];
+        const values: any[] = [];
+        let idx = 1;
+
+        if (allow_guests !== undefined) {
+          fields.push(`allow_guests = $${idx++}`);
+          values.push(!!allow_guests);
+        }
+        if (allow_chat !== undefined) {
+          fields.push(`allow_chat = $${idx++}`);
+          values.push(!!allow_chat);
+        }
+        if (auto_start_games !== undefined) {
+          fields.push(`auto_start_games = $${idx++}`);
+          values.push(!!auto_start_games);
+        }
+        if (max_rounds !== undefined) {
+          fields.push(`max_rounds = $${idx++}`);
+          values.push(Number(max_rounds));
+        }
+
+        if (fields.length > 0) {
+          values.push(req.params.eventId);
+          await query(
+            `UPDATE event_settings SET ${fields.join(', ')}, updated_at = NOW()
+             WHERE event_id = $${idx}`,
+            values
+          );
+        }
+      }
+
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_UPDATE', { eventId: req.params.eventId, changes: Object.keys(req.body) });
       emitEventUpdate(req.params.eventId, req.body);
       res.json(updated);
@@ -231,6 +282,19 @@ export class EventsController {
   async getPublicInfo(req: Request, res: Response, next: NextFunction) {
     try {
       const info = await eventsService.getPublicInfo(req.params.eventId);
+
+      // For private events, avoid leaking organization identity and counts
+      if (info.visibility === 'private') {
+        const { organization_name, organization_logo, participant_count, invited_count, ...safe } = info as any;
+        return res.json({
+          ...safe,
+          organization_name: null,
+          organization_logo: null,
+          participant_count: null,
+          invited_count: null,
+        });
+      }
+
       res.json(info);
     } catch (err) { next(err); }
   }
@@ -249,6 +313,10 @@ export class EventsController {
   async joinAsGuest(req: Request, res: Response, next: NextFunction) {
     try {
       const event = await eventsService.getById(req.params.eventId);
+      if (!event.allow_guests) {
+        throw new AppError('Guests are not allowed for this event', 403, 'GUESTS_NOT_ALLOWED');
+      }
+
       const result = await invitationsService.joinAsGuest(req.params.eventId, req.body, event);
       await audit.create(event.organization_id, null, 'EVENT_GUEST_JOIN', { eventId: req.params.eventId, guestName: result.guest_name, ip: req.ip });
       emitEventNotification(req.params.eventId, 'participant:joined', {
@@ -289,9 +357,19 @@ export class EventsController {
     } catch (err) { next(err); }
   }
 
-  /** GET /events/:eventId/participants — List participants (no auth, for lobby) */
+  /** GET /events/:eventId/participants — List participants (lobby) */
   async getParticipants(req: Request, res: Response, next: NextFunction) {
     try {
+      const event = await eventsService.getById(req.params.eventId);
+      // For private events, only expose participant list to authenticated flows via lobby token.
+      // The frontend already only calls this once it has a valid event token;
+      // for unauthenticated callers without any context, treat private events as not found.
+      if (event.visibility === 'private') {
+        // Hide whether the event exists at all for completely unauthenticated callers.
+        // Authenticated flows use /events/:id and /events/:id/me instead.
+        throw new AppError('Event not found', 404, 'NOT_FOUND');
+      }
+
       const result = await eventsService.getParticipants(req.params.eventId, req.query as any);
       res.json(result);
     } catch (err) { next(err); }

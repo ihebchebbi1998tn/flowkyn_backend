@@ -301,12 +301,22 @@ export class GamesService {
 
   /**
    * Create a Strategic Escape session for an event with initial configuration snapshot.
+   *
+   * NOTE: To keep analytics and translations stable over time, we store BOTH
+   * stable keys (industryKey/crisisKey/difficultyKey) and human-readable labels.
+   * Existing callers that only send labels remain supported.
    */
-  async createStrategicSession(eventId: string, config: {
-    industry: string;
-    crisisType: string;
-    difficulty: string;
-  }) {
+  async createStrategicSession(
+    eventId: string,
+    config: {
+      industry: string;
+      crisisType: string;
+      difficulty: string;
+      industryKey?: string;
+      crisisKey?: string;
+      difficultyLabel?: string;
+    }
+  ) {
     const gameType = await this.getGameTypeByKey('strategic-escape');
     if (!gameType) throw new AppError('Strategic Escape game type not found', 404, 'NOT_FOUND');
 
@@ -315,9 +325,14 @@ export class GamesService {
     const initialState = {
       kind: 'strategic-escape',
       phase: 'setup',
-      industry: config.industry,
-      crisisType: config.crisisType,
-      difficulty: config.difficulty,
+      // Stable keys for analytics and future filtering
+      industryKey: config.industryKey || null,
+      crisisKey: config.crisisKey || null,
+      difficultyKey: config.difficulty,
+      // Human-readable labels for immediate display / email content
+      industryLabel: config.industry,
+      crisisLabel: config.crisisType,
+      difficultyLabel: config.difficultyLabel || config.difficulty,
       rolesAssigned: false,
     };
 

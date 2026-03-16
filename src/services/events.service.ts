@@ -30,7 +30,7 @@ const ALLOWED_EVENT_UPDATE_FIELDS = new Set([
 export class EventsService {
   /**
    * Create a new event within an organization.
-   * Automatically creates default event_settings and sets status to 'draft'.
+   * Automatically creates default event_settings and starts in 'draft' status.
    *
    * @param memberId - The creating member's organization_member ID
    * @param data - Event creation payload
@@ -40,22 +40,35 @@ export class EventsService {
     organization_id: string; title: string; description?: string;
     event_mode?: string; visibility?: string; max_participants?: number;
     start_time?: string; end_time?: string; allow_guests?: boolean;
+    allow_chat?: boolean; auto_start_games?: boolean; max_rounds?: number;
   }) {
     const eventId = uuid();
     const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
+    const allowChat = data.allow_chat ?? true;
+    const autoStartGames = data.auto_start_games ?? false;
+    const maxRounds = data.max_rounds ?? 5;
 
     const event = await transaction(async (client) => {
       const { rows: [ev] } = await client.query(
         `INSERT INTO events (id, organization_id, created_by_member_id, title, description, event_mode, visibility, max_participants, start_time, end_time, status, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'active', NOW(), NOW()) RETURNING *`,
-        [eventId, data.organization_id, memberId, data.title, data.description || '',
-         data.event_mode || 'sync', data.visibility || 'private', data.max_participants || 50,
-         data.start_time || null, data.end_time || null]
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, 'draft', NOW(), NOW()) RETURNING *`,
+        [
+          eventId,
+          data.organization_id,
+          memberId,
+          data.title,
+          data.description || '',
+          data.event_mode || 'sync',
+          data.visibility || 'private',
+          data.max_participants || 50,
+          data.start_time || null,
+          data.end_time || null,
+        ]
       );
       await client.query(
         `INSERT INTO event_settings (event_id, allow_guests, allow_chat, auto_start_games, max_rounds)
-         VALUES ($1, $2, true, false, 5)`,
-        [eventId, allowGuests]
+         VALUES ($1, $2, $3, $4, $5)`,
+        [eventId, allowGuests, allowChat, autoStartGames, maxRounds]
       );
       // Auto-join creator so they can use /me, messages, posts, etc. when landing on play
       const participantId = uuid();

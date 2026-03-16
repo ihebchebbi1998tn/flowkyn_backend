@@ -285,6 +285,9 @@ export class GamesController {
         industry: req.body.industry,
         crisisType: req.body.crisisType,
         difficulty: req.body.difficulty,
+        industryKey: req.body.industryKey,
+        crisisKey: req.body.crisisKey,
+        difficultyLabel: req.body.difficultyLabel,
       });
 
       await audit.create(null, req.user.userId, 'GAME_CREATE_STRATEGIC_SESSION', {
@@ -339,9 +342,19 @@ export class GamesController {
         const snapshot = await gamesService.getLatestSnapshot(req.params.sessionId);
         const state = snapshot?.state as any;
 
-        const industryLabel = state?.industry || 'strategic.industries.generic';
-        const crisisLabel = state?.crisisType || 'strategic.crises.generic';
-        const difficultyLabel = state?.difficulty || 'strategic.difficulties.medium';
+        // Prefer normalized label fields but fall back to legacy ones
+        const industryLabel =
+          state?.industryLabel ||
+          state?.industry ||
+          'strategic.industries.generic';
+        const crisisLabel =
+          state?.crisisLabel ||
+          state?.crisisType ||
+          'strategic.crises.generic';
+        const difficultyLabel =
+          state?.difficultyLabel ||
+          state?.difficulty ||
+          'strategic.difficulties.medium';
 
         const frontendBase = env.frontendUrl;
         const eventLink = `${frontendBase}/join/${session.event_id}`;

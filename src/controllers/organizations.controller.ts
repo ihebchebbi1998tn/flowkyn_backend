@@ -61,6 +61,17 @@ export class OrganizationsController {
     } catch (err) { next(err); }
   }
 
+  async listPeople(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const member = await orgsService.getMemberByUserId(req.params.orgId, req.user!.userId);
+      if (!member) throw new AppError('You are not a member of this organization', 403, 'NOT_A_MEMBER');
+      const people = await orgsService.listPeopleWithInvites(req.params.orgId);
+      res.json(people);
+    } catch (err) {
+      next(err);
+    }
+  }
+
   /** Get the current user's primary organization (first membership) */
   async getCurrentForUser(req: AuthRequest, res: Response, next: NextFunction) {
     try {

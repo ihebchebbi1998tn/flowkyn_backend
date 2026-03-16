@@ -7,6 +7,7 @@
  * PATCH  /organizations/:orgId                   — Update org
  * GET    /organizations/:orgId/members           — List members
  * GET    /organizations/:orgId/invitations       — List invitations
+ * GET    /organizations/:orgId/people            — List members and pending invitations
  * DELETE /organizations/:orgId/members/:memberId — Remove member
  * POST   /organizations/:orgId/logo              — Upload org logo
  * POST   /organizations/:orgId/invitations       — Send invitation
@@ -30,6 +31,7 @@ router.get('/:orgId', authenticate, validate(orgIdParam, 'params'), ctrl.getById
 router.patch('/:orgId', authenticate, validate(orgIdParam, 'params'), validate(updateOrgSchema), ctrl.update);
 router.get('/:orgId/members', authenticate, validate(orgIdParam, 'params'), ctrl.listMembers);
 router.get('/:orgId/invitations', authenticate, validate(orgIdParam, 'params'), ctrl.listInvitations);
+router.get('/:orgId/people', authenticate, validate(orgIdParam, 'params'), ctrl.listPeople);
 router.delete('/:orgId/members/:memberId', authenticate, validate(orgMemberParams, 'params'), ctrl.removeMember);
 router.post('/:orgId/logo', authenticate, validate(orgIdParam, 'params'), upload.single('logo'), ctrl.uploadLogo);
 router.post('/:orgId/invitations', authenticate, validate(orgIdParam, 'params'), validate(inviteMemberSchema), ctrl.inviteMember);

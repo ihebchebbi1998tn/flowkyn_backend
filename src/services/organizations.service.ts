@@ -80,6 +80,16 @@ export class OrganizationsService {
     );
   }
 
+  async listPeopleWithInvites(orgId: string) {
+    const members = await this.listMembers(orgId);
+    const invitations = await this.listInvitations(orgId);
+
+    return {
+      members,
+      invitations,
+    };
+  }
+
   async inviteMember(orgId: string, invitedByMemberId: string, email: string, roleIdOrName: string, lang?: string) {
     const rawToken = crypto.randomBytes(32).toString('hex');
     const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');

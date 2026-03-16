@@ -18,9 +18,16 @@ export const submitActionSchema = z.object({
 });
 
 // Strategic Escape Challenge: configuration payload for creating a session
+// We accept both stable keys and human-readable labels so that analytics
+// can rely on keys while the UI/emails can render labels.
 export const createStrategicSessionSchema = z.object({
+  // Human-readable labels (required for existing clients)
   industry: z.string().min(1).max(50),
   crisisType: z.string().min(1).max(50),
   difficulty: z.enum(['easy', 'medium', 'hard']),
+  // Optional stable keys + difficulty label for richer analytics
+  industryKey: z.string().min(1).max(50).optional(),
+  crisisKey: z.string().min(1).max(50).optional(),
+  difficultyLabel: z.string().min(1).max(50).optional(),
 });
 
