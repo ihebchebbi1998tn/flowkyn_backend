@@ -48,6 +48,7 @@ export type ErrorCode =
   | 'SESSION_NOT_ACTIVE'
   | 'ROUND_NOT_ACTIVE'
   | 'SESSION_ALREADY_FINISHED'
+  | 'NAME_TAKEN'
   // Infrastructure
   | 'CORS_BLOCKED'
   | 'TIMEOUT'

@@ -25,6 +25,19 @@ export class EventProfilesService {
     displayName: string,
     avatarUrl?: string | null,
   ) {
+    const sanitizedName = displayName.trim();
+    
+    // Check for display name conflicts within the same event (excluding the current participant)
+    const conflict = await queryOne(
+      `SELECT participant_id FROM event_profiles 
+       WHERE event_id = $1 AND LOWER(display_name) = LOWER($2) AND participant_id != $3`,
+      [eventId, sanitizedName, participantId]
+    );
+
+    if (conflict) {
+      throw new AppError('This nickname is already taken in this event. Please choose another one.', 400, 'NAME_TAKEN');
+    }
+
     const [row] = await query<{
       id: string;
       display_name: string;
@@ -37,7 +50,7 @@ export class EventProfilesService {
                      avatar_url   = EXCLUDED.avatar_url,
                      updated_at   = NOW()
        RETURNING id, display_name, avatar_url`,
-      [eventId, participantId, displayName, avatarUrl || null],
+      [eventId, participantId, sanitizedName, avatarUrl || null],
     );
     return row;
   }

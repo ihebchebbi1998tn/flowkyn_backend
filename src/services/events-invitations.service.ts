@@ -180,8 +180,23 @@ export class EventInvitationsService {
       }
 
       const participantId = uuid();
-      const sanitizedName = sanitizeText(data.name, 100);
+      const sanitizedName = sanitizeText(data.name, 100).trim();
       if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED');
+
+      // Check for name conflicts across both guest_name and event_profiles.display_name
+      // We check guests who haven't left, and any member profiles.
+      const conflict = await client.query(
+        `SELECT id FROM (
+          SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
+          UNION ALL
+          SELECT participant_id as id FROM event_profiles WHERE event_id = $1 AND LOWER(display_name) = LOWER($2)
+        ) combined LIMIT 1`,
+        [eventId, sanitizedName]
+      );
+
+      if (conflict.rows.length > 0) {
+        throw new AppError('This name is already taken in this lobby. Please choose a slightly different one.', 400, 'NAME_TAKEN');
+      }
 
       await client.query(
         `INSERT INTO participants (id, event_id, guest_name, guest_avatar, participant_type, joined_at, created_at)
@@ -213,7 +228,7 @@ export class EventInvitationsService {
    * @param maxParticipants - Event's max participant limit
    * @param lang - Email language (defaults to 'en')
    */
-  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, eventTitle: string, maxParticipants: number, lang?: string) {
+  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, eventTitle: string, maxParticipants: number, lang?: string, gameId?: string) {
     const [{ count }] = await query<{ count: string }>(
       'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
       [eventId]
@@ -234,7 +249,7 @@ export class EventInvitationsService {
     await sendEmail({
       to: email,
       type: 'event_invitation',
-      data: { eventTitle, link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}` },
+      data: { eventTitle, link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameId ? `&game=${gameId}` : ''}` },
       lang,
     });
 

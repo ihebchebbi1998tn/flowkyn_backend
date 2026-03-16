@@ -306,6 +306,27 @@ export class EventsService {
     );
     if (existing) throw new AppError('You are already a participant in this event', 409, 'ALREADY_PARTICIPANT');
 
+    // Check if the member's default user name is already taken by a guest or another member's profile
+    const memberName = await queryOne<{ name: string }>(
+      'SELECT u.name FROM users u JOIN organization_members om ON om.user_id = u.id WHERE om.id = $1',
+      [memberId]
+    );
+
+    if (memberName) {
+      const conflict = await queryOne(
+        `SELECT id FROM (
+          SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
+          UNION ALL
+          SELECT participant_id as id FROM event_profiles WHERE event_id = $1 AND LOWER(display_name) = LOWER($2)
+        ) combined LIMIT 1`,
+        [eventId, memberName.name]
+      );
+
+      if (conflict) {
+        throw new AppError('Your name is already taken in this lobby by a guest or another member. Please choose a different nickname after joining.', 400, 'NAME_TAKEN');
+      }
+    }
+
     const participantId = uuid();
     await transaction(async (client) => {
       const { rows: [{ count }] } = await client.query(
