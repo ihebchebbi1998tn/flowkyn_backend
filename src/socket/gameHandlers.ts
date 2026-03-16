@@ -258,13 +258,23 @@ async function reduceCoffeeState(args: {
       [eventId]
     );
 
-    // Guard: need at least 2 participants to form pairs
-    if (participants.length < 2) {
+    // Deduplicate participants to prevent a single user (e.g. guest from multiple tabs) from matching with themselves.
+    // We consider it the same person if they share the same display name and avatar payload.
+    const seenUsers = new Set<string>();
+    const uniqueParticipants = participants.filter(p => {
+      const key = `${p.name.trim().toLowerCase()}||${p.avatar || ''}`;
+      if (seenUsers.has(key)) return false;
+      seenUsers.add(key);
+      return true;
+    });
+
+    // Guard: need at least 2 unique participants to form pairs
+    if (uniqueParticipants.length < 2) {
       return { ...base, phase: 'waiting', pairs: [], startedChatAt: null };
     }
 
     // Fisher-Yates shuffle for unbiased randomisation
-    const shuffled = [...participants];
+    const shuffled = [...uniqueParticipants];
     for (let i = shuffled.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
