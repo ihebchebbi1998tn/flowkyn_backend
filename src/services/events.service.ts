@@ -150,10 +150,13 @@ export class EventsService {
                 p.created_at,
                 u.name as user_name,
                 u.avatar_url as user_avatar,
+                ep.display_name as custom_display_name,
+                ep.avatar_url as custom_avatar_url,
                 om.id as member_id,
                 e.created_by_member_id
          FROM participants p
          JOIN events e ON e.id = p.event_id
+         LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
          WHERE p.event_id = $1 AND p.left_at IS NULL
@@ -170,8 +173,8 @@ export class EventsService {
     const participants = data.map((p: any) => ({
       id: p.id,
       type: p.participant_type,
-      name: p.participant_type === 'guest' ? p.guest_name : p.user_name,
-      avatar: p.participant_type === 'guest' ? p.guest_avatar : p.user_avatar,
+      name: p.custom_display_name || (p.participant_type === 'guest' ? p.guest_name : p.user_name),
+      avatar: p.custom_avatar_url || (p.participant_type === 'guest' ? p.guest_avatar : p.user_avatar),
       email: null,
       is_host: !!p.member_id && p.member_id === p.created_by_member_id,
       joined_at: p.joined_at,
