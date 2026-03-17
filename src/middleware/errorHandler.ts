@@ -49,6 +49,8 @@ export type ErrorCode =
   | 'ROUND_NOT_ACTIVE'
   | 'SESSION_ALREADY_FINISHED'
   | 'NAME_TAKEN'
+  | 'EVENT_ENDED'
+  | 'ROUNDS_COMPLETE'
   // Infrastructure
   | 'CORS_BLOCKED'
   | 'TIMEOUT'
