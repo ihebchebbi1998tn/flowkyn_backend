@@ -348,6 +348,9 @@ async function reduceCoffeeState(args: {
   }
 
   if (actionType === 'coffee:start_chat') {
+    // Idempotent: if chat already started, ignore duplicates (prevents timer resets
+    // when multiple clients emit automatically on 'matching').
+    if (base.startedChatAt) return base;
     const chatDurationMinutes = 30; // Using 30 minutes chat limit
     return { 
       ...base, 
