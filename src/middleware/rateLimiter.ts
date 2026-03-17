@@ -10,6 +10,10 @@
 import rateLimit from 'express-rate-limit';
 import { env } from '../config/env';
 
+function isRateLimitingDisabled(): boolean {
+  return String(process.env.DISABLE_RATE_LIMIT || '').toLowerCase() === 'true';
+}
+
 /** Standardized rate limit error response */
 const rateLimitHandler = (_req: any, res: any) => {
   const requestId = _req.headers['x-request-id'] || 'unknown';
@@ -36,7 +40,7 @@ export const apiRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => true, // Disabled by user request
+  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
 });
 
 /**
@@ -52,7 +56,7 @@ export const authRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => true, // Disabled by user request
+  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
 });
 
 /**
@@ -68,7 +72,7 @@ export const uploadRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => true, // Disabled by user request
+  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
 });
 
 /**
@@ -84,5 +88,5 @@ export const publicRateLimiter = rateLimit({
     return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
   },
   handler: rateLimitHandler,
-  skip: () => true, // Disabled by user request
+  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
 });

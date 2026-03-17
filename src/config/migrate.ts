@@ -597,6 +597,25 @@ const migrations: { version: number; name: string; sql: string }[] = [
         ADD COLUMN IF NOT EXISTS allow_participant_game_control BOOLEAN NOT NULL DEFAULT true;
     `,
   },
+  {
+    version: 12,
+    name: 'event_settings_updated_at',
+    sql: `
+      -- Controllers update event_settings.updated_at; ensure the column exists.
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
+    `,
+  },
+  {
+    version: 13,
+    name: 'participants_unique_active_member_per_event',
+    sql: `
+      -- Prevent multiple active participant rows for the same org member in an event.
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_participants_unique_active_member_event
+        ON participants(event_id, organization_member_id)
+        WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
+    `,
+  },
 ];
 
 /**
