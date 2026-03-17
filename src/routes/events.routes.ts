@@ -70,8 +70,8 @@ router.get('/:eventId/posts', authenticateOrGuest, validate(eventIdParam, 'param
 router.get('/:eventId/me', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyParticipant);
 router.get('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getMyProfile);
 router.put('/:eventId/profile', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.upsertMyProfile);
-router.post('/:eventId/pin-message', authenticate, validate(eventIdParam, 'params'), ctrl.pinMessage);
-router.delete('/:eventId/pin-message', authenticate, validate(eventIdParam, 'params'), ctrl.unpinMessage);
+router.post('/:eventId/pin-message', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.pinMessage);
+router.delete('/:eventId/pin-message', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.unpinMessage);
 
 // Post reactions (nested under /posts)
 const postsRouter = Router();

@@ -47,7 +47,7 @@ export class EventsService {
     const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
     const allowChat = data.allow_chat ?? true;
     const autoStartGames = data.auto_start_games ?? false;
-    const maxRounds = data.max_rounds ?? 5;
+    const maxRounds = data.max_rounds ?? 30;
     const allowParticipantGameControl = data.allow_participant_game_control ?? true;
 
     const event = await transaction(async (client) => {

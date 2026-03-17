@@ -12,7 +12,7 @@ export const createEventSchema = z.object({
   allow_guests: z.boolean().optional(),
   allow_chat: z.boolean().optional(),
   auto_start_games: z.boolean().optional(),
-  max_rounds: z.number().int().min(1).max(20).optional(),
+  max_rounds: z.number().int().min(1).max(30).optional(),
   allow_participant_game_control: z.boolean().optional(),
 }).refine((data) => {
   if (!data.start_time || !data.end_time) return true;
@@ -33,7 +33,7 @@ export const updateEventSchema = z.object({
   allow_guests: z.boolean().optional(),
   allow_chat: z.boolean().optional(),
   auto_start_games: z.boolean().optional(),
-  max_rounds: z.number().int().min(1).max(20).optional(),
+  max_rounds: z.number().int().min(1).max(30).optional(),
   allow_participant_game_control: z.boolean().optional(),
   status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional(),
 }).refine(data => Object.keys(data).length > 0, {

@@ -555,21 +555,19 @@ export class EventsController {
   }
 
   /**
-   * POST /events/:eventId/pin-message — Pin a chat message (host/admin only).
+   * POST /events/:eventId/pin-message — Pin a chat message (any participant).
    */
   async pinMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can pin messages', 403, 'FORBIDDEN');
-
       const eventId = req.params.eventId;
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
+
       const { message_id } = req.body as { message_id: string };
       if (!message_id) throw new AppError('message_id is required', 400, 'VALIDATION_FAILED');
 
-      const event = await eventsService.getById(eventId);
-      const member = await requireOrgMember(event.organization_id, req.user.userId);
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
-        throw new AppError('You need owner, admin, moderator, or host role to pin messages', 403, 'INSUFFICIENT_PERMISSIONS');
-      }
+      // Must be a participant in this event (members or guests)
+      await requireCurrentParticipantId(eventId, auth as any);
 
       // Ensure message belongs to this event
       const messageRow = await queryOne<{ id: string }>(
@@ -588,18 +586,16 @@ export class EventsController {
   }
 
   /**
-   * DELETE /events/:eventId/pin-message — Unpin the current pinned message (host/admin only).
+   * DELETE /events/:eventId/pin-message — Unpin the current pinned message (any participant).
    */
   async unpinMessage(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can unpin messages', 403, 'FORBIDDEN');
-
       const eventId = req.params.eventId;
-      const event = await eventsService.getById(eventId);
-      const member = await requireOrgMember(event.organization_id, req.user.userId);
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
-        throw new AppError('You need owner, admin, moderator, or host role to unpin messages', 403, 'INSUFFICIENT_PERMISSIONS');
-      }
+      const auth = getEventAuthPayload(req);
+      if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
+
+      // Must be a participant in this event (members or guests)
+      await requireCurrentParticipantId(eventId, auth as any);
 
       await query(
         `UPDATE events SET pinned_message_id = NULL, updated_at = NOW() WHERE id = $1`,
