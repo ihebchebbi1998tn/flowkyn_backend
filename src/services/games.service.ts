@@ -52,7 +52,7 @@ export class GamesService {
     return session || null;
   }
 
-  async startSession(eventId: string, gameTypeId: string) {
+  async startSession(eventId: string, gameTypeId: string, totalRounds?: number) {
     const event = await queryOne('SELECT id, status FROM events WHERE id = $1', [eventId]);
     if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
     
@@ -71,9 +71,28 @@ export class GamesService {
       // Lock the event row to serialize session creation for this event
       await client.query('SELECT id FROM events WHERE id = $1 FOR UPDATE', [eventId]);
 
+      // Validate totalRounds and enforce event_settings.max_rounds (if present)
+      const { rows: [settings] } = await client.query<{ max_rounds: number | null }>(
+        `SELECT max_rounds
+         FROM event_settings
+         WHERE event_id = $1`,
+        [eventId]
+      );
+
+      const maxRounds = settings?.max_rounds ?? null;
+
+      let requestedRounds: number | null = null;
+      if (totalRounds !== undefined && totalRounds !== null) {
+        const n = Number(totalRounds);
+        if (!Number.isFinite(n) || !Number.isInteger(n) || n < 1) {
+          throw new AppError('total_rounds must be a positive integer', 400, 'VALIDATION_FAILED');
+        }
+        requestedRounds = n;
+      }
+
       // Concurrency check: prevent multiple active sessions for the same game
       const { rows: [existing] } = await client.query(
-        `SELECT gs.id
+        `SELECT gs.id, gs.total_rounds
          FROM game_sessions gs
          WHERE gs.event_id = $1 AND gs.game_type_id = $2 AND gs.status = 'active'`,
          [eventId, gameTypeId]
@@ -89,12 +108,20 @@ export class GamesService {
       }
 
       const sessionId = uuid();
+      let rounds = requestedRounds ?? 4;
+      if (maxRounds !== null && Number.isFinite(maxRounds)) {
+        // If an event-wide cap exists, clamp the default and reject explicit overflow
+        if (requestedRounds !== null && rounds > maxRounds) {
+          throw new AppError(`total_rounds cannot exceed event max_rounds (${maxRounds})`, 400, 'VALIDATION_FAILED');
+        }
+        rounds = Math.min(rounds, maxRounds);
+      }
       // Create the session and an initial active round so clients can immediately
       // submit actions without needing an admin-only "start round" step.
       const { rows: [session] } = await client.query(
-        `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, started_at)
-         VALUES ($1, $2, $3, 'active', 1, 30, NOW()) RETURNING *`,
-        [sessionId, eventId, gameTypeId]
+        `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, total_rounds, started_at)
+         VALUES ($1, $2, $3, 'active', 1, 30, $4, NOW()) RETURNING *`,
+        [sessionId, eventId, gameTypeId, rounds]
       );
 
       const roundId = uuid();
@@ -178,6 +205,12 @@ export class GamesService {
       );
       if (!session) throw new AppError('Game session not found', 404, 'NOT_FOUND');
       if (session.status !== 'active') throw new AppError('Game session is not active (current status: ' + session.status + ')', 400, 'SESSION_NOT_ACTIVE');
+
+      const total = Number(session.total_rounds || 0);
+      const current = Number(session.current_round || 0);
+      if (Number.isFinite(total) && total > 0 && current >= total) {
+        throw new AppError('Cannot start a new round — session has reached total_rounds', 400, 'ROUNDS_COMPLETE');
+      }
 
       const roundNumber = session.current_round + 1;
       const roundId = uuid();
@@ -304,7 +337,25 @@ export class GamesService {
       return actions;
     });
 
-    return { message: 'Game session finished', results };
+    // Provide a clearer message for Coffee Roulette which is not score-based.
+    // Keep the response shape stable for existing clients.
+    let message = 'Game session finished';
+    try {
+      const row = await queryOne<{ key: string }>(
+        `SELECT gt.key
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         WHERE gs.id = $1`,
+        [sessionId]
+      );
+      if (row?.key === 'coffee-roulette') {
+        message = 'Coffee Roulette session finished';
+      }
+    } catch {
+      // Non-fatal; keep generic message
+    }
+
+    return { message, results };
   }
 
   async saveSnapshot(sessionId: string, state: any) {

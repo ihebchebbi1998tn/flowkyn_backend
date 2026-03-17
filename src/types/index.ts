@@ -137,6 +137,7 @@ export interface GameSessionRow {
   game_type_id: string;
   status: string;
   current_round: number;
+  total_rounds: number;
   game_duration_minutes: number;
   expires_at: Date;
   metadata: any;

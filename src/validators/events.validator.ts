@@ -13,6 +13,12 @@ export const createEventSchema = z.object({
   allow_chat: z.boolean().optional(),
   auto_start_games: z.boolean().optional(),
   max_rounds: z.number().int().min(1).max(20).optional(),
+}).refine((data) => {
+  if (!data.start_time || !data.end_time) return true;
+  return new Date(data.end_time).getTime() > new Date(data.start_time).getTime();
+}, {
+  message: 'end_time must be after start_time',
+  path: ['end_time'],
 });
 
 export const updateEventSchema = z.object({
@@ -30,6 +36,12 @@ export const updateEventSchema = z.object({
   status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field is required',
+}).refine((data) => {
+  if (!data.start_time || !data.end_time) return true;
+  return new Date(data.end_time).getTime() > new Date(data.start_time).getTime();
+}, {
+  message: 'end_time must be after start_time',
+  path: ['end_time'],
 });
 
 export const inviteParticipantSchema = z.object({

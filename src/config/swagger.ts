@@ -523,6 +523,7 @@ Organizations use a hierarchical role system:
             game_type_id: { type: 'string', format: 'uuid' },
             status: { type: 'string', enum: ['waiting', 'active', 'paused', 'completed'] },
             current_round: { type: 'integer' },
+            total_rounds: { type: 'integer', description: 'Configured number of rounds for the session', default: 4 },
             game_duration_minutes: { type: 'integer' },
             expires_at: { type: 'string', format: 'date-time' },
             metadata: { type: 'object', description: 'Game-specific configuration' },
@@ -1749,9 +1750,13 @@ const paths: Record<string, any> = {
             schema: {
               type: 'object',
               required: ['game_type_id'],
-              properties: { game_type_id: { type: 'string', format: 'uuid', description: 'ID of the game type to play' } },
+              properties: {
+                game_type_id: { type: 'string', format: 'uuid', description: 'ID of the game type to play' },
+                total_rounds: { type: 'integer', minimum: 1, default: 4, description: 'Optional configured number of rounds for this session' },
+              },
+              additionalProperties: false,
             },
-            example: { game_type_id: '550e8400-e29b-41d4-a716-446655440000' },
+            example: { game_type_id: '550e8400-e29b-41d4-a716-446655440000', total_rounds: 4 },
           },
         },
       },

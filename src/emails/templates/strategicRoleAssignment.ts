@@ -20,6 +20,8 @@ export function strategicRoleAssignmentTemplate(params: StrategicRoleTemplatePar
   const t = getTranslation('strategic_role_assignment', params.lang);
   const safeName = params.name ? escapeHtml(params.name) : undefined;
   const safeLink = encodeURI(params.eventLink);
+  const roleLabel = (t.body as any).roleLabel || 'Your role';
+  const secretLabel = (t.body as any).secretInstructionsLabel || 'Secret instructions';
 
   const content = `
     <h1>${t.greeting(safeName)}</h1>
@@ -30,12 +32,12 @@ export function strategicRoleAssignmentTemplate(params: StrategicRoleTemplatePar
     </div>
     <p>${t.body.instruction}</p>
     <div style="margin:24px 0;padding:16px;background:#f0f9ff;border-radius:8px;border-left:4px solid #7c3aed;">
-      <p style="margin:0 0 8px;font-size:12px;color:#666;text-transform:uppercase;">${t.body.roleLabel || 'Your Role'}</p>
+      <p style="margin:0 0 8px;font-size:12px;color:#666;text-transform:uppercase;">${escapeHtml(roleLabel)}</p>
       <p style="margin:0 0 8px;font-size:16px;font-weight:700;color:#1a1a2e;">${escapeHtml(params.roleName)}</p>
-      <p style="margin:0 0 8px;font-size:14px;color:#51545e;">${params.roleBrief}</p>
+      <p style="margin:0 0 8px;font-size:14px;color:#51545e;">${escapeHtml(params.roleBrief)}</p>
       <hr style="border:none;border-top:1px solid #cbd5e1;margin:12px 0;" />
-      <p style="margin:0;font-size:13px;color:#666;"><strong>Secret Instructions:</strong></p>
-      <p style="margin:8px 0 0;font-size:14px;color:#51545e;">${params.roleSecretInstructions}</p>
+      <p style="margin:0;font-size:13px;color:#666;"><strong>${escapeHtml(secretLabel)}:</strong></p>
+      <p style="margin:8px 0 0;font-size:14px;color:#51545e;">${escapeHtml(params.roleSecretInstructions)}</p>
     </div>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px auto;">
       <tr>

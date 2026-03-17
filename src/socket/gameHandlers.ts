@@ -110,14 +110,15 @@ async function reduceTwoTruthsState(args: {
   actionType: string;
   payload: any;
   prev: TwoTruthsState | null;
+  session?: any;
 }): Promise<TwoTruthsState> {
-  const { eventId, participantId, actionType, payload, prev } = args;
+  const { eventId, participantId, actionType, payload, prev, session } = args;
 
   const base: TwoTruthsState = prev || {
     kind: 'two-truths',
     phase: 'waiting',
     round: 1,
-    totalRounds: 4,
+    totalRounds: session?.total_rounds || 4,
     presenterParticipantId: null,
     statements: null,
     votes: {},
@@ -251,6 +252,10 @@ type CoffeeState = {
   }>;
   startedChatAt: string | null;
   chatEndsAt?: string;
+  /** Number of conversation prompts used in the current chat session */
+  promptsUsed: number;
+  /** When true, clients should ask whether to continue or end */
+  decisionRequired: boolean;
 };
 
 const COFFEE_TOPICS = [
@@ -275,7 +280,14 @@ async function reduceCoffeeState(args: {
 }): Promise<CoffeeState> {
   const { eventId, actionType, prev } = args;
 
-  const base: CoffeeState = prev || { kind: 'coffee-roulette', phase: 'waiting', pairs: [], startedChatAt: null };
+  const base: CoffeeState = prev || {
+    kind: 'coffee-roulette',
+    phase: 'waiting',
+    pairs: [],
+    startedChatAt: null,
+    promptsUsed: 0,
+    decisionRequired: false,
+  };
 
   if (actionType === 'coffee:shuffle') {
     const participants = await query<{ id: string; name: string; avatar: string | null }>(
@@ -325,7 +337,14 @@ async function reduceCoffeeState(args: {
         topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
       });
     }
-    return { ...base, phase: 'matching', pairs, startedChatAt: null };
+    return {
+      ...base,
+      phase: 'matching',
+      pairs,
+      startedChatAt: null,
+      promptsUsed: 0,
+      decisionRequired: false,
+    };
   }
 
   if (actionType === 'coffee:start_chat') {
@@ -334,7 +353,41 @@ async function reduceCoffeeState(args: {
       ...base, 
       phase: 'chatting', 
       startedChatAt: new Date().toISOString(),
-      chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString()
+      chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString(),
+      // Start with 1 prompt already assigned on shuffle
+      promptsUsed: Math.max(1, base.promptsUsed || 0),
+      decisionRequired: false,
+    };
+  }
+
+  if (actionType === 'coffee:next_prompt') {
+    // Only relevant during an active chat
+    if (base.phase !== 'chatting') return base;
+
+    const nextPromptsUsed = (base.promptsUsed || 0) + 1;
+    const shouldAsk = nextPromptsUsed >= 6;
+
+    // Rotate topics for all pairs so everyone stays in sync
+    const updatedPairs = (base.pairs || []).map((pair) => ({
+      ...pair,
+      topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
+    }));
+
+    return {
+      ...base,
+      pairs: updatedPairs,
+      promptsUsed: nextPromptsUsed,
+      decisionRequired: shouldAsk,
+    };
+  }
+
+  if (actionType === 'coffee:continue') {
+    // Host/any participant chooses to continue; reset the counter and keep chatting
+    if (base.phase !== 'chatting') return base;
+    return {
+      ...base,
+      promptsUsed: 0,
+      decisionRequired: false,
     };
   }
 
@@ -342,8 +395,19 @@ async function reduceCoffeeState(args: {
     return { ...base, phase: 'complete' };
   }
 
+  if (actionType === 'coffee:end_and_finish') {
+    return { ...base, phase: 'complete' };
+  }
+
   if (actionType === 'coffee:reset') {
-    return { kind: 'coffee-roulette', phase: 'waiting', pairs: [], startedChatAt: null };
+    return {
+      kind: 'coffee-roulette',
+      phase: 'waiting',
+      pairs: [],
+      startedChatAt: null,
+      promptsUsed: 0,
+      decisionRequired: false,
+    };
   }
 
   return base;
@@ -352,9 +416,14 @@ async function reduceCoffeeState(args: {
 type StrategicState = {
   kind: 'strategic-escape';
   phase: 'setup' | 'roles_assignment' | 'pre_discussion' | 'discussion' | 'debrief';
-  industry: string;
-  crisisType: string;
-  difficulty: string;
+  // Stable keys (preferred)
+  industryKey: string | null;
+  crisisKey: string | null;
+  difficultyKey: 'easy' | 'medium' | 'hard';
+  // Display labels (for UI/emails)
+  industryLabel: string;
+  crisisLabel: string;
+  difficultyLabel: string;
   rolesAssigned: boolean;
   discussionEndsAt?: string;
 };
@@ -370,18 +439,24 @@ async function reduceStrategicState(args: {
   const base: StrategicState = prev || {
     kind: 'strategic-escape',
     phase: 'setup',
-    industry: payload?.industry || 'strategic.industries.tech_saas',
-    crisisType: payload?.crisisType || 'strategic.crises.product_launch_crisis',
-    difficulty: payload?.difficulty || 'medium',
+    industryKey: payload?.industryKey || null,
+    crisisKey: payload?.crisisKey || null,
+    difficultyKey: (payload?.difficultyKey || payload?.difficulty || 'medium'),
+    industryLabel: payload?.industryLabel || payload?.industry || 'General',
+    crisisLabel: payload?.crisisLabel || payload?.crisisType || 'Scenario',
+    difficultyLabel: payload?.difficultyLabel || payload?.difficulty || 'medium',
     rolesAssigned: false,
   };
 
   if (actionType === 'strategic:configure') {
     return {
       ...base,
-      industry: payload?.industry || base.industry,
-      crisisType: payload?.crisisType || base.crisisType,
-      difficulty: payload?.difficulty || base.difficulty,
+      industryKey: payload?.industryKey ?? base.industryKey,
+      crisisKey: payload?.crisisKey ?? base.crisisKey,
+      difficultyKey: (payload?.difficultyKey || payload?.difficulty || base.difficultyKey),
+      industryLabel: payload?.industryLabel || payload?.industry || base.industryLabel,
+      crisisLabel: payload?.crisisLabel || payload?.crisisType || base.crisisLabel,
+      difficultyLabel: payload?.difficultyLabel || payload?.difficulty || base.difficultyLabel,
       phase: 'setup',
     };
   }
@@ -513,10 +588,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const [session, activeRound, snapshot] = await Promise.all([
+        const [session, activeRound, snapshot, admin] = await Promise.all([
           gamesService.getSession(data.sessionId),
           gamesService.getActiveRound(data.sessionId),
           gamesService.getLatestSnapshot(data.sessionId),
+          isEventAdmin(data.sessionId, user.userId).catch(() => false),
         ]);
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
@@ -530,16 +606,18 @@ export function setupGameHandlers(gamesNs: Namespace) {
           timestamp: new Date().toISOString(),
         });
 
-        ack?.({
-          ok: true,
-          data: {
-            status: session.status,
-            currentRound: session.current_round,
-            activeRoundId: activeRound?.id || null,
-            participantId: participant.participantId,
-            snapshot: snapshot?.state || null,
-          },
-        });
+          ack?.({
+            ok: true,
+            data: {
+              status: session.status,
+              currentRound: session.current_round,
+              totalRounds: session.total_rounds || 4,
+              activeRoundId: activeRound?.id || null,
+              participantId: participant.participantId,
+              snapshot: snapshot?.state || null,
+              isAdmin: !!admin,
+            },
+          });
       } catch (err: any) {
         console.error(`[Games] game:join error:`, err.message);
         socket.emit('error', { message: err.message, code: 'JOIN_ERROR' });
@@ -672,12 +750,40 @@ export function setupGameHandlers(gamesNs: Namespace) {
         ]);
 
         if (gameKey === 'two-truths' && isTwoTruthsAction(data.actionType)) {
+          // Guard: only admins/moderators can control core game flow
+          const CONTROL_ACTIONS = new Set(['two_truths:start', 'two_truths:reveal', 'two_truths:next_round']);
+          if (CONTROL_ACTIONS.has(data.actionType)) {
+            const admin = await isEventAdmin(data.sessionId, user.userId);
+            if (!admin) {
+              socket.emit('error', { message: 'Only event administrators can control the game flow', code: 'FORBIDDEN' });
+              return;
+            }
+          }
+
+          // Persist total_rounds if provided on start so late joiners stay consistent
+          if (data.actionType === 'two_truths:start') {
+            const n = Number(data.payload?.totalRounds);
+            if (Number.isFinite(n) && Number.isInteger(n) && n >= 1) {
+              try {
+                await query(
+                  `UPDATE game_sessions SET total_rounds = $1 WHERE id = $2`,
+                  [n, data.sessionId]
+                );
+                // Keep in-memory session consistent for this reducer call
+                (session as any).total_rounds = n;
+              } catch {
+                // Non-fatal: snapshot still carries totalRounds for current players
+              }
+            }
+          }
+
           const next = await reduceTwoTruthsState({
             eventId: session.event_id,
             participantId: participant.participantId,
             actionType: data.actionType,
             payload: data.payload,
             prev: (latest?.state as any) || null,
+            session,
           });
 
           // SECURITY: If we are in the vote phase, strip the correctLieId from the broadcast
@@ -692,17 +798,37 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
+          const normalizedAction =
+            data.actionType === 'coffee:end_and_finish' ? 'coffee:end' : data.actionType;
+
           const next = await reduceCoffeeState({
             eventId: session.event_id,
-            actionType: data.actionType,
+            actionType: normalizedAction,
             payload: data.payload,
             prev: (latest?.state as any) || null,
           });
+
           await gamesService.saveSnapshot(data.sessionId, next);
           gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+
+          // If requested, also close the DB session and broadcast game:ended.
+          if (data.actionType === 'coffee:end_and_finish') {
+            const { results } = await gamesService.finishSession(data.sessionId);
+            gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+              sessionId: data.sessionId,
+              results,
+              timestamp: new Date().toISOString(),
+            });
+          }
         }
 
         if (gameKey === 'strategic-escape' && isStrategicAction(data.actionType)) {
+          const admin = await isEventAdmin(data.sessionId, user.userId);
+          if (!admin) {
+            socket.emit('error', { message: 'Only event administrators can perform strategic actions', code: 'FORBIDDEN' });
+            return;
+          }
+
           const next = await reduceStrategicState({
             eventId: session.event_id,
             actionType: data.actionType,
@@ -764,11 +890,22 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // BUG FIX: Only admins can end games
-        const admin = await isEventAdmin(data.sessionId, user.userId);
-        if (!admin) {
-          socket.emit('error', { message: 'Only event administrators can end games', code: 'FORBIDDEN' });
-          return;
+        // Coffee Roulette is designed so any participant can end the session.
+        // Other games remain admin-only.
+        const gameKey = await getSessionGameKey(data.sessionId);
+        if (gameKey !== 'coffee-roulette') {
+          const admin = await isEventAdmin(data.sessionId, user.userId);
+          if (!admin) {
+            socket.emit('error', { message: 'Only event administrators can end games', code: 'FORBIDDEN' });
+            return;
+          }
+        } else {
+          // Still verify they belong to the session's event
+          const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
+          if (!participant) {
+            socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
+            return;
+          }
         }
 
         // Fetch the latest snapshot to see if we have custom scores (e.g., Two Truths)

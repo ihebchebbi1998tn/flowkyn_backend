@@ -7,6 +7,7 @@ import { emitGameUpdate } from '../socket/emitter';
 import { query, queryOne } from '../config/database';
 import { sendEmail } from '../services/email.service';
 import { env } from '../config/env';
+import { getStrategicRoleContent } from '../emails/strategicRoleContent';
 
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
@@ -83,7 +84,8 @@ export class GamesController {
         throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
-      const session = await gamesService.startSession(req.params.eventId, req.body.game_type_id);
+      const { game_type_id, total_rounds } = req.body;
+      const session = await gamesService.startSession(req.params.eventId, game_type_id, total_rounds);
 
       const { emitEventNotification } = await import('../socket/emitter');
       emitEventNotification(req.params.eventId, 'game:session_created', {
@@ -344,19 +346,19 @@ export class GamesController {
         const snapshot = await gamesService.getLatestSnapshot(req.params.sessionId);
         const state = snapshot?.state as any;
 
-        // Prefer normalized label fields but fall back to legacy ones
+        // Prefer label fields; avoid sending translation-key strings in emails.
         const industryLabel =
           state?.industryLabel ||
           state?.industry ||
-          'strategic.industries.generic';
+          'General';
         const crisisLabel =
           state?.crisisLabel ||
           state?.crisisType ||
-          'strategic.crises.generic';
+          'Scenario';
         const difficultyLabel =
           state?.difficultyLabel ||
           state?.difficulty ||
-          'strategic.difficulties.medium';
+          'medium';
 
         const frontendBase = env.frontendUrl;
         const eventLink = `${frontendBase}/join/${session.event_id}`;
@@ -383,15 +385,12 @@ export class GamesController {
 
         const byId = new Map(participantRows.map((r: typeof participantRows[0]) => [r.id, r]));
 
-        // For now, use simple role content keys; frontend/localization can map roleKey to details.
         for (const a of assignments) {
           const row = byId.get(a.participantId);
           if (!row || !row.email) continue;
 
-          // Basic role text keys; actual human-readable content handled via translations.
-          const roleNameKey = `strategic.roles.${a.roleKey}.name`;
-          const roleBriefKey = `strategic.roles.${a.roleKey}.brief`;
-          const roleSecretKey = `strategic.roles.${a.roleKey}.secret`;
+          const roleContent = getStrategicRoleContent(a.roleKey, row.language || 'en');
+          if (!roleContent) continue;
 
           await sendEmail({
             to: row.email,
@@ -403,9 +402,9 @@ export class GamesController {
               industryLabel,
               crisisLabel,
               difficultyLabel,
-              roleName: roleNameKey,
-              roleBrief: roleBriefKey,
-              roleSecretInstructions: roleSecretKey,
+              roleName: roleContent.name,
+              roleBrief: roleContent.brief,
+              roleSecretInstructions: roleContent.secret,
               eventLink,
             },
             lang: row.language || 'en',

@@ -17,6 +17,24 @@ import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
 import { sanitizeText } from '../utils/sanitize';
 
 export class EventMessagesService {
+  private async requireEventOpenForPosts(eventId: string): Promise<void> {
+    const row = await queryOne<{ end_time: string | null; status: string }>(
+      `SELECT end_time, status
+       FROM events
+       WHERE id = $1`,
+      [eventId]
+    );
+
+    if (!row) throw new AppError('Event not found', 404, 'NOT_FOUND');
+
+    // If an explicit end_time is set, the posts game becomes read-only after that moment.
+    if (row.end_time) {
+      const endsAtMs = new Date(row.end_time).getTime();
+      if (Number.isFinite(endsAtMs) && Date.now() >= endsAtMs) {
+        throw new AppError('Event has ended', 400, 'EVENT_ENDED');
+      }
+    }
+  }
   /**
    * Send a chat message in an event.
    *
@@ -183,6 +201,8 @@ export class EventMessagesService {
    * @throws {AppError} 403 if participant doesn't belong to this event
    */
   async createPost(eventId: string, participantId: string, content: string) {
+    await this.requireEventOpenForPosts(eventId);
+
     const participant = await queryOne(
       'SELECT id FROM participants WHERE id = $1 AND event_id = $2 AND left_at IS NULL',
       [participantId, eventId]
@@ -209,6 +229,21 @@ export class EventMessagesService {
    * @param reactionType - Reaction emoji/type string
    */
   async reactToPost(postId: string, participantId: string, reactionType: string) {
+    const postRow = await queryOne<{ event_id: string }>(
+      'SELECT event_id FROM activity_posts WHERE id = $1',
+      [postId]
+    );
+    if (!postRow) throw new AppError('Post not found', 404, 'NOT_FOUND');
+
+    await this.requireEventOpenForPosts(postRow.event_id);
+
+    // Ensure the reactor is a valid participant in the same event as the post.
+    const participant = await queryOne(
+      'SELECT id FROM participants WHERE id = $1 AND event_id = $2 AND left_at IS NULL',
+      [participantId, postRow.event_id]
+    );
+    if (!participant) throw new AppError('Invalid participant for this event', 403, 'NOT_PARTICIPANT');
+
     const [reaction] = await query(
       `INSERT INTO post_reactions (id, post_id, participant_id, reaction_type, created_at)
        VALUES ($1, $2, $3, $4, NOW())

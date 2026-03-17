@@ -237,6 +237,7 @@ const migrations: { version: number; name: string; sql: string }[] = [
         game_type_id UUID NOT NULL REFERENCES game_types(id),
         status VARCHAR(20) NOT NULL DEFAULT 'active',
         current_round INT DEFAULT 0,
+        total_rounds INT DEFAULT 4,
         game_duration_minutes INT DEFAULT 30,
         expires_at TIMESTAMP,
         metadata JSONB,
@@ -544,6 +545,46 @@ const migrations: { version: number; name: string; sql: string }[] = [
       -- This blocked game retries (e.g. re-submitting vote after reconnect) and
       -- snapshot-based state machines that process repeated actions.
       DROP INDEX IF EXISTS idx_game_actions_unique;
+    `,
+  },
+  {
+    version: 9,
+    name: 'add_game_sessions_total_rounds',
+    sql: `
+      -- Add total_rounds for configurable game length (default 4)
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS total_rounds INT DEFAULT 4;
+    `,
+  },
+  {
+    version: 10,
+    name: 'strategic_escape_bootstrap',
+    sql: `
+      -- Seed Strategic Escape game type (if missing)
+      INSERT INTO game_types (id, key, name, category, is_sync, min_players, max_players, description)
+      VALUES (
+        uuid_generate_v4(),
+        'strategic-escape',
+        'Strategic Escape Challenge',
+        'strategy',
+        false,
+        3,
+        20,
+        'Scenario-based strategic challenge with secret roles and async discussion.'
+      )
+      ON CONFLICT (key) DO NOTHING;
+
+      -- Strategic roles table (if missing)
+      CREATE TABLE IF NOT EXISTS strategic_roles (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        role_key VARCHAR(50) NOT NULL,
+        email_sent_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (game_session_id, participant_id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_strategic_roles_session ON strategic_roles(game_session_id);
     `,
   },
 ];

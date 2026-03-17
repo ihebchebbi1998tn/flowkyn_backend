@@ -249,6 +249,8 @@ CREATE TABLE game_sessions (
   game_type_id UUID NOT NULL REFERENCES game_types(id),
   status VARCHAR(20) NOT NULL DEFAULT 'active', -- active, paused, finished
   current_round INT DEFAULT 0,
+  -- Configurable game length (default 4 to match legacy Two Truths logic)
+  total_rounds INT DEFAULT 4,
   game_duration_minutes INT DEFAULT 30,
   expires_at TIMESTAMP,
   metadata JSONB,
