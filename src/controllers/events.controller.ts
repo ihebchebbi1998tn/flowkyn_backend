@@ -832,20 +832,24 @@ export class EventsController {
     try {
       const auth = getEventAuthPayload(req);
       if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
-      await verifyParticipantOwnership(req.body.participant_id, auth);
-      const result = await messagesService.reactToPost(req.params.postId, req.body.participant_id, req.body.reaction_type);
+      // Do NOT trust participant_id from the client. Derive the caller's participant id
+      // from their auth token (guest token or user JWT) + the post's event_id.
+      const postRow = await queryOne<{ event_id: string }>(
+        'SELECT event_id FROM activity_posts WHERE id = $1',
+        [req.params.postId]
+      );
+      if (!postRow) throw new AppError('Post not found', 404, 'NOT_FOUND');
+
+      const participantId = await requireCurrentParticipantId(postRow.event_id, auth);
+      const result = await messagesService.reactToPost(req.params.postId, participantId, req.body.reaction_type);
       await audit.create(null, auth.userId ?? null, 'EVENT_REACT_POST', { postId: req.params.postId, reactionType: req.body.reaction_type });
 
       // Best-effort real-time notification so async boards can refresh reactions
       try {
-        const row = await queryOne<{ event_id: string }>(
-          'SELECT event_id FROM activity_posts WHERE id = $1',
-          [req.params.postId]
-        );
-        if (row?.event_id) {
-          emitEventNotification(row.event_id, 'post:reacted', {
+        if (postRow?.event_id) {
+          emitEventNotification(postRow.event_id, 'post:reacted', {
             postId: req.params.postId,
-            participantId: req.body.participant_id,
+            participantId,
             reactionType: req.body.reaction_type,
           });
         }
