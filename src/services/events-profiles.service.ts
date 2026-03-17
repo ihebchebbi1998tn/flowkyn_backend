@@ -29,8 +29,13 @@ export class EventProfilesService {
     
     // Check for display name conflicts within the same event (excluding the current participant)
     const conflict = await queryOne(
-      `SELECT participant_id FROM event_profiles 
-       WHERE event_id = $1 AND LOWER(display_name) = LOWER($2) AND participant_id != $3`,
+      `SELECT ep.participant_id
+       FROM event_profiles ep
+       JOIN participants p ON p.id = ep.participant_id
+       WHERE ep.event_id = $1
+         AND LOWER(ep.display_name) = LOWER($2)
+         AND ep.participant_id != $3
+         AND p.left_at IS NULL`,
       [eventId, sanitizedName, participantId]
     );
 

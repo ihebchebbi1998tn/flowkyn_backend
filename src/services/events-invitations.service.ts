@@ -189,7 +189,10 @@ export class EventInvitationsService {
         `SELECT id FROM (
           SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
           UNION ALL
-          SELECT participant_id as id FROM event_profiles WHERE event_id = $1 AND LOWER(display_name) = LOWER($2)
+          SELECT ep.participant_id as id
+          FROM event_profiles ep
+          JOIN participants p ON p.id = ep.participant_id
+          WHERE ep.event_id = $1 AND LOWER(ep.display_name) = LOWER($2) AND p.left_at IS NULL
         ) combined LIMIT 1`,
         [eventId, sanitizedName]
       );
