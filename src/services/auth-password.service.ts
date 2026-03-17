@@ -34,8 +34,8 @@ export class AuthPasswordService {
    */
   async forgotPassword(email: string, lang?: string) {
     const user = await queryOne<UserRow>('SELECT id, name, language FROM users WHERE email = $1', [email]);
-    // Always return same message to prevent email enumeration
-    if (!user) return { message: 'If the email exists, a reset link has been sent' };
+    // NOTE: This reveals whether an email exists (user enumeration). Requested behavior.
+    if (!user) throw new AppError('No account found with that email address', 404, 'AUTH_EMAIL_NOT_FOUND');
 
     await query('DELETE FROM password_resets WHERE email = $1', [email]);
 
