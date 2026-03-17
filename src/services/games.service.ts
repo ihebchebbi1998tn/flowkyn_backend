@@ -209,7 +209,7 @@ export class GamesService {
       const total = Number(session.total_rounds || 0);
       const current = Number(session.current_round || 0);
       if (Number.isFinite(total) && total > 0 && current >= total) {
-        throw new AppError('Cannot start a new round — session has reached total_rounds', 400, undefined, 'ROUNDS_COMPLETE');
+        throw new AppError('Cannot start a new round — session has reached total_rounds', 400, 'ROUNDS_COMPLETE');
       }
 
       const roundNumber = session.current_round + 1;
