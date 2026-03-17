@@ -58,7 +58,7 @@ type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation'
 interface EmailOptions {
   to: string;
   type: EmailType;
-  data: Record<string, string>;
+  data: Record<string, string | undefined>;
   /** User's preferred language (e.g., 'en', 'fr', 'de'). Defaults to 'en'. */
   lang?: string;
 }
@@ -66,29 +66,35 @@ interface EmailOptions {
 /**
  * Build subject + HTML for an email using the appropriate template.
  */
-function buildEmail(type: EmailType, data: Record<string, string>, lang?: string): { subject: string; html: string } {
+function buildEmail(type: EmailType, data: Record<string, string | undefined>, lang?: string): { subject: string; html: string } {
   switch (type) {
     case 'verify_account':
-      return verifyAccountTemplate({ link: data.link, name: data.name, otpCode: data.otpCode, lang });
+      return verifyAccountTemplate({ link: data.link || '', name: data.name || '', otpCode: data.otpCode || '', lang });
     case 'reset_password':
-      return resetPasswordTemplate({ link: data.link, name: data.name, lang });
+      return resetPasswordTemplate({ link: data.link || '', name: data.name || '', lang });
     case 'organization_invitation':
-      return organizationInvitationTemplate({ link: data.link, orgName: data.orgName, lang });
+      return organizationInvitationTemplate({ link: data.link || '', orgName: data.orgName || '', lang });
     case 'event_invitation':
-      return eventInvitationTemplate({ link: data.link, eventTitle: data.eventTitle, lang });
+      return eventInvitationTemplate({
+        link: data.link || '',
+        eventTitle: data.eventTitle || '',
+        startTime: data.startTime,
+        endTime: data.endTime,
+        lang
+      });
     case 'strategic_role_assignment':
       return strategicRoleAssignmentTemplate({
         lang,
-        name: data.name,
-        orgName: data.orgName,
-        eventTitle: data.eventTitle,
-        industryLabel: data.industryLabel,
-        crisisLabel: data.crisisLabel,
-        difficultyLabel: data.difficultyLabel,
-        roleName: data.roleName,
-        roleBrief: data.roleBrief,
-        roleSecretInstructions: data.roleSecretInstructions,
-        eventLink: data.eventLink,
+        name: data.name || '',
+        orgName: data.orgName || '',
+        eventTitle: data.eventTitle || '',
+        industryLabel: data.industryLabel || '',
+        crisisLabel: data.crisisLabel || '',
+        difficultyLabel: data.difficultyLabel || '',
+        roleName: data.roleName || '',
+        roleBrief: data.roleBrief || '',
+        roleSecretInstructions: data.roleSecretInstructions || '',
+        eventLink: data.eventLink || '',
       });
   }
 }

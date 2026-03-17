@@ -89,10 +89,20 @@ type TwoTruthsState = {
   statements: { id: 's0' | 's1' | 's2'; text: string }[] | null;
   votes: Record<string, 's0' | 's1' | 's2'>;
   revealedLie: 's0' | 's1' | 's2' | null;
+  correctLieId?: 's0' | 's1' | 's2'; // Internal secret
   scores: Record<string, number>;
   submitEndsAt?: string;
   voteEndsAt?: string;
 };
+
+function shuffleArray<T>(array: T[]): T[] {
+  const shuffled = [...array];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
 
 async function reduceTwoTruthsState(args: {
   eventId: string;
@@ -124,19 +134,35 @@ async function reduceTwoTruthsState(args: {
       statements: null,
       votes: {},
       revealedLie: null,
+      correctLieId: undefined,
       submitEndsAt: new Date(Date.now() + 30000).toISOString(),
     };
   }
 
   if (actionType === 'two_truths:submit') {
     const statements: string[] = Array.isArray(payload?.statements) ? payload.statements : [];
-    const normalized = [
-      { id: 's0' as const, text: String(statements[0] || '').slice(0, 300) },
-      { id: 's1' as const, text: String(statements[1] || '').slice(0, 300) },
-      { id: 's2' as const, text: String(statements[2] || '').slice(0, 300) },
+    if (statements.length < 3) return base;
+
+    // The original logic assumed index 2 is the lie.
+    // We shuffle them but keep track of which one was originally at index 2.
+    const rawStatementsWithLabels = [
+      { text: String(statements[0] || '').slice(0, 300), isLie: false },
+      { text: String(statements[1] || '').slice(0, 300), isLie: false },
+      { text: String(statements[2] || '').slice(0, 300), isLie: true },
     ];
+
+    const shuffled = shuffleArray(rawStatementsWithLabels);
+    let correctLieId: 's0' | 's1' | 's2' = 's2';
+
+    const normalized = shuffled.map((s, i) => {
+      const id = `s${i}` as 's0' | 's1' | 's2';
+      if (s.isLie) correctLieId = id;
+      return { id, text: s.text };
+    });
+
     const ready = normalized.every(s => s.text.trim().length > 0);
     if (!ready) return base;
+
     return {
       ...base,
       phase: 'vote',
@@ -144,6 +170,7 @@ async function reduceTwoTruthsState(args: {
       statements: normalized,
       votes: {},
       revealedLie: null,
+      correctLieId, // Store this securely in the snapshot
       voteEndsAt: new Date(Date.now() + 20000).toISOString(),
     };
   }
@@ -156,7 +183,12 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:reveal') {
-    const lie: 's0' | 's1' | 's2' = (['s0', 's1', 's2'].includes(payload?.lieId) ? payload.lieId : 's2');
+    // Priority: 
+    // 1. correctLieId stored in snapshot during submit phase
+    // 2. lieId provided by host in payload (legacy/fallback)
+    // 3. s2 (default)
+    const lie: 's0' | 's1' | 's2' = base.correctLieId || 
+      (['s0', 's1', 's2'].includes(payload?.lieId) ? payload.lieId : 's2');
     
     // Calculate new scores
     const updatedScores = { ...base.scores };
@@ -200,6 +232,7 @@ async function reduceTwoTruthsState(args: {
       statements: null,
       votes: {},
       revealedLie: null,
+      correctLieId: undefined,
       submitEndsAt: new Date(Date.now() + 30000).toISOString(),
     };
   }
@@ -646,8 +679,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
             payload: data.payload,
             prev: (latest?.state as any) || null,
           });
+
+          // SECURITY: If we are in the vote phase, strip the correctLieId from the broadcast
+          // so participants cannot inspect the WebSocket traffic to cheat.
+          const publiclySafeState = { ...next };
+          if (next.phase === 'vote' && publiclySafeState.correctLieId) {
+            delete publiclySafeState.correctLieId;
+          }
+
           await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: publiclySafeState });
         }
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {

@@ -228,7 +228,7 @@ export class EventInvitationsService {
    * @param maxParticipants - Event's max participant limit
    * @param lang - Email language (defaults to 'en')
    */
-  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, eventTitle: string, maxParticipants: number, lang?: string, gameId?: string) {
+  async inviteParticipant(eventId: string, invitedByMemberId: string, email: string, eventTitle: string, maxParticipants: number, lang?: string, gameId?: string, startTime?: string, endTime?: string) {
     const [{ count }] = await query<{ count: string }>(
       'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
       [eventId]
@@ -249,7 +249,12 @@ export class EventInvitationsService {
     await sendEmail({
       to: email,
       type: 'event_invitation',
-      data: { eventTitle, link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameId ? `&game=${gameId}` : ''}` },
+      data: { 
+        eventTitle, 
+        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameId ? `&game=${gameId}` : ''}`,
+        startTime: startTime ? String(startTime) : undefined,
+        endTime: endTime ? String(endTime) : undefined
+      },
       lang,
     });
 

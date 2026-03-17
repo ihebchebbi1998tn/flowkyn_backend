@@ -57,6 +57,10 @@ export const translations: TranslationMap = {
       body: {
         intro: 'You\'ve been invited to participate in <strong>{{eventTitle}}</strong> on Flowkyn.',
         instruction: 'Click the button below to join the event. This invitation expires in 7 days.',
+        scheduleLabel: 'Schedule:',
+        dateLabel: 'Date:',
+        dayLabel: 'Day:',
+        timeLabel: 'Time:',
         noAction: 'If you weren\'t expecting this invitation, you can safely ignore this email.',
       },
       cta: 'Join event',
@@ -116,6 +120,10 @@ export const translations: TranslationMap = {
       body: {
         intro: 'Vous avez été invité(e) à participer à <strong>{{eventTitle}}</strong> sur Flowkyn.',
         instruction: 'Cliquez sur le bouton ci-dessous pour rejoindre l\'événement. Cette invitation expire dans 7 jours.',
+        scheduleLabel: 'Calendrier :',
+        dateLabel: 'Date :',
+        dayLabel: 'Jour :',
+        timeLabel: 'Heure :',
         noAction: 'Si vous n\'attendiez pas cette invitation, vous pouvez ignorer cet e-mail.',
       },
       cta: 'Rejoindre l\'événement',
@@ -175,6 +183,10 @@ export const translations: TranslationMap = {
       body: {
         intro: 'Sie wurden eingeladen, an <strong>{{eventTitle}}</strong> auf Flowkyn teilzunehmen.',
         instruction: 'Klicken Sie auf die Schaltfläche unten, um dem Event beizutreten. Diese Einladung läuft in 7 Tagen ab.',
+        scheduleLabel: 'Termin:',
+        dateLabel: 'Datum:',
+        dayLabel: 'Tag:',
+        timeLabel: 'Zeit:',
         noAction: 'Wenn Sie diese Einladung nicht erwartet haben, können Sie diese E-Mail ignorieren.',
       },
       cta: 'Am Event teilnehmen',

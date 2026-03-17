@@ -149,7 +149,9 @@ export class EventsController {
               event.title,
               event.max_participants,
               'en', // Default to english if missing on payload
-              body.game_id
+              body.game_id,
+              event.start_time,
+              event.end_time
             )
           )
         );
@@ -487,7 +489,7 @@ export class EventsController {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgMember(event.organization_id, req.user!.userId);
       requireAdminRole(member, 'invite participants');
-      const result = await invitationsService.inviteParticipant(req.params.eventId, member.id, req.body.email, event.title, event.max_participants, req.body.lang, req.body.game_id);
+      const result = await invitationsService.inviteParticipant(req.params.eventId, member.id, req.body.email, event.title, event.max_participants, req.body.lang, req.body.game_id, event.start_time, event.end_time);
       await audit.create(event.organization_id, req.user!.userId, 'EVENT_INVITE', { eventId: req.params.eventId, invitedEmail: req.body.email });
       res.json(result);
     } catch (err) { next(err); }

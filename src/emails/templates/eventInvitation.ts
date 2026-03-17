@@ -9,6 +9,8 @@ interface EventInvitationData {
   link: string;
   eventTitle: string;
   lang?: string;
+  startTime?: string;
+  endTime?: string;
 }
 
 export function eventInvitationTemplate(data: EventInvitationData): { subject: string; html: string } {
@@ -19,9 +21,29 @@ export function eventInvitationTemplate(data: EventInvitationData): { subject: s
   // Replace {{eventTitle}} placeholder
   const intro = t.body.intro.replace('{{eventTitle}}', safeTitle);
 
+  let scheduleSection = '';
+  if (data.startTime) {
+    const startDate = new Date(data.startTime);
+    const locale = data.lang || 'en';
+    
+    const dateStr = new Intl.DateTimeFormat(locale, { dateStyle: 'long' }).format(startDate);
+    const dayStr = new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(startDate);
+    const timeStr = new Intl.DateTimeFormat(locale, { timeStyle: 'short' }).format(startDate);
+
+    scheduleSection = `
+      <div style="margin: 20px 0; padding: 15px; background-color: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0;">
+        <h3 style="margin-top: 0; color: #1e293b; font-size: 16px;">${t.body.scheduleLabel}</h3>
+        <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>${t.body.dayLabel}</strong> ${dayStr}</p>
+        <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>${t.body.dateLabel}</strong> ${dateStr}</p>
+        <p style="margin: 5px 0; font-size: 14px; color: #475569;"><strong>${t.body.timeLabel}</strong> ${timeStr}</p>
+      </div>
+    `;
+  }
+
   const content = `
     <h1>${t.greeting()}</h1>
     <p>${intro}</p>
+    ${scheduleSection}
     <p>${t.body.instruction}</p>
     <table role="presentation" cellpadding="0" cellspacing="0" style="margin:24px 0;">
       <tr>
