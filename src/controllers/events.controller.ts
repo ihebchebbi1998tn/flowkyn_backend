@@ -212,6 +212,7 @@ export class EventsController {
         allow_chat,
         auto_start_games,
         max_rounds,
+        allow_participant_game_control,
         ...eventUpdates
       } = req.body as any;
 
@@ -225,7 +226,8 @@ export class EventsController {
         allow_guests !== undefined ||
         allow_chat !== undefined ||
         auto_start_games !== undefined ||
-        max_rounds !== undefined
+        max_rounds !== undefined ||
+        allow_participant_game_control !== undefined
       ) {
         const fields: string[] = [];
         const values: any[] = [];
@@ -246,6 +248,10 @@ export class EventsController {
         if (max_rounds !== undefined) {
           fields.push(`max_rounds = $${idx++}`);
           values.push(Number(max_rounds));
+        }
+        if (allow_participant_game_control !== undefined) {
+          fields.push(`allow_participant_game_control = $${idx++}`);
+          values.push(!!allow_participant_game_control);
         }
 
         if (fields.length > 0) {

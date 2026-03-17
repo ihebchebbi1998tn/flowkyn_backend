@@ -13,6 +13,37 @@ let logCount = 0;
 
 console.log('[Monitor] ✓ Middleware initialized. Capturing all API requests.');
 
+function redactSensitiveObject(value: unknown): unknown {
+  if (!value || typeof value !== 'object') return value;
+  if (Array.isArray(value)) return value.map(redactSensitiveObject);
+
+  const input = value as Record<string, unknown>;
+  const out: Record<string, unknown> = {};
+
+  // Common token/password fields (add more as needed)
+  const sensitiveKeys = new Set([
+    'password',
+    'token',
+    'access_token',
+    'refresh_token',
+    'secret',
+    'pass',
+    'pin',
+    'creditCard',
+    'ssn',
+    'authorization',
+  ]);
+
+  for (const [k, v] of Object.entries(input)) {
+    if (sensitiveKeys.has(k)) {
+      out[k] = '***REDACTED***';
+      continue;
+    }
+    out[k] = redactSensitiveObject(v);
+  }
+  return out;
+}
+
 export function monitorMiddleware(req: Request, res: Response, next: NextFunction) {
   // Skip monitor routes and static files
   if (SKIP_PATHS.some(p => req.path.startsWith(p))) return next();
@@ -68,7 +99,7 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
   let responseLogged = false;
 
   res.json = function (body: unknown) {
-    resBody = body;
+    resBody = redactSensitiveObject(body);
     // Log immediately to ensure capture
     logRequest(res.statusCode);
     return originalJson(body);

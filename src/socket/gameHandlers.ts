@@ -565,6 +565,29 @@ async function isEventAdmin(sessionId: string, userId: string): Promise<boolean>
   return row && ['owner', 'admin', 'moderator'].includes(row.name);
 }
 
+async function allowParticipantGameControlForSession(sessionId: string): Promise<boolean> {
+  const row = await queryOne<{ allow: boolean }>(
+    `SELECT COALESCE(es.allow_participant_game_control, true) as allow
+     FROM game_sessions gs
+     LEFT JOIN event_settings es ON es.event_id = gs.event_id
+     WHERE gs.id = $1`,
+    [sessionId]
+  );
+  return row ? !!row.allow : true;
+}
+
+/**
+ * When allow_participant_game_control=true for the event, any verified participant (including guests)
+ * can perform actions that are otherwise restricted to admins/moderators.
+ */
+async function canControlGameFlow(sessionId: string, userId: string, socket: AuthenticatedSocket): Promise<boolean> {
+  if (!(await allowParticipantGameControlForSession(sessionId))) {
+    return isEventAdmin(sessionId, userId);
+  }
+  const participant = await verifyGameParticipant(sessionId, userId, socket);
+  return !!participant;
+}
+
 export function setupGameHandlers(gamesNs: Namespace) {
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
@@ -595,7 +618,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
           gamesService.getSession(data.sessionId),
           gamesService.getActiveRound(data.sessionId),
           gamesService.getLatestSnapshot(data.sessionId),
-          isEventAdmin(data.sessionId, user.userId).catch(() => false),
+          canControlGameFlow(data.sessionId, user.userId, socket).catch(() => false),
         ]);
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
@@ -618,6 +641,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               activeRoundId: activeRound?.id || null,
               participantId: participant.participantId,
               snapshot: snapshot?.state || null,
+              // "Admin" here means "can control game flow" for UI purposes.
               isAdmin: !!admin,
             },
           });
@@ -652,9 +676,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // BUG FIX: Only org admins/moderators can start games
-        const admin = await isEventAdmin(data.sessionId, user.userId);
-        if (!admin) {
+        const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+        if (!ok) {
           socket.emit('error', { message: 'Only event administrators can start games', code: 'FORBIDDEN' });
           return;
         }
@@ -687,9 +710,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // BUG FIX: Only admins can start rounds
-        const admin = await isEventAdmin(data.sessionId, user.userId);
-        if (!admin) {
+        const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+        if (!ok) {
           socket.emit('error', { message: 'Only event administrators can start rounds', code: 'FORBIDDEN' });
           return;
         }
@@ -756,8 +778,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
           // Guard: only admins/moderators can control core game flow
           const CONTROL_ACTIONS = new Set(['two_truths:start', 'two_truths:reveal', 'two_truths:next_round']);
           if (CONTROL_ACTIONS.has(data.actionType)) {
-            const admin = await isEventAdmin(data.sessionId, user.userId);
-            if (!admin) {
+            const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+            if (!ok) {
               socket.emit('error', { message: 'Only event administrators can control the game flow', code: 'FORBIDDEN' });
               return;
             }
@@ -826,8 +848,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         if (gameKey === 'strategic-escape' && isStrategicAction(data.actionType)) {
-          const admin = await isEventAdmin(data.sessionId, user.userId);
-          if (!admin) {
+          const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+          if (!ok) {
             socket.emit('error', { message: 'Only event administrators can perform strategic actions', code: 'FORBIDDEN' });
             return;
           }
@@ -856,9 +878,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // BUG FIX: Only admins can end rounds, and persist to DB with transaction
-        const admin = await isEventAdmin(data.sessionId, user.userId);
-        if (!admin) {
+        const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+        if (!ok) {
           socket.emit('error', { message: 'Only event administrators can end rounds', code: 'FORBIDDEN' });
           return;
         }
@@ -897,8 +918,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         // Other games remain admin-only.
         const gameKey = await getSessionGameKey(data.sessionId);
         if (gameKey !== 'coffee-roulette') {
-          const admin = await isEventAdmin(data.sessionId, user.userId);
-          if (!admin) {
+          const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
+          if (!ok) {
             socket.emit('error', { message: 'Only event administrators can end games', code: 'FORBIDDEN' });
             return;
           }

@@ -53,13 +53,17 @@ app.use('/monitor', monitorRoutes);
 // ─── Swagger API Documentation (HTTP Basic Auth in production) ───
 const docsAuth = (req: express.Request, res: express.Response, next: express.NextFunction) => {
   if (env.nodeEnv !== 'production') return next();
+  if (!process.env.DOCS_USER || !process.env.DOCS_PASSWORD) {
+    res.status(500).send('Docs auth is not configured');
+    return;
+  }
   const authHeader = req.headers.authorization;
   if (authHeader) {
     const [scheme, encoded] = authHeader.split(' ');
     if (scheme === 'Basic' && encoded) {
       const [user, pass] = Buffer.from(encoded, 'base64').toString().split(':');
-      const expectedUser = process.env.DOCS_USER || 'admin';
-      const expectedPass = process.env.DOCS_PASSWORD || 'Flowkyn2026';
+      const expectedUser = process.env.DOCS_USER;
+      const expectedPass = process.env.DOCS_PASSWORD;
       if (user === expectedUser && pass === expectedPass) return next();
     }
   }

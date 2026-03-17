@@ -16,11 +16,22 @@ async function bootstrap() {
   }
   console.log('✅ Database connected');
 
-  // 2. Run auto-migrations (creates tables if not exists)
-  await runMigrations();
+  const shouldRunMigrations = String(process.env.RUN_MIGRATIONS || '').toLowerCase() === 'true';
+  const shouldSeedSuperAdmin = String(process.env.SEED_SUPER_ADMIN || '').toLowerCase() === 'true';
 
-  // 3. Seed super admin (support@flowkyn.com) — no-op if already exists
-  await seedSuperAdmin();
+  // 2. Run auto-migrations (opt-in)
+  if (shouldRunMigrations) {
+    await runMigrations();
+  } else {
+    console.log('ℹ️  Skipping migrations (set RUN_MIGRATIONS=true to enable)');
+  }
+
+  // 3. Seed super admin (opt-in)
+  if (shouldSeedSuperAdmin) {
+    await seedSuperAdmin();
+  } else {
+    console.log('ℹ️  Skipping super admin seed (set SEED_SUPER_ADMIN=true to enable)');
+  }
 
   // 4. Create HTTP server & attach Socket.io
   const server = createServer(app);

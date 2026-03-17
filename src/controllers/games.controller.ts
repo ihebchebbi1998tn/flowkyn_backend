@@ -12,6 +12,16 @@ import { getStrategicRoleContent } from '../emails/strategicRoleContent';
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
 
+async function allowParticipantGameControlForEvent(eventId: string): Promise<boolean> {
+  const row = await queryOne<{ allow: boolean }>(
+    `SELECT COALESCE(allow_participant_game_control, true) as allow
+     FROM event_settings
+     WHERE event_id = $1`,
+    [eventId]
+  );
+  return row ? !!row.allow : true;
+}
+
 /**
  * Verify the caller owns the given participant_id.
  * Supports both authenticated org members AND guest participants.
@@ -69,7 +79,8 @@ export class GamesController {
 
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Authorization: only admins/moderators can start game sessions
+      // Authorization: default is admins/moderators only. When ALLOW_PARTICIPANT_GAME_CONTROL=true,
+      // any active/pending org member can start a session for the event.
       if (!req.user) throw new AppError('Only authenticated users can start game sessions', 403, 'FORBIDDEN');
 
       const member = await queryOne<{ id: string; role_name: string }>(
@@ -80,7 +91,8 @@ export class GamesController {
         [req.params.eventId, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+      const allow = await allowParticipantGameControlForEvent(req.params.eventId);
+      if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
         throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
@@ -136,7 +148,8 @@ export class GamesController {
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+      const allow = await allowParticipantGameControlForEvent(session.event_id);
+      if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
         throw new AppError('Only admins and moderators can start rounds', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 
@@ -199,7 +212,8 @@ export class GamesController {
         [session.event_id, req.user.userId]
       );
       if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+      const allow = await allowParticipantGameControlForEvent(session.event_id);
+      if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
         throw new AppError('Only admins and moderators can finish game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
       }
 

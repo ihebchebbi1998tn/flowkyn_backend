@@ -41,12 +41,14 @@ export class EventsService {
     event_mode?: string; visibility?: string; max_participants?: number;
     start_time?: string; end_time?: string; allow_guests?: boolean;
     allow_chat?: boolean; auto_start_games?: boolean; max_rounds?: number;
+    allow_participant_game_control?: boolean;
   }) {
     const eventId = uuid();
     const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
     const allowChat = data.allow_chat ?? true;
     const autoStartGames = data.auto_start_games ?? false;
     const maxRounds = data.max_rounds ?? 5;
+    const allowParticipantGameControl = data.allow_participant_game_control ?? true;
 
     const event = await transaction(async (client) => {
       const { rows: [ev] } = await client.query(
@@ -66,9 +68,9 @@ export class EventsService {
         ]
       );
       await client.query(
-        `INSERT INTO event_settings (event_id, allow_guests, allow_chat, auto_start_games, max_rounds)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [eventId, allowGuests, allowChat, autoStartGames, maxRounds]
+        `INSERT INTO event_settings (event_id, allow_guests, allow_chat, auto_start_games, max_rounds, allow_participant_game_control)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [eventId, allowGuests, allowChat, autoStartGames, maxRounds, allowParticipantGameControl]
       );
       // Auto-join creator so they can use /me, messages, posts, etc. when landing on play
       const participantId = uuid();
@@ -89,7 +91,7 @@ export class EventsService {
    */
   async getById(eventId: string) {
     const event = await queryOne<EventRow>(
-      `SELECT e.*, es.allow_guests, es.allow_chat, es.auto_start_games, es.max_rounds
+      `SELECT e.*, es.allow_guests, es.allow_chat, es.auto_start_games, es.max_rounds, es.allow_participant_game_control
        FROM events e LEFT JOIN event_settings es ON es.event_id = e.id
        WHERE e.id = $1`,
       [eventId]

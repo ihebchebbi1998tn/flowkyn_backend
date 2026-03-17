@@ -587,6 +587,16 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_strategic_roles_session ON strategic_roles(game_session_id);
     `,
   },
+  {
+    version: 11,
+    name: 'event_settings_participant_game_control',
+    sql: `
+      -- Allow event creators/admins to decide who can control live game flow.
+      -- Default is TRUE for backward compatibility with "anyone can manage".
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS allow_participant_game_control BOOLEAN NOT NULL DEFAULT true;
+    `,
+  },
 ];
 
 /**
