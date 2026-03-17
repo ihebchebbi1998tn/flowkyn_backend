@@ -108,7 +108,7 @@ export class GamesService {
       }
 
       const sessionId = uuid();
-      let rounds = requestedRounds ?? 4;
+      let rounds = requestedRounds ?? (Number.isFinite(maxRounds as any) && maxRounds !== null ? Number(maxRounds) : 4);
       if (maxRounds !== null && Number.isFinite(maxRounds)) {
         // If an event-wide cap exists, clamp the default and reject explicit overflow
         if (requestedRounds !== null && rounds > maxRounds) {

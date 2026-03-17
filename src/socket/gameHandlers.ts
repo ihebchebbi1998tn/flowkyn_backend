@@ -131,7 +131,8 @@ async function reduceTwoTruthsState(args: {
       ...base,
       phase: 'submit',
       presenterParticipantId: participantId,
-      totalRounds: Number(payload?.totalRounds) || base.totalRounds,
+      // Source of truth: totalRounds configured when the session was created
+      totalRounds: base.totalRounds,
       statements: null,
       votes: {},
       revealedLie: null,
@@ -145,11 +146,18 @@ async function reduceTwoTruthsState(args: {
     if (statements.length < 3) return base;
 
     // The original logic assumed index 2 is the lie.
-    // We shuffle them but keep track of which one was originally at index 2.
+    // We now allow the presenter to explicitly choose which index is the lie (0..2).
+    const rawLieIndex = Number(payload?.lieIndex);
+    const lieIndex =
+      Number.isFinite(rawLieIndex) && Number.isInteger(rawLieIndex) && rawLieIndex >= 0 && rawLieIndex <= 2
+        ? rawLieIndex
+        : 2;
+
+    // We shuffle them but keep track of which one was the lie.
     const rawStatementsWithLabels = [
-      { text: String(statements[0] || '').slice(0, 300), isLie: false },
-      { text: String(statements[1] || '').slice(0, 300), isLie: false },
-      { text: String(statements[2] || '').slice(0, 300), isLie: true },
+      { text: String(statements[0] || '').slice(0, 300), isLie: lieIndex === 0 },
+      { text: String(statements[1] || '').slice(0, 300), isLie: lieIndex === 1 },
+      { text: String(statements[2] || '').slice(0, 300), isLie: lieIndex === 2 },
     ];
 
     const shuffled = shuffleArray(rawStatementsWithLabels);
@@ -784,23 +792,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
             if (!ok) {
               socket.emit('error', { message: 'Only event administrators can control the game flow', code: 'FORBIDDEN' });
               return;
-            }
-          }
-
-          // Persist total_rounds if provided on start so late joiners stay consistent
-          if (data.actionType === 'two_truths:start') {
-            const n = Number(data.payload?.totalRounds);
-            if (Number.isFinite(n) && Number.isInteger(n) && n >= 1) {
-              try {
-                await query(
-                  `UPDATE game_sessions SET total_rounds = $1 WHERE id = $2`,
-                  [n, data.sessionId]
-                );
-                // Keep in-memory session consistent for this reducer call
-                (session as any).total_rounds = n;
-              } catch {
-                // Non-fatal: snapshot still carries totalRounds for current players
-              }
             }
           }
 
