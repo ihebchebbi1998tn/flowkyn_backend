@@ -31,7 +31,7 @@ export class EventMessagesService {
     if (row.end_time) {
       const endsAtMs = new Date(row.end_time).getTime();
       if (Number.isFinite(endsAtMs) && Date.now() >= endsAtMs) {
-        throw new AppError('Event has ended', 400, 'EVENT_ENDED');
+        throw new AppError('Event has ended', 400, undefined, 'EVENT_ENDED');
       }
     }
   }
