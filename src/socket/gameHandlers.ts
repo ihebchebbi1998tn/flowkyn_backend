@@ -552,17 +552,19 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
   return null;
 }
 
-/** Check if user has admin/moderator role in the event's org */
+/** Check if user can control game flow (org admin/moderator/owner OR event creator/host). */
 async function isEventAdmin(sessionId: string, userId: string): Promise<boolean> {
-  const row = await queryOne(
-    `SELECT r.name FROM organization_members om
+  const row = await queryOne<{ role_name: string; member_id: string; created_by_member_id: string }>(
+    `SELECT r.name as role_name, om.id as member_id, e.created_by_member_id
+     FROM organization_members om
      JOIN roles r ON r.id = om.role_id
      JOIN events e ON e.organization_id = om.organization_id
      JOIN game_sessions gs ON gs.event_id = e.id
      WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
     [sessionId, userId]
   );
-  return row && ['owner', 'admin', 'moderator'].includes(row.name);
+  if (!row) return false;
+  return ['owner', 'admin', 'moderator'].includes(row.role_name) || row.member_id === row.created_by_member_id;
 }
 
 async function allowParticipantGameControlForSession(sessionId: string): Promise<boolean> {

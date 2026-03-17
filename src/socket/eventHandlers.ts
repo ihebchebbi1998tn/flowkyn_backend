@@ -264,16 +264,19 @@ export function setupEventHandlers(eventsNs: Namespace) {
         ? Math.min(Math.max(data.durationSeconds, 3), 30)
         : 5;
       try {
-        // Verify caller is an event admin/host
-        const member = await queryOne<{ role_name: string }>(
-          `SELECT r.name as role_name
+        // Verify caller is an event admin/moderator/owner OR the event creator (host)
+        const member = await queryOne<{ role_name: string; member_id: string; created_by_member_id: string }>(
+          `SELECT r.name as role_name, om.id as member_id, e.created_by_member_id
            FROM organization_members om
            JOIN roles r ON r.id = om.role_id
            JOIN events e ON e.organization_id = om.organization_id
            WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
           [data.eventId, user.userId]
         );
-        if (!member || !['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        const isPrivileged =
+          !!member &&
+          (['owner', 'admin', 'moderator'].includes(member.role_name) || member.member_id === member.created_by_member_id);
+        if (!isPrivileged) {
           ack?.({ ok: false, error: 'INSUFFICIENT_PERMISSIONS' });
           return;
         }

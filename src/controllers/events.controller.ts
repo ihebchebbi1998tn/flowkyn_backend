@@ -567,7 +567,9 @@ export class EventsController {
 
       const event = await eventsService.getById(eventId);
       const member = await requireOrgMember(event.organization_id, req.user.userId);
-      requireAdminRole(member, 'pin messages');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
+        throw new AppError('You need owner, admin, moderator, or host role to pin messages', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
 
       // Ensure message belongs to this event
       const messageRow = await queryOne<{ id: string }>(
@@ -595,7 +597,9 @@ export class EventsController {
       const eventId = req.params.eventId;
       const event = await eventsService.getById(eventId);
       const member = await requireOrgMember(event.organization_id, req.user.userId);
-      requireAdminRole(member, 'unpin messages');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name) && member.id !== event.created_by_member_id) {
+        throw new AppError('You need owner, admin, moderator, or host role to unpin messages', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
 
       await query(
         `UPDATE events SET pinned_message_id = NULL, updated_at = NOW() WHERE id = $1`,
