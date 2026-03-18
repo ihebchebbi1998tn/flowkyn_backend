@@ -163,18 +163,32 @@ export class EventsController {
       const event = await eventsService.create(member.id, body);
       await audit.create(body.organization_id, req.user!.userId, 'EVENT_CREATE', { eventId: event.id, title: body.title });
 
-      // Automatically invite pre-selected members/emails if provided
+      // Automatically invite recipients if provided (by email list and/or by department)
+      const inviteEmails = new Set<string>();
+
+      if (Array.isArray(body.invite_department_ids) && body.invite_department_ids.length > 0) {
+        const emails = await orgsService.listEmailsByDepartments(event.organization_id, body.invite_department_ids);
+        for (const email of emails) inviteEmails.add(email);
+      }
+
       if (Array.isArray(body.invites) && body.invites.length > 0) {
+        for (const email of body.invites) inviteEmails.add(email);
+      }
+
+      const inviteEmailList = Array.from(inviteEmails);
+      if (inviteEmailList.length > 0) {
+        const emailLang = typeof body.lang === 'string' ? body.lang : (req.user as any)?.language || 'en';
+
         // Run invitations in parallel, silencing errors so one failure doesn't crash the whole creation flow
         await Promise.allSettled(
-          body.invites.map((email: string) =>
+          inviteEmailList.map((email: string) =>
             invitationsService.inviteParticipant(
               event.id,
               member.id,
               email,
               event.title,
               event.max_participants,
-              'en', // Default to english if missing on payload
+              emailLang,
               body.game_id,
               event.start_time,
               event.end_time

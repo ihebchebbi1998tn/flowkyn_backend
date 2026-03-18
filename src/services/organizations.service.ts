@@ -130,21 +130,57 @@ export class OrganizationsService {
     );
     if (!invitation) throw new AppError('Invitation is invalid or has expired', 400, 'AUTH_VERIFICATION_EXPIRED');
 
+    const ensureDepartmentId = async (orgId: string, name: string) => {
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM departments WHERE organization_id = $1 AND name = $2`,
+        [orgId, name]
+      );
+      if (existing) return existing.id;
+
+      const dept = await queryOne<{ id: string }>(
+        `INSERT INTO departments (id, organization_id, name, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         RETURNING id`,
+        [uuid(), orgId, name]
+      );
+      return dept.id;
+    };
+
+    const departmentId = invitation.department_id
+      ? invitation.department_id
+      : await ensureDepartmentId(invitation.organization_id, 'General');
+
     const existingMember = await queryOne(
       `SELECT id FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
       [invitation.organization_id, userId]
     );
     if (existingMember) {
       await query(`UPDATE organization_invitations SET status = 'accepted' WHERE id = $1`, [invitation.id]);
+
+      // Ensure the member is mapped to the invitation's department
+      await query(
+        `INSERT INTO organization_member_departments (id, organization_member_id, department_id, created_at)
+         VALUES ($1, $2, $3, NOW())
+         ON CONFLICT (organization_member_id) DO NOTHING`,
+        [uuid(), existingMember.id, departmentId]
+      );
       return { message: 'Already a member of this organization' };
     }
 
     await transaction(async (client) => {
+      const memberId = uuid();
       await client.query(
         `INSERT INTO organization_members (id, organization_id, user_id, role_id, invited_by_member_id, status, joined_at, created_at)
          VALUES ($1, $2, $3, $4, $5, 'active', NOW(), NOW())`,
-        [uuid(), invitation.organization_id, userId, invitation.role_id, invitation.invited_by_member_id]
+        [memberId, invitation.organization_id, userId, invitation.role_id, invitation.invited_by_member_id]
       );
+
+      await client.query(
+        `INSERT INTO organization_member_departments (id, organization_member_id, department_id, created_at)
+         VALUES ($1, $2, $3, NOW())`,
+        [uuid(), memberId, departmentId]
+      );
+
       await client.query(
         `UPDATE organization_invitations SET status = 'accepted' WHERE id = $1`,
         [invitation.id]
@@ -159,6 +195,78 @@ export class OrganizationsService {
       `SELECT * FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
       [orgId, userId]
     );
+  }
+
+  async createDepartment(orgId: string, _createdByMemberId: string, name: string) {
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id FROM departments WHERE organization_id = $1 AND name = $2`,
+      [orgId, name]
+    );
+    if (existing) throw new AppError('Department already exists', 400, 'ALREADY_EXISTS');
+
+    const deptId = uuid();
+    const dept = await queryOne(
+      `INSERT INTO departments (id, organization_id, name, created_at, updated_at)
+       VALUES ($1, $2, $3, NOW(), NOW())
+       RETURNING *`,
+      [deptId, orgId, name]
+    );
+    return dept;
+  }
+
+  async listDepartments(orgId: string) {
+    return query(
+      `SELECT id, name, created_at, updated_at
+       FROM departments
+       WHERE organization_id = $1
+       ORDER BY name ASC`,
+      [orgId]
+    );
+  }
+
+  async deleteDepartment(orgId: string, departmentId: string) {
+    const result = await queryOne(
+      `DELETE FROM departments
+       WHERE id = $1 AND organization_id = $2
+       RETURNING id`,
+      [departmentId, orgId]
+    );
+    if (!result) throw new AppError('Department not found', 404, 'NOT_FOUND');
+    return { message: 'Department deleted' };
+  }
+
+  /**
+   * List distinct recipient emails for event invites targeted by departments.
+   * Includes:
+   * - Active org members mapped to those departments
+   * - Pending org invitations assigned to those departments
+   */
+  async listEmailsByDepartments(orgId: string, departmentIds: string[]) {
+    if (!departmentIds.length) return [];
+
+    const rows = await query<{ email: string }>(
+      `
+      SELECT DISTINCT u.email
+      FROM organization_member_departments omd
+      JOIN organization_members om ON om.id = omd.organization_member_id
+      JOIN users u ON u.id = om.user_id
+      WHERE om.organization_id = $1
+        AND om.status = 'active'
+        AND omd.department_id = ANY($2::uuid[])
+
+      UNION
+
+      SELECT DISTINCT oi.email
+      FROM organization_invitations oi
+      WHERE oi.organization_id = $1
+        AND oi.status = 'pending'
+        AND oi.expires_at > NOW()
+        AND oi.department_id = ANY($2::uuid[])
+      `,
+      [orgId, departmentIds]
+    );
+
+    return rows.map((r) => r.email);
   }
 
   async uploadLogo(orgId: string, file: { buffer: Buffer; originalname: string; mimetype: string }) {

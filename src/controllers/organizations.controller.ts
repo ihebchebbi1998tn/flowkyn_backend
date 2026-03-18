@@ -5,6 +5,7 @@ import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { isAllowedImageType } from '../utils/upload';
 import { query, queryOne } from '../config/database';
+import { requireAdminRole, requireOrgMember } from '../utils/authHelpers';
 
 const orgsService = new OrganizationsService();
 const audit = new AuditLogsService();
@@ -153,6 +154,36 @@ export class OrganizationsController {
       const org = await orgsService.updateOrg(req.params.orgId, req.body);
       await audit.create(req.params.orgId, req.user!.userId, 'ORG_UPDATE', { changes: Object.keys(req.body) });
       res.json(org);
+    } catch (err) { next(err); }
+  }
+
+  async createDepartment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const member = await requireOrgMember(req.params.orgId, req.user!.userId);
+      requireAdminRole(member, 'create departments');
+
+      const dept = await orgsService.createDepartment(req.params.orgId, member.id, req.body.name);
+      await audit.create(req.params.orgId, req.user!.userId, 'ORG_CREATE_DEPARTMENT', { departmentId: dept.id, name: req.body.name });
+      res.status(201).json(dept);
+    } catch (err) { next(err); }
+  }
+
+  async listDepartments(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      await requireOrgMember(req.params.orgId, req.user!.userId);
+      const depts = await orgsService.listDepartments(req.params.orgId);
+      res.json(depts);
+    } catch (err) { next(err); }
+  }
+
+  async deleteDepartment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const member = await requireOrgMember(req.params.orgId, req.user!.userId);
+      requireAdminRole(member, 'delete departments');
+
+      const result = await orgsService.deleteDepartment(req.params.orgId, req.params.departmentId);
+      await audit.create(req.params.orgId, req.user!.userId, 'ORG_DELETE_DEPARTMENT', { departmentId: req.params.departmentId });
+      res.json(result);
     } catch (err) { next(err); }
   }
 }

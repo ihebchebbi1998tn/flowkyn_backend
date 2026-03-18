@@ -616,6 +616,53 @@ const migrations: { version: number; name: string; sql: string }[] = [
         WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
     `,
   },
+  {
+    version: 14,
+    name: 'org_departments_and_member_mapping',
+    sql: `
+      -- ─── Departments (organization-scoped) ───
+      CREATE TABLE IF NOT EXISTS departments (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        name VARCHAR(100) NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_org_name ON departments(organization_id, name);
+
+      -- Link pending org invites to departments (email -> department grouping)
+      ALTER TABLE organization_invitations ADD COLUMN IF NOT EXISTS department_id UUID;
+
+      DO $$
+      BEGIN
+        IF NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conname = 'organization_invitations_department_id_fkey'
+        ) THEN
+          ALTER TABLE organization_invitations
+            ADD CONSTRAINT organization_invitations_department_id_fkey
+            FOREIGN KEY (department_id)
+            REFERENCES departments(id)
+            ON DELETE CASCADE;
+        END IF;
+      END
+      $$;
+
+      -- Map active org members to departments (for event targeting)
+      CREATE TABLE IF NOT EXISTS organization_member_departments (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_member_id UUID NOT NULL REFERENCES organization_members(id) ON DELETE CASCADE,
+        department_id UUID NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_org_member_departments_unique
+        ON organization_member_departments(organization_member_id);
+
+      -- Backfill legacy invites (if any) with NULL department_id:
+      -- UI/backend will ignore missing dept ids for department-targeted events.
+    `,
+  },
 ];
 
 /**

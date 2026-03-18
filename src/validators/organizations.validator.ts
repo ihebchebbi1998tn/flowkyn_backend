@@ -27,3 +27,11 @@ export const inviteMemberSchema = z.object({
 export const acceptInvitationSchema = z.object({
   token: z.string().min(1, 'Token is required'),
 });
+
+export const departmentCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Department name is required').max(100),
+});
+
+export const departmentIdParam = z.object({
+  departmentId: z.string().uuid('Invalid UUID format'),
+});

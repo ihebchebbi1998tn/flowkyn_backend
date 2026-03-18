@@ -80,7 +80,7 @@ export class UsersService {
   async sendOnboardingInvites(
     orgId: string,
     invitedByUserId: string,
-    invites: Array<{ email: string }>,
+    invites: Array<{ email: string; department?: string }>,
     lang?: string
   ) {
     // Get invited_by_member_id
@@ -111,10 +111,38 @@ export class UsersService {
       failed: [] as Array<{ email: string; reason: string }>,
     };
 
+    // Cache department name -> id within this request (avoids repeated INSERT/SELECT per email)
+    const departmentIdByName = new Map<string, string>();
+    const getOrCreateDepartmentId = async (departmentName: string) => {
+      const name = departmentName.trim();
+      const cached = departmentIdByName.get(name);
+      if (cached) return cached;
+
+      const existing = await queryOne<{ id: string }>(
+        `SELECT id FROM departments WHERE organization_id = $1 AND name = $2`,
+        [orgId, name]
+      );
+      if (existing) {
+        departmentIdByName.set(name, existing.id);
+        return existing.id;
+      }
+
+      const dept = await queryOne<{ id: string }>(
+        `INSERT INTO departments (id, organization_id, name, created_at, updated_at)
+         VALUES ($1, $2, $3, NOW(), NOW())
+         RETURNING id`,
+        [uuid(), orgId, name]
+      );
+      departmentIdByName.set(name, dept.id);
+      return dept.id;
+    };
+
     // Send invitations
     for (const invite of invites) {
       try {
         const email = invite.email.trim().toLowerCase();
+        const departmentName = invite.department?.trim() || 'General';
+        const departmentId = await getOrCreateDepartmentId(departmentName);
 
         // Validate email format
         if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -149,9 +177,10 @@ export class UsersService {
         const hashedToken = crypto.createHash('sha256').update(rawToken).digest('hex');
 
         await query(
-          `INSERT INTO organization_invitations (id, organization_id, email, role_id, invited_by_member_id, token, status, expires_at, created_at)
-           VALUES ($1, $2, $3, $4, $5, $6, 'pending', NOW() + INTERVAL '7 days', NOW())`,
-          [uuid(), orgId, email, memberRole.id, invitedByMember.id, hashedToken]
+          `INSERT INTO organization_invitations
+            (id, organization_id, email, role_id, department_id, invited_by_member_id, token, status, expires_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', NOW() + INTERVAL '7 days', NOW())`,
+          [uuid(), orgId, email, memberRole.id, departmentId, invitedByMember.id, hashedToken]
         );
 
         // Send invitation email

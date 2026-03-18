@@ -14,6 +14,10 @@ export const createEventSchema = z.object({
   auto_start_games: z.boolean().optional(),
   max_rounds: z.number().int().min(1).max(30).optional(),
   allow_participant_game_control: z.boolean().optional(),
+  // Optional: target recipients directly by email
+  invites: z.array(z.string().trim().email().max(255)).optional(),
+  // Optional: target recipients by department (org-scoped UUIDs)
+  invite_department_ids: z.array(z.string().uuid()).optional(),
 }).refine((data) => {
   if (!data.start_time || !data.end_time) return true;
   return new Date(data.end_time).getTime() > new Date(data.start_time).getTime();

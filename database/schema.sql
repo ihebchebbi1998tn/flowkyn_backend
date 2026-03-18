@@ -72,6 +72,16 @@ CREATE TABLE organizations (
   updated_at TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
+-- ─── Departments ───
+CREATE TABLE departments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+  name VARCHAR(100) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX idx_departments_org_name ON departments(organization_id, name);
+
 -- ─── Subscriptions ───
 CREATE TABLE subscriptions (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -119,12 +129,22 @@ CREATE TABLE organization_members (
 );
 CREATE UNIQUE INDEX idx_org_members_unique ON organization_members(organization_id, user_id);
 
+-- ─── Organization Member Departments ───
+CREATE TABLE organization_member_departments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  organization_member_id UUID NOT NULL REFERENCES organization_members(id) ON DELETE CASCADE,
+  department_id UUID NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW()
+);
+CREATE UNIQUE INDEX idx_org_member_departments_unique ON organization_member_departments(organization_member_id);
+
 -- ─── Organization Invitations ───
 CREATE TABLE organization_invitations (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
   email VARCHAR(255) NOT NULL,
   role_id UUID NOT NULL REFERENCES roles(id),
+  department_id UUID REFERENCES departments(id) ON DELETE CASCADE,
   invited_by_member_id UUID REFERENCES organization_members(id),
   token VARCHAR(255) UNIQUE NOT NULL,
   status VARCHAR(20) NOT NULL DEFAULT 'pending',
