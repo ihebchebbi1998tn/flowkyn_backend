@@ -143,6 +143,7 @@ export class OrganizationsService {
          RETURNING id`,
         [uuid(), orgId, name]
       );
+      if (!dept) throw new Error(`Failed to create department for organization ${orgId}`);
       return dept.id;
     };
 
