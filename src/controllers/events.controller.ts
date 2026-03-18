@@ -70,6 +70,11 @@ function getEventAuthPayload(req: AuthRequest): { isGuest: boolean; userId?: str
  * Verify the authenticated user owns a given participant_id.
  * Supports both org-member participants and guest participants.
  * Prevents impersonation in message/post/action endpoints.
+ * 
+ * For invited users (org members who haven't created a participant yet),
+ * we allow them to post if they are:
+ * 1. An invited member of the organization
+ * 2. The participant belongs to that organization
  */
 async function verifyParticipantOwnership(participantId: string, userPayload: any): Promise<void> {
   // Check guest participant
@@ -88,6 +93,27 @@ async function verifyParticipantOwnership(participantId: string, userPayload: an
     [participantId, userPayload.userId]
   );
   if (memberRow) return;
+
+  // For invited users: check if they are a member of the organization that owns this event
+  // and if the participant belongs to that same organization
+  const orgMemberRow = await queryOne(
+    `SELECT om.id FROM organization_members om
+     WHERE om.user_id = $1`,
+    [userPayload.userId]
+  );
+  
+  if (orgMemberRow) {
+    // User is an org member. Now check if the participant belongs to the same org
+    const participantOrgRow = await queryOne(
+      `SELECT p.id FROM participants p
+       JOIN events e ON e.id = p.event_id
+       WHERE p.id = $1 AND e.organization_id = (
+         SELECT organization_id FROM organization_members WHERE user_id = $2 LIMIT 1
+       )`,
+      [participantId, userPayload.userId]
+    );
+    if (participantOrgRow) return;
+  }
 
   // No match — user doesn't own this participant
   throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
