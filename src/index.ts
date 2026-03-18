@@ -5,6 +5,7 @@ import { initializeSocket } from './socket';
 import { pool, checkConnection, stopPoolMonitor } from './config/database';
 import { runMigrations } from './config/migrate';
 import { startCleanupCron, stopCleanupCron } from './services/cleanup.service';
+import { scheduleDiscussionTimer } from './jobs/discussionTimer';
 import { seedSuperAdmin } from './config/seedAdmin';
 
 async function bootstrap() {
@@ -44,6 +45,11 @@ async function bootstrap() {
 
   // 6. Start cleanup cron (every 30 min)
   startCleanupCron();
+
+  // 6b. Start discussion timer job (every 60 seconds)
+  // This auto-closes expired discussions and transitions to debrief phase
+  scheduleDiscussionTimer();
+  console.log('✅ Discussion timer job scheduled (runs every 60s)');
 
   // 7. Start listening
   server.listen(env.port, () => {
