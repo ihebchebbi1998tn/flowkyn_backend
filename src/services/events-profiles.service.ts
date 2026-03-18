@@ -27,15 +27,27 @@ export class EventProfilesService {
   ) {
     const sanitizedName = displayName.trim();
     
-    // Check for display name conflicts within the same event (excluding the current participant)
+    // Check for display name conflicts within the same event
+    // Exclude the current participant's own name (whether they have a profile or guest_name)
     const conflict = await queryOne(
-      `SELECT ep.participant_id
-       FROM event_profiles ep
-       JOIN participants p ON p.id = ep.participant_id
-       WHERE ep.event_id = $1
-         AND LOWER(ep.display_name) = LOWER($2)
-         AND ep.participant_id != $3
-         AND p.left_at IS NULL`,
+      `SELECT id FROM (
+        -- Check event_profiles, excluding current participant
+        SELECT ep.participant_id as id
+        FROM event_profiles ep
+        JOIN participants p ON p.id = ep.participant_id
+        WHERE ep.event_id = $1
+          AND LOWER(ep.display_name) = LOWER($2)
+          AND ep.participant_id != $3
+          AND p.left_at IS NULL
+        UNION ALL
+        -- Check guest_names, excluding current participant
+        SELECT id
+        FROM participants p
+        WHERE p.event_id = $1
+          AND LOWER(p.guest_name) = LOWER($2)
+          AND p.id != $3
+          AND p.left_at IS NULL
+      ) combined LIMIT 1`,
       [eventId, sanitizedName, participantId]
     );
 

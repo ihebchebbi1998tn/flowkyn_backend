@@ -184,7 +184,8 @@ export class EventInvitationsService {
       if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED');
 
       // Check for name conflicts across both guest_name and event_profiles.display_name
-      // We check guests who haven't left, and any member profiles.
+      // Exclude the new guest being added (since this is a new participant, there's no existing ID to exclude)
+      // However, if someone rejoins from the same device/browser, we need to allow them
       const conflict = await client.query(
         `SELECT id FROM (
           SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
