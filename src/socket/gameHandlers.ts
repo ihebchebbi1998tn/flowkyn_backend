@@ -142,6 +142,8 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:submit') {
+    // Guard: only accept submissions during submit phase
+    if (base.phase !== 'submit') return base;
     const statements: string[] = Array.isArray(payload?.statements) ? payload.statements : [];
     if (statements.length < 3) return base;
 
@@ -185,6 +187,8 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:vote') {
+    // Guard: only accept votes during vote phase
+    if (base.phase !== 'vote') return base;
     const choice = payload?.statementId;
     if (!['s0', 's1', 's2'].includes(choice)) return base;
     if (base.presenterParticipantId && participantId === base.presenterParticipantId) return base;
@@ -280,6 +284,23 @@ const COFFEE_TOPICS = [
   "What's something you're surprisingly good at?",
 ];
 
+/**
+ * Generate a deterministic topic for a pair based on pair ID and prompt count.
+ * Both users in the pair will always see the same topic using this method.
+ */
+function getDeterministicTopic(pairId: string, promptIndex: number = 0): string {
+  // Create a simple hash from pairId + promptIndex
+  const combined = `${pairId}|${promptIndex}`;
+  let hash = 0;
+  for (let i = 0; i < combined.length; i++) {
+    const char = combined.charCodeAt(i);
+    hash = ((hash << 5) - hash) + char;
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  const index = Math.abs(hash) % COFFEE_TOPICS.length;
+  return COFFEE_TOPICS[index];
+}
+
 async function reduceCoffeeState(args: {
   eventId: string;
   actionType: string;
@@ -338,11 +359,12 @@ async function reduceCoffeeState(args: {
       if (i + 1 >= shuffled.length) break;
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
+      const pairId = crypto.randomUUID();
       pairs.push({
-        id: crypto.randomUUID(),
+        id: pairId,
         person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
         person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p2.avatar || null },
-        topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
+        topic: getDeterministicTopic(pairId, 0), // Use deterministic topic based on pair ID
       });
     }
     return {
@@ -378,10 +400,11 @@ async function reduceCoffeeState(args: {
     const nextPromptsUsed = (base.promptsUsed || 0) + 1;
     const shouldAsk = nextPromptsUsed >= 6;
 
-    // Rotate topics for all pairs so everyone stays in sync
+    // Rotate topics for all pairs using deterministic selection based on promptsUsed
+    // This ensures both users in a pair see the same new topic
     const updatedPairs = (base.pairs || []).map((pair) => ({
       ...pair,
-      topic: COFFEE_TOPICS[Math.floor(Math.random() * COFFEE_TOPICS.length)],
+      topic: getDeterministicTopic(pair.id, nextPromptsUsed),
     }));
 
     return {
