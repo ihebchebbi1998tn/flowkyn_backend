@@ -4,7 +4,6 @@
 import { Namespace } from 'socket.io';
 import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
-import { checkRateLimit } from './index';
 import { GamesService } from '../services/games.service';
 import { query, queryOne, transaction } from '../config/database';
 import crypto from 'crypto';
@@ -769,7 +768,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
-      if (!(await checkRateLimit(socket, 'game:action'))) return;
 
       try {
         // BUG FIX: Resolve participant ID from authenticated user instead of trusting client

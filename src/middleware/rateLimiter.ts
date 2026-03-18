@@ -1,110 +1,36 @@
 /**
- * Rate Limiting Middleware — protects against brute-force and abuse.
+ * Rate Limiting Middleware — DISABLED
  * 
- * Configurable limits:
- * - apiRateLimiter: General API endpoints (200 req/15min)
- * - authRateLimiter: Auth endpoints (20 req/15min) — stricter for login/register
- * - uploadRateLimiter: File uploads (30 req/15min)
- * - publicRateLimiter: Public/unauthenticated endpoints (100 req/15min)
+ * All rate limiting has been disabled. The following middleware exports
+ * are no-op functions that simply pass through to the next middleware.
  */
-import rateLimit from 'express-rate-limit';
-import { env } from '../config/env';
 
-function isRateLimitingDisabled(): boolean {
-  return String(process.env.DISABLE_RATE_LIMIT || '').toLowerCase() === 'true';
-}
-
-/** Standardized rate limit error response */
-const rateLimitHandler = (_req: any, res: any) => {
-  const requestId = _req.headers['x-request-id'] || 'unknown';
-  res.status(429).json({
-    error: 'Too many requests — please slow down',
-    code: 'RATE_LIMITED',
-    statusCode: 429,
-    requestId,
-    timestamp: new Date().toISOString(),
-  });
+/** No-op rate limiter middleware */
+const noOpRateLimiter = (_req: any, _res: any, next: any) => {
+  next();
 };
 
 /**
- * General API rate limiter — 200 requests per 15 minutes per IP.
- * Applies to all authenticated API endpoints.
+ * General API rate limiter — DISABLED (no-op)
  */
-export const apiRateLimiter = rateLimit({
-  windowMs: env.rateLimit.windowMs, // 15 minutes
-  max: env.rateLimit.max, // 200 requests
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Use X-Forwarded-For in production (behind proxy/load balancer)
-    return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
-  },
-  handler: rateLimitHandler,
-  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
-});
+export const apiRateLimiter = noOpRateLimiter;
 
 /**
- * Auth-specific rate limiter — stricter limits for login/register.
- * 20 requests per 15 minutes to prevent credential stuffing.
+ * Auth-specific rate limiter — DISABLED (no-op)
  */
-export const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 20, // 20 attempts
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
-  },
-  handler: rateLimitHandler,
-  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
-});
+export const authRateLimiter = noOpRateLimiter;
 
 /**
- * Upload rate limiter — 30 uploads per 15 minutes.
- * Protects against disk/bandwidth abuse.
+ * Upload rate limiter — DISABLED (no-op)
  */
-export const uploadRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 30,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
-  },
-  handler: rateLimitHandler,
-  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
-});
+export const uploadRateLimiter = noOpRateLimiter;
 
 /**
- * Public endpoint rate limiter — 100 requests per 15 minutes.
- * For unauthenticated endpoints like event lobbies and contact forms.
+ * Public endpoint rate limiter — DISABLED (no-op)
  */
-export const publicRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    return req.headers['x-forwarded-for']?.toString().split(',')[0].trim() || req.ip || 'unknown';
-  },
-  handler: rateLimitHandler,
-  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
-});
+export const publicRateLimiter = noOpRateLimiter;
 
 /**
- * Game debrief rate limiter — 10 requests per minute per user.
- * Prevents abuse of debrief calculation endpoints.
+ * Game debrief rate limiter — DISABLED (no-op)
  */
-export const debriefRateLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 10, // 10 calls per minute
-  standardHeaders: true,
-  legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Rate limit per user ID (from decoded token)
-    const userId = (req as any).user?.id || req.ip || 'anonymous';
-    return userId.toString();
-  },
-  handler: rateLimitHandler,
-  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
-});
+export const debriefRateLimiter = noOpRateLimiter;

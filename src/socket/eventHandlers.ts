@@ -4,7 +4,7 @@
  */
 import { Namespace } from 'socket.io';
 import { AuthenticatedSocket } from './types';
-import { addPresence, removePresence, getPresence, checkRateLimit } from './index';
+import { addPresence, removePresence, getPresence } from './index';
 import { EventMessagesService } from '../services/events-messages.service';
 import { query, queryOne } from '../config/database';
 import { sanitizeText } from '../utils/sanitize';
@@ -172,12 +172,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
         ack?.({ ok: false, error: 'Invalid data' });
         return;
       }
-      
-      if (!(await checkRateLimit(socket, 'chat:message'))) {
-        console.warn(`[Events] Rate limit hit for chat:message from user ${user.userId}`);
-        ack?.({ ok: false, error: 'Rate limited' });
-        return;
-      }
 
       // Verify the user is a participant and use their ACTUAL participant ID
       // verifyParticipant auto-inserts org members (including organizers) who bypassed the Lobby
@@ -235,8 +229,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
     socket.on('chat:typing', async (data: { eventId: string; isTyping: boolean }) => {
       if (!validateFields(data, ['eventId'])) return;
       try {
-        if (!(await checkRateLimit(socket, 'chat:typing'))) return;
-
         // Resolve display name once per connection
         if (!cachedDisplayName) {
           const participant = await verifyParticipant(data.eventId, user.userId, socket);
