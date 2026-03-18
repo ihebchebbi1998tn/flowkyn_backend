@@ -5,10 +5,12 @@ import { Namespace } from 'socket.io';
 import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
 import { GamesService } from '../services/games.service';
+import { CoffeeRouletteConfigService } from '../services/coffeeRouletteConfig.service';
 import { query, queryOne, transaction } from '../config/database';
 import crypto from 'crypto';
 
 const gamesService = new GamesService();
+const coffeeService = new CoffeeRouletteConfigService();
 
 // Zod schemas for game socket events
 const gameJoinSchema = z.object({
@@ -255,11 +257,14 @@ async function reduceTwoTruthsState(args: {
 type CoffeeState = {
   kind: 'coffee-roulette';
   phase: 'waiting' | 'matching' | 'chatting' | 'complete';
+  configId?: string; // ID of the coffee roulette configuration for this event
   pairs: Array<{
     id: string;
     person1: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
     person2: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
     topic: string;
+    topicId?: string; // ID of the selected topic
+    sessionId?: string; // Pair session ID for tracking
   }>;
   startedChatAt: string | null;
   chatEndsAt?: string;
@@ -267,37 +272,53 @@ type CoffeeState = {
   promptsUsed: number;
   /** When true, clients should ask whether to continue or end */
   decisionRequired: boolean;
+  /** Track questions used in session */
+  usedQuestionIndices?: number[];
 };
 
-const COFFEE_TOPICS = [
-  "What's the most interesting thing you've learned recently?",
-  "If you could have dinner with anyone (alive or dead), who would it be?",
-  "What's a hobby or skill you'd love to pick up?",
-  "What was your first job? What did you learn from it?",
-  "If you could live anywhere in the world for a year, where would you go?",
-  "What's the best piece of advice you've ever received?",
-  "What's a book or movie that completely changed your perspective?",
-  "If you had to eat one meal for the rest of your life, what would it be?",
-  "What's the most spontaneous thing you've ever done?",
-  "Which fictional character do you relate to the most?",
-  "What's something you're surprisingly good at?",
-];
-
 /**
- * Generate a deterministic topic for a pair based on pair ID and prompt count.
- * Both users in the pair will always see the same topic using this method.
+ * Get dynamic topic from Coffee Roulette configuration for an event.
+ * Falls back to fallback topic if no configuration exists.
  */
-function getDeterministicTopic(pairId: string, promptIndex: number = 0): string {
-  // Create a simple hash from pairId + promptIndex
-  const combined = `${pairId}|${promptIndex}`;
-  let hash = 0;
-  for (let i = 0; i < combined.length; i++) {
-    const char = combined.charCodeAt(i);
-    hash = ((hash << 5) - hash) + char;
-    hash = hash & hash; // Convert to 32bit integer
+async function getDynamicTopic(eventId: string): Promise<{ text: string; id?: string }> {
+  try {
+    // Get configuration for the event
+    const config = await queryOne(
+      'SELECT id FROM coffee_roulette_config WHERE event_id = $1',
+      [eventId]
+    );
+
+    if (config) {
+      // Use service to select topic based on configuration strategy
+      const selectedTopic = await coffeeService.selectTopic(config.id);
+      if (selectedTopic) {
+        return {
+          text: selectedTopic.title || 'Let\'s chat!',
+          id: selectedTopic.id,
+        };
+      }
+    }
+  } catch (error) {
+    console.error('Error selecting dynamic topic:', error);
   }
-  const index = Math.abs(hash) % COFFEE_TOPICS.length;
-  return COFFEE_TOPICS[index];
+
+  // Fallback to default topics if no configuration or selection failed
+  const FALLBACK_TOPICS = [
+    "What's the most interesting thing you've learned recently?",
+    "If you could have dinner with anyone (alive or dead), who would it be?",
+    "What's a hobby or skill you'd love to pick up?",
+    "What was your first job? What did you learn from it?",
+    "If you could live anywhere in the world for a year, where would you go?",
+    "What's the best piece of advice you've ever received?",
+    "What's a book or movie that completely changed your perspective?",
+    "If you had to eat one meal for the rest of your life, what would it be?",
+    "What's the most spontaneous thing you've ever done?",
+    "Which fictional character do you relate to the most?",
+    "What's something you're surprisingly good at?",
+  ];
+
+  const randomTopic = FALLBACK_TOPICS[Math.floor(Math.random() * FALLBACK_TOPICS.length)];
+  return { text: randomTopic };
 }
 
 async function reduceCoffeeState(args: {
@@ -318,6 +339,12 @@ async function reduceCoffeeState(args: {
   };
 
   if (actionType === 'coffee:shuffle') {
+    // Get configuration ID for the event
+    const configRow = await queryOne(
+      'SELECT id FROM coffee_roulette_config WHERE event_id = $1',
+      [eventId]
+    );
+
     const participants = await query<{ id: string; name: string; avatar: string | null }>(
       `SELECT p.id,
               COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') AS name,
@@ -359,15 +386,21 @@ async function reduceCoffeeState(args: {
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
       const pairId = crypto.randomUUID();
+      
+      // Get dynamic topic for the pair
+      const topicData = await getDynamicTopic(eventId);
+      
       pairs.push({
         id: pairId,
         person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
         person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p2.avatar || null },
-        topic: getDeterministicTopic(pairId, 0), // Use deterministic topic based on pair ID
+        topic: topicData.text,
+        topicId: topicData.id,
       });
     }
     return {
       ...base,
+      configId: configRow?.id,
       phase: 'matching',
       pairs,
       startedChatAt: null,
@@ -399,12 +432,13 @@ async function reduceCoffeeState(args: {
     const nextPromptsUsed = (base.promptsUsed || 0) + 1;
     const shouldAsk = nextPromptsUsed >= 6;
 
-    // Rotate topics for all pairs using deterministic selection based on promptsUsed
-    // This ensures both users in a pair see the same new topic
-    const updatedPairs = (base.pairs || []).map((pair) => ({
-      ...pair,
-      topic: getDeterministicTopic(pair.id, nextPromptsUsed),
-    }));
+    // Get new topics for all pairs from dynamic configuration
+    const updatedPairs = await Promise.all(
+      (base.pairs || []).map(async (pair) => ({
+        ...pair,
+        topic: (await getDynamicTopic(eventId)).text,
+      }))
+    );
 
     return {
       ...base,
