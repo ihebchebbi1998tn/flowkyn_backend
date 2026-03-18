@@ -144,6 +144,9 @@ export interface GameSessionRow {
   metadata: any;
   started_at: Date;
   ended_at: Date | null;
+  discussion_ends_at?: Date | null;
+  debrief_sent_at?: Date | null;
+  role_assignment_completed_at?: Date | null;
 }
 
 export interface GameRoundRow {

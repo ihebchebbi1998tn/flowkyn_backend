@@ -509,4 +509,95 @@ export class GamesController {
       next(err);
     }
   }
+
+  /**
+   * Strategic Escape Challenge — get debrief results for a session.
+   * Returns aggregated rankings, action counts, and statistics.
+   */
+  async getDebriefResults(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can view debrief results', 403, 'FORBIDDEN');
+
+      const session = await gamesService.getSession(req.params.sessionId);
+
+      // Verify caller is admin/moderator of the event's organization
+      const member = await queryOne<{ role_name: string }>(
+        `SELECT r.name as role_name
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+        [session.event_id, req.user.userId]
+      );
+
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can view debrief results', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const results = await gamesService.getDebriefResults(req.params.sessionId);
+      res.json(results);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — start the debrief phase.
+   * Calculates final results, updates session state, and emits notifications.
+   */
+  async startDebrief(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      if (!req.user) throw new AppError('Only authenticated users can start debrief', 403, 'FORBIDDEN');
+
+      const session = await gamesService.getSession(req.params.sessionId);
+
+      // Validate session state — can only start debrief if in progress
+      if (session.status !== 'in_progress') {
+        throw new AppError(`Cannot start debrief — session is in '${session.status}' status (expected 'in_progress')`, 400, 'SESSION_NOT_ACTIVE');
+      }
+
+      // Validate session hasn't already sent debrief
+      if (session.debrief_sent_at !== null && session.debrief_sent_at !== undefined) {
+        throw new AppError('Debrief has already been sent for this session', 400, 'SESSION_ALREADY_FINISHED');
+      }
+
+      // Verify caller is admin/moderator of the event's organization
+      const member = await queryOne<{ role_name: string }>(
+        `SELECT r.name as role_name
+         FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+        [session.event_id, req.user.userId]
+      );
+
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can start debrief', 403, 'INSUFFICIENT_PERMISSIONS');
+      }
+
+      const result = await gamesService.startDebrief(req.params.sessionId);
+
+      // Emit WebSocket event to notify all participants
+      emitGameUpdate(req.params.sessionId, 'game:debrief_started', {
+        sessionId: req.params.sessionId,
+        phase: 'debrief',
+        resultsCount: result.results.rankings.length,
+        timestamp: new Date().toISOString(),
+      });
+
+      // Log audit trail
+      await audit.create(null, req.user.userId, 'GAME_START_DEBRIEF', {
+        sessionId: req.params.sessionId,
+        resultsCount: result.results.rankings.length,
+        participantCount: result.results.participantCount,
+        totalActions: result.results.totalActions,
+      });
+
+      res.status(200).json(result);
+    } catch (err) {
+      next(err);
+    }
+  }
 }

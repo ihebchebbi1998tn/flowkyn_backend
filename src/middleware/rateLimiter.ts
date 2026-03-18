@@ -90,3 +90,21 @@ export const publicRateLimiter = rateLimit({
   handler: rateLimitHandler,
   skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
 });
+
+/**
+ * Game debrief rate limiter — 10 requests per minute per user.
+ * Prevents abuse of debrief calculation endpoints.
+ */
+export const debriefRateLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // 10 calls per minute
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Rate limit per user ID (from decoded token)
+    const userId = (req as any).user?.id || req.ip || 'anonymous';
+    return userId.toString();
+  },
+  handler: rateLimitHandler,
+  skip: () => env.nodeEnv !== 'production' || isRateLimitingDisabled(),
+});

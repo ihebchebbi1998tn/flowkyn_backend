@@ -374,6 +374,11 @@ export class GamesService {
    * stable keys (industryKey/crisisKey/difficultyKey) and human-readable labels.
    * Existing callers that only send labels remain supported.
    */
+  /**
+   * CRITICAL: Create a Strategic Escape session with discussion timeout.
+   * Sets discussion_ends_at to 30 minutes from now by default.
+   * The discussion timer job will auto-close this and trigger debrief.
+   */
   async createStrategicSession(
     eventId: string,
     config: {
@@ -383,12 +388,25 @@ export class GamesService {
       industryKey?: string;
       crisisKey?: string;
       difficultyLabel?: string;
+      discussionDurationMinutes?: number;  // Optional: custom timeout (default 30 min)
     }
   ) {
     const gameType = await this.getGameTypeByKey('strategic-escape');
     if (!gameType) throw new AppError('Strategic Escape game type not found', 404, 'NOT_FOUND');
 
     const session = await this.startSession(eventId, gameType.id);
+
+    // Set discussion timeout (default 30 minutes)
+    const durationMinutes = config.discussionDurationMinutes || 30;
+    const discussionEndsAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+
+    // Update session with discussion timeout
+    await query(
+      `UPDATE game_sessions 
+       SET discussion_ends_at = $1
+       WHERE id = $2`,
+      [discussionEndsAt, session.id]
+    );
 
     const initialState = {
       kind: 'strategic-escape',
@@ -402,6 +420,9 @@ export class GamesService {
       crisisLabel: config.crisisType,
       difficultyLabel: config.difficultyLabel || config.difficulty,
       rolesAssigned: false,
+      // Discussion timing
+      discussionDurationMinutes: durationMinutes,
+      discussionEndsAt: discussionEndsAt.toISOString(),
     };
 
     await this.saveSnapshot(session.id, initialState);
