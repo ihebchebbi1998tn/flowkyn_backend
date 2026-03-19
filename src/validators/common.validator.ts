@@ -38,6 +38,21 @@ export const memberIdParam = z.object({
   memberId: z.string().uuid('Invalid UUID format'),
 });
 
+/** Validates `configId` path parameter as a UUID */
+export const configIdParam = z.object({
+  configId: z.string().uuid('Invalid UUID format'),
+});
+
+/** Validates `topicId` path parameter as a UUID */
+export const topicIdParam = z.object({
+  topicId: z.string().uuid('Invalid UUID format'),
+});
+
+/** Validates `questionId` path parameter as a UUID */
+export const questionIdParam = z.object({
+  questionId: z.string().uuid('Invalid UUID format'),
+});
+
 /** Validates `orgId` + `memberId` path parameters */
 export const orgMemberParams = z.object({
   orgId: z.string().uuid('Invalid UUID format'),

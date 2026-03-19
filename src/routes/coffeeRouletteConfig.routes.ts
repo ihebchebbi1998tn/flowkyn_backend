@@ -46,7 +46,9 @@
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { validate } from '../middleware/validate';
 import * as controller from '../controllers/coffeeRouletteConfig.controller';
+import { configIdParam, eventIdParam, questionIdParam, sessionIdParam, topicIdParam } from '../validators/common.validator';
 
 const router = Router();
 
@@ -56,25 +58,25 @@ router.use(authenticate);
 // ─────────────────────── CONFIGURATION ───────────────────────────────
 
 router.post('/config', controller.createConfig);
-router.get('/config/:eventId', controller.getConfig);
-router.get('/config/:eventId/with-details', controller.getConfigWithDetails);
-router.patch('/config/:configId', controller.updateConfig);
-router.delete('/config/:configId', controller.deleteConfig);
+router.get('/config/:eventId', validate(eventIdParam, 'params'), controller.getConfig);
+router.get('/config/:eventId/with-details', validate(eventIdParam, 'params'), controller.getConfigWithDetails);
+router.patch('/config/:configId', validate(configIdParam, 'params'), controller.updateConfig);
+router.delete('/config/:configId', validate(configIdParam, 'params'), controller.deleteConfig);
 
 // ─────────────────────── TOPICS ───────────────────────────────
 
 router.post('/topics', controller.createTopic);
-router.get('/topics/:configId', controller.getTopics);
-router.get('/topics/:topicId/details', controller.getTopicWithQuestions);
-router.patch('/topics/:topicId', controller.updateTopic);
-router.delete('/topics/:topicId', controller.deleteTopic);
+router.get('/topics/:configId', validate(configIdParam, 'params'), controller.getTopics);
+router.get('/topics/:topicId/details', validate(topicIdParam, 'params'), controller.getTopicWithQuestions);
+router.patch('/topics/:topicId', validate(topicIdParam, 'params'), controller.updateTopic);
+router.delete('/topics/:topicId', validate(topicIdParam, 'params'), controller.deleteTopic);
 
 // ─────────────────────── QUESTIONS ───────────────────────────────
 
 router.post('/questions', controller.createQuestion);
-router.get('/questions/:configId', controller.getQuestions);
-router.patch('/questions/:questionId', controller.updateQuestion);
-router.delete('/questions/:questionId', controller.deleteQuestion);
+router.get('/questions/:configId', validate(configIdParam, 'params'), controller.getQuestions);
+router.patch('/questions/:questionId', validate(questionIdParam, 'params'), controller.updateQuestion);
+router.delete('/questions/:questionId', validate(questionIdParam, 'params'), controller.deleteQuestion);
 
 // ─────────────────────── MAPPINGS ───────────────────────────────
 
@@ -90,13 +92,13 @@ router.post('/session-questions', controller.getSessionQuestions);
 
 // ─────────────────────── STATISTICS ───────────────────────────────
 
-router.get('/stats/config/:configId', controller.getConfigStats);
-router.get('/stats/topic/:topicId', controller.getTopicStats);
+router.get('/stats/config/:configId', validate(configIdParam, 'params'), controller.getConfigStats);
+router.get('/stats/topic/:topicId', validate(topicIdParam, 'params'), controller.getTopicStats);
 
 // ─────────────────────── SESSION TRACKING ───────────────────────────────
 
 router.post('/sessions/start', controller.startPairSession);
-router.post('/sessions/:sessionId/end', controller.endPairSession);
-router.post('/sessions/:sessionId/add-question', controller.addQuestionToSession);
+router.post('/sessions/:sessionId/end', validate(sessionIdParam, 'params'), controller.endPairSession);
+router.post('/sessions/:sessionId/add-question', validate(sessionIdParam, 'params'), controller.addQuestionToSession);
 
 export default router;

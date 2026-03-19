@@ -182,9 +182,14 @@ export class BugReportController {
       // Verify bug report exists and user can access it
       await bugReportService.getById(req.params.id, req.user?.userId);
 
-      // TODO: Upload file to cloud storage (S3, Azure, etc.)
-      // For now, generate a mock URL
-      const fileUrl = `/reports/${req.params.id}/attachments/${req.file.originalname}`;
+      const { isAllowedFileType, saveFile } = await import('../utils/upload');
+      if (!isAllowedFileType(req.file.mimetype)) {
+        throw new AppError(`File type "${req.file.mimetype}" is not allowed`, 400, 'FILE_TYPE_NOT_ALLOWED');
+      }
+
+      // Store locally under uploads/bug-reports/<reportId>/... and serve via /uploads static route
+      const { url } = saveFile(req.file.buffer, req.file.originalname, `bug-reports/${req.params.id}`);
+      const fileUrl = url;
 
       const attachment = await bugReportService.addAttachment({
         bugReportId: req.params.id,
@@ -214,7 +219,17 @@ export class BugReportController {
    */
   async deleteAttachment(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      await bugReportService.deleteAttachment(req.params.attachmentId);
+      const fileUrl = await bugReportService.deleteAttachment(req.params.attachmentId);
+      if (fileUrl) {
+        const { deleteFile } = await import('../utils/upload');
+        // Support both absolute and relative URLs; extract the path after `/uploads/`
+        const marker = '/uploads/';
+        const idx = fileUrl.indexOf(marker);
+        if (idx >= 0) {
+          const rel = fileUrl.slice(idx + marker.length);
+          deleteFile(rel);
+        }
+      }
 
       await auditService.create(null, req.user!.userId, 'BUG_REPORT_ATTACHMENT_DELETE', {
         reportId: req.params.id,

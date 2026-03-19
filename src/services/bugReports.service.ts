@@ -436,15 +436,15 @@ export class BugReportService {
   /**
    * Delete an attachment
    */
-  async deleteAttachment(attachmentId: string): Promise<string> {
-    const result = await queryOne(
-      'DELETE FROM bug_report_attachments WHERE id = $1 RETURNING id',
+  async deleteAttachment(attachmentId: string): Promise<string | null> {
+    const result = await queryOne<{ file_url: string }>(
+      'DELETE FROM bug_report_attachments WHERE id = $1 RETURNING file_url',
       [attachmentId],
     );
     if (!result) {
       throw new AppError('Attachment not found', 404, 'NOT_FOUND');
     }
-    return attachmentId;
+    return result.file_url || null;
   }
 
   /**
