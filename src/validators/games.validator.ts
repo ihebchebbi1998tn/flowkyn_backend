@@ -31,3 +31,8 @@ export const createStrategicSessionSchema = z.object({
   difficultyLabel: z.string().min(1).max(50).optional(),
 });
 
+// Strategic Escape Challenge: private per-participant notes
+export const updateStrategicNotesSchema = z.object({
+  content: z.string().max(5000).optional().default(''),
+});
+

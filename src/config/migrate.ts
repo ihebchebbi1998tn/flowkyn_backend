@@ -675,6 +675,39 @@ const migrations: { version: number; name: string; sql: string }[] = [
         ON strategic_roles(game_session_id, revealed_at);
     `,
   },
+  {
+    version: 16,
+    name: 'strategic_ready_prompts_notes',
+    sql: `
+      -- Track when a participant indicates they're ready to start discussion
+      ALTER TABLE strategic_roles
+        ADD COLUMN IF NOT EXISTS ready_at TIMESTAMP;
+
+      CREATE INDEX IF NOT EXISTS idx_strategic_roles_ready_at
+        ON strategic_roles(game_session_id, ready_at);
+
+      -- Track per-participant role prompt rotation (role-specific prompts shown in UI)
+      ALTER TABLE strategic_roles
+        ADD COLUMN IF NOT EXISTS prompt_index INT NOT NULL DEFAULT 0;
+      ALTER TABLE strategic_roles
+        ADD COLUMN IF NOT EXISTS prompt_updated_at TIMESTAMP;
+
+      CREATE INDEX IF NOT EXISTS idx_strategic_roles_prompt_index
+        ON strategic_roles(game_session_id, prompt_index);
+
+      -- Private notes per participant, per strategic session
+      CREATE TABLE IF NOT EXISTS strategic_notes (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        content TEXT NOT NULL DEFAULT '',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (game_session_id, participant_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_strategic_notes_session ON strategic_notes(game_session_id);
+    `,
+  },
 ];
 
 /**

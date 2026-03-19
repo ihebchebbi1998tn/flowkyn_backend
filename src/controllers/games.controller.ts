@@ -52,6 +52,24 @@ async function verifyParticipantOwnership(participantId: string, req: AuthReques
   throw new AppError('You do not own this participant', 403, 'FORBIDDEN');
 }
 
+/**
+ * Resolve the caller's participant_id for a given event.
+ * Supports both guests (from req.guest) and authenticated org members (via participants join).
+ */
+async function resolveCallerParticipantId(eventId: string, req: AuthRequest): Promise<string | null> {
+  if (req.guest) return req.guest.participantId;
+  if (!req.user) return null;
+
+  const row = await queryOne<{ id: string }>(
+    `SELECT p.id
+     FROM participants p
+     JOIN organization_members om ON om.id = p.organization_member_id
+     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+    [eventId, req.user.userId]
+  );
+  return row?.id || null;
+}
+
 export class GamesController {
   async listGameTypes(_req: AuthRequest, res: Response, next: NextFunction) {
     try {
@@ -419,14 +437,18 @@ export class GamesController {
         throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
       }
 
-      const roleRow = await queryOne<{ role_key: string }>(
-        `SELECT role_key
+      const roleRow = await queryOne<{ role_key: string; ready_at: string | null; revealed_at: string | null }>(
+        `SELECT role_key, ready_at, revealed_at
          FROM strategic_roles
          WHERE game_session_id = $1 AND participant_id = $2`,
         [req.params.sessionId, participantId]
       );
 
-      res.json(roleRow ? { roleKey: roleRow.role_key } : null);
+      res.json(
+        roleRow
+          ? { roleKey: roleRow.role_key, readyAt: roleRow.ready_at, revealedAt: roleRow.revealed_at }
+          : null
+      );
     } catch (err) {
       next(err);
     }
@@ -513,6 +535,170 @@ export class GamesController {
       const total = Number(row?.total || 0);
       const acknowledged = Number(row?.acknowledged || 0);
       res.json({ total, acknowledged, allAcknowledged: total > 0 && acknowledged >= total });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — mark current participant as "ready" (guest-safe).
+   */
+  async readyMyStrategicRole(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const result = await query(
+        `UPDATE strategic_roles
+         SET ready_at = COALESCE(ready_at, NOW())
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+
+      if ((result as any)?.rowCount === 0) {
+        throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+      }
+
+      res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — get aggregate "ready" status for the session (counts only).
+   */
+  async getStrategicRoleReadyStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const row = await queryOne<{ total: string; ready: string }>(
+        `WITH assigned AS (
+           SELECT sr.participant_id, sr.ready_at
+           FROM strategic_roles sr
+           WHERE sr.game_session_id = $1
+         )
+         SELECT
+           (SELECT COUNT(*)::text FROM assigned) as total,
+           (SELECT COUNT(*)::text FROM assigned WHERE ready_at IS NOT NULL) as ready`,
+        [req.params.sessionId]
+      );
+
+      const total = Number(row?.total || 0);
+      const ready = Number(row?.ready || 0);
+      res.json({ total, ready, allReady: total > 0 && ready >= total });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — get current participant's prompt state (index + last update).
+   */
+  async getMyStrategicRolePromptState(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const row = await queryOne<{ prompt_index: number; prompt_updated_at: string | null }>(
+        `SELECT prompt_index, prompt_updated_at
+         FROM strategic_roles
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+
+      if (!row) throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+      res.json({ promptIndex: row.prompt_index ?? 0, promptUpdatedAt: row.prompt_updated_at });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — advance current participant to the next prompt (idempotent by increment).
+   */
+  async advanceMyStrategicRolePrompt(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const row = await queryOne<{ prompt_index: number; prompt_updated_at: string }>(
+        `UPDATE strategic_roles
+         SET prompt_index = COALESCE(prompt_index, 0) + 1,
+             prompt_updated_at = NOW()
+         WHERE game_session_id = $1 AND participant_id = $2
+         RETURNING prompt_index, prompt_updated_at`,
+        [req.params.sessionId, participantId]
+      );
+
+      if (!row) throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+      res.json({ promptIndex: row.prompt_index ?? 0, promptUpdatedAt: row.prompt_updated_at });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — get current participant's private notes for this session.
+   */
+  async getMyStrategicNotes(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      // Guard: only allow notes if the role exists for this participant/session (same principle as revealed_at)
+      const hasRole = await queryOne<{ id: string }>(
+        `SELECT id FROM strategic_roles WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+      if (!hasRole) throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+
+      const row = await queryOne<{ content: string; updated_at: string }>(
+        `SELECT content, updated_at
+         FROM strategic_notes
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+
+      res.json({ content: row?.content ?? '', updatedAt: row?.updated_at ?? null });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — upsert current participant's private notes for this session.
+   */
+  async updateMyStrategicNotes(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+      const participantId = await resolveCallerParticipantId(session.event_id, req);
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const hasRole = await queryOne<{ id: string }>(
+        `SELECT id FROM strategic_roles WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+      if (!hasRole) throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+
+      const content = (req.body?.content ?? '') as string;
+
+      const row = await queryOne<{ content: string; updated_at: string }>(
+        `INSERT INTO strategic_notes (id, game_session_id, participant_id, content)
+         VALUES (uuid_generate_v4(), $1, $2, $3)
+         ON CONFLICT (game_session_id, participant_id)
+         DO UPDATE SET content = EXCLUDED.content, updated_at = NOW()
+         RETURNING content, updated_at`,
+        [req.params.sessionId, participantId, content]
+      );
+
+      res.json({ content: row?.content ?? content, updatedAt: row?.updated_at ?? null });
     } catch (err) {
       next(err);
     }

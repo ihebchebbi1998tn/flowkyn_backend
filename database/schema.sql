@@ -287,10 +287,27 @@ CREATE TABLE strategic_roles (
   role_key VARCHAR(50) NOT NULL,
   email_sent_at TIMESTAMP,
   revealed_at TIMESTAMP,
+  ready_at TIMESTAMP,
+  prompt_index INT NOT NULL DEFAULT 0,
+  prompt_updated_at TIMESTAMP,
   created_at TIMESTAMP NOT NULL DEFAULT NOW(),
   UNIQUE (game_session_id, participant_id)
 );
 CREATE INDEX idx_strategic_roles_session ON strategic_roles(game_session_id);
+CREATE INDEX idx_strategic_roles_ready_at ON strategic_roles(game_session_id, ready_at);
+CREATE INDEX idx_strategic_roles_prompt_index ON strategic_roles(game_session_id, prompt_index);
+
+-- ─── Strategic Notes (Strategic Escape) ───
+CREATE TABLE strategic_notes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  content TEXT NOT NULL DEFAULT '',
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (game_session_id, participant_id)
+);
+CREATE INDEX idx_strategic_notes_session ON strategic_notes(game_session_id);
 
 -- ─── Game Rounds ───
 CREATE TABLE game_rounds (

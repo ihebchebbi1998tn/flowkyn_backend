@@ -15,7 +15,7 @@ import { authenticate } from '../middleware/auth';
 import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
 import { debriefRateLimiter } from '../middleware/rateLimiter';
-import { startSessionSchema, submitActionSchema, createStrategicSessionSchema } from '../validators/games.validator';
+import { startSessionSchema, submitActionSchema, createStrategicSessionSchema, updateStrategicNotesSchema } from '../validators/games.validator';
 import { eventIdParam, sessionIdParam, uuidParam } from '../validators/common.validator';
 
 const router = Router();
@@ -47,6 +47,18 @@ router.post('/strategic-sessions/:sessionId/assign-roles', authenticateOrGuest, 
 router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicRole);
 router.post('/strategic-sessions/:sessionId/roles/me/ack', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.acknowledgeMyStrategicRole);
 router.get('/strategic-sessions/:sessionId/roles/reveal-status', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getStrategicRoleRevealStatus);
+router.post('/strategic-sessions/:sessionId/roles/me/ready', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.readyMyStrategicRole);
+router.get('/strategic-sessions/:sessionId/roles/ready-status', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getStrategicRoleReadyStatus);
+router.get('/strategic-sessions/:sessionId/roles/me/prompts', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicRolePromptState);
+router.post('/strategic-sessions/:sessionId/roles/me/prompts/next', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.advanceMyStrategicRolePrompt);
+router.get('/strategic-sessions/:sessionId/roles/me/notes', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicNotes);
+router.put(
+  '/strategic-sessions/:sessionId/roles/me/notes',
+  authenticateOrGuest,
+  validate(sessionIdParam, 'params'),
+  validate(updateStrategicNotesSchema),
+  ctrl.updateMyStrategicNotes
+);
 router.get('/strategic-sessions/:sessionId/debrief-results', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.getDebriefResults);
 router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.startDebrief);
 
