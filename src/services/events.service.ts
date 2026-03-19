@@ -343,4 +343,19 @@ export class EventsService {
     if (result.length === 0) throw new AppError('You are not a participant in this event', 404, 'NOT_PARTICIPANT');
     return { message: 'Left event' };
   }
+
+  /**
+   * Leave an event by participant ID (supports both members and guests).
+   * Soft-delete by setting left_at.
+   */
+  async leaveByParticipantId(eventId: string, participantId: string) {
+    const result = await query(
+      `UPDATE participants SET left_at = NOW()
+       WHERE event_id = $1 AND id = $2 AND left_at IS NULL
+       RETURNING id`,
+      [eventId, participantId]
+    );
+    if (result.length === 0) throw new AppError('You are not a participant in this event', 404, 'NOT_PARTICIPANT');
+    return { message: 'Left event' };
+  }
 }

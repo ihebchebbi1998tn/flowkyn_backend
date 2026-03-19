@@ -6,11 +6,13 @@ import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
 import { GamesService } from '../services/games.service';
 import { CoffeeRouletteConfigService } from '../services/coffeeRouletteConfig.service';
+import { EventsService } from '../services/events.service';
 import { query, queryOne, transaction } from '../config/database';
 import crypto from 'crypto';
 
 const gamesService = new GamesService();
 const coffeeService = new CoffeeRouletteConfigService();
+const eventsService = new EventsService();
 
 // Zod schemas for game socket events
 const gameJoinSchema = z.object({
@@ -772,6 +774,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
     console.log(`[Games] User ${user.userId} connected`);
 
     const joinedSessions = new Set<string>();
+    // Track participant IDs per joined session so disconnect cleanup can soft-delete correctly.
+    const joinedParticipantBySessionId = new Map<string, string>();
 
     // ─── Join game session room ───
     socket.on('game:join', async (data: { sessionId: string }, ack) => {
@@ -800,6 +804,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
         joinedSessions.add(data.sessionId);
+        joinedParticipantBySessionId.set(data.sessionId, participant.participantId);
 
         // Register socket mapping for targeted voice signaling.
         // This is needed because `coffee:voice_*` events must be forwarded only to the paired participant.
@@ -844,6 +849,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
       const roomId = `game:${data.sessionId}`;
       socket.leave(roomId);
       joinedSessions.delete(data.sessionId);
+      joinedParticipantBySessionId.delete(data.sessionId);
 
       // Remove any voice keys associated with this session for this socket.
       const keys = voiceKeysBySocket.get(socket.id);
@@ -1669,7 +1675,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
     });
 
     // ─── Disconnect cleanup ───
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', async (reason) => {
       console.log(`[Games] User ${user.userId} disconnected: ${reason}`);
 
       // Cleanup targeted voice signaling mappings.
@@ -1680,13 +1686,74 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       for (const sessionId of joinedSessions) {
+        const participantId = joinedParticipantBySessionId.get(sessionId);
+
+        // Mark participant as left in DB so they disappear from pairing + lobby lists.
+        if (participantId) {
+          try {
+            const session = await gamesService.getSession(sessionId);
+            await eventsService.leaveByParticipantId(session.event_id, participantId);
+          } catch (err) {
+            console.warn('[Games] disconnect leaveByParticipantId failed', {
+              sessionId,
+              participantId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        }
+
         socket.to(`game:${sessionId}`).emit('game:player_left', {
           userId: user.userId,
           sessionId,
           timestamp: new Date().toISOString(),
         });
+
+        // Coffee Roulette: if we were currently matching/chatting with this participant,
+        // re-run pairing so everyone sees the "next match" automatically.
+        if (participantId) {
+          const prevQueue = coffeeActionQueue.get(sessionId) ?? Promise.resolve();
+          const run = prevQueue.then(async () => {
+            try {
+              const [latestSnapshot, session] = await Promise.all([
+                gamesService.getLatestSnapshot(sessionId),
+                gamesService.getSession(sessionId),
+              ]);
+              const state = latestSnapshot?.state as any;
+              if (state?.kind !== 'coffee-roulette') return;
+              if (!['matching', 'chatting'].includes(state?.phase)) return;
+
+              const inPairs = (state?.pairs || []).some((p: any) => {
+                return (
+                  p?.person1?.participantId === participantId ||
+                  p?.person2?.participantId === participantId
+                );
+              });
+              if (!inPairs) return;
+
+              const next = await reduceCoffeeState({
+                eventId: session.event_id,
+                actionType: 'coffee:shuffle',
+                payload: {},
+                prev: (latestSnapshot?.state as any) || null,
+              });
+
+              await gamesService.saveSnapshot(sessionId, next);
+              gamesNs.to(`game:${sessionId}`).emit('game:data', { sessionId, gameData: next });
+            } catch (err) {
+              console.error('[Games] coffee rematch on disconnect failed', {
+                sessionId,
+                participantId,
+                error: err instanceof Error ? err.message : String(err),
+              });
+            }
+          });
+
+          coffeeActionQueue.set(sessionId, run.then(() => undefined).catch(() => undefined));
+          void run;
+        }
       }
       joinedSessions.clear();
+      joinedParticipantBySessionId.clear();
     });
   });
 }
