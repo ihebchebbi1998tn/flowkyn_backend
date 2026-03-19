@@ -1277,7 +1277,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
             partnerParticipantId,
             partnerKey,
           });
-          ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
+          // Not fatal: we already cached the offer above.
+          // The answerer can later call `coffee:voice_request_offer` to retrieve it.
+          ack?.({ ok: true });
           return;
         }
 
