@@ -839,6 +839,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
               activeRoundId: activeRound?.id || null,
               participantId: participant.participantId,
               snapshot: snapshot?.state || null,
+              snapshotRevisionId: snapshot?.id || null,
+              snapshotCreatedAt: snapshot?.created_at || null,
               // "Admin" here means "can control game flow" for UI purposes.
               isAdmin: !!admin,
             },
@@ -1011,8 +1013,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
             delete publiclySafeState.correctLieId;
           }
 
-          await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: publiclySafeState });
+          const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+            sessionId: data.sessionId,
+            gameData: publiclySafeState,
+            snapshotRevisionId: savedSnapshot?.id || null,
+            snapshotCreatedAt: savedSnapshot?.created_at || null,
+          });
         }
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
@@ -1031,8 +1038,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
               prev: (latestSnapshot?.state as any) || null,
             });
 
-            await gamesService.saveSnapshot(data.sessionId, next);
-            gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+            gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+              sessionId: data.sessionId,
+              gameData: next,
+              snapshotRevisionId: savedSnapshot?.id || null,
+              snapshotCreatedAt: savedSnapshot?.created_at || null,
+            });
 
             // If requested, also close the DB session and broadcast game:ended.
             if (data.actionType === 'coffee:end_and_finish') {
@@ -1067,8 +1079,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
             payload: data.payload,
             prev: (latest?.state as any) || null,
           });
-          await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+          const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+          gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+            sessionId: data.sessionId,
+            gameData: next,
+            snapshotRevisionId: savedSnapshot?.id || null,
+            snapshotCreatedAt: savedSnapshot?.created_at || null,
+          });
         }
       } catch (err: any) {
         console.error(`[Games] game:action error:`, err.message);
@@ -1191,6 +1208,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
             endedAt: session.ended_at,
             activeRoundId: activeRound?.id || null,
             snapshot: snapshot?.state || null,
+            snapshotRevisionId: snapshot?.id || null,
+            snapshotCreatedAt: snapshot?.created_at || null,
           },
         });
       } catch (err: any) {
@@ -1745,8 +1764,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
                 prev: (latestSnapshot?.state as any) || null,
               });
 
-              await gamesService.saveSnapshot(sessionId, next);
-              gamesNs.to(`game:${sessionId}`).emit('game:data', { sessionId, gameData: next });
+              const savedSnapshot = await gamesService.saveSnapshot(sessionId, next);
+              gamesNs.to(`game:${sessionId}`).emit('game:data', {
+                sessionId,
+                gameData: next,
+                snapshotRevisionId: savedSnapshot?.id || null,
+                snapshotCreatedAt: savedSnapshot?.created_at || null,
+              });
             } catch (err) {
               console.error('[Games] coffee rematch on disconnect failed', {
                 sessionId,
