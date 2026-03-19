@@ -171,33 +171,91 @@ export class GamesController {
 
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      // Authorization: default is admins/moderators only. When ALLOW_PARTICIPANT_GAME_CONTROL=true,
-      // any active/pending org member can start a session for the event.
-      if (!req.user) throw new AppError('Only authenticated users can start game sessions', 403, 'FORBIDDEN');
+      const eventId = req.params.eventId;
+      const callerInfo = {
+        userId: req.user?.userId ?? null,
+        guestParticipantId: req.guest?.participantId ?? null,
+        guestTokenEventId: req.guest?.eventId ?? null,
+      };
+      console.log('[GamesController] startSession', { eventId, ...callerInfo });
 
-      const member = await queryOne<{ id: string; role_name: string }>(
-        `SELECT om.id, r.name as role_name FROM organization_members om
-         JOIN roles r ON r.id = om.role_id
-         JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
-        [req.params.eventId, req.user.userId]
-      );
-      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
-      const allow = await allowParticipantGameControlForEvent(req.params.eventId);
-      if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
-        throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
+      // When ALLOW_PARTICIPANT_GAME_CONTROL=true:
+      // - authenticated users: allow members to start
+      // - guests: allow guests (participant records) to start
+      // When false:
+      // - authenticated users: only owner/admin/moderator
+      // - guests: forbid (no org role available)
+      const allow = await allowParticipantGameControlForEvent(eventId);
+
+      if (req.user) {
+        const member = await queryOne<{ id: string; role_name: string }>(
+          `SELECT om.id, r.name as role_name FROM organization_members om
+           JOIN roles r ON r.id = om.role_id
+           JOIN events e ON e.organization_id = om.organization_id
+           WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+          [eventId, req.user.userId]
+        );
+        if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+
+        if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
+          throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
+        }
+      } else if (req.guest) {
+        // Defense-in-depth: make sure the guest token is for the same event being requested.
+        if (req.guest.eventId !== eventId) {
+          throw new AppError('Forbidden', 403, 'FORBIDDEN');
+        }
+
+        const guestParticipant = await queryOne<{ id: string }>(
+          `SELECT id
+           FROM participants
+           WHERE id = $1
+             AND event_id = $2
+             AND participant_type = 'guest'
+             AND left_at IS NULL`,
+          [req.guest.participantId, eventId]
+        );
+        if (!guestParticipant) {
+          throw new AppError('You are not a participant in this event.', 403, 'NOT_PARTICIPANT');
+        }
+
+        if (!allow) {
+          throw new AppError('Forbidden', 403, 'FORBIDDEN');
+        }
+      } else {
+        // Should not happen because this route uses authenticateOrGuest.
+        throw new AppError('Authorization required', 401, 'AUTH_MISSING_TOKEN');
       }
 
       const { game_type_id, total_rounds } = req.body;
-      const session = await gamesService.startSession(req.params.eventId, game_type_id, total_rounds);
+      const session = await gamesService.startSession(eventId, game_type_id, total_rounds);
 
       const { emitEventNotification } = await import('../socket/emitter');
-      emitEventNotification(req.params.eventId, 'game:session_created', {
+      emitEventNotification(eventId, 'game:session_created', {
         sessionId: session.id,
         gameTypeId: session.game_type_id,
       });
 
-      await audit.create(null, req.user.userId, 'GAME_START_SESSION', { eventId: req.params.eventId, sessionId: session.id, gameTypeId: req.body.game_type_id });
+      await audit.create(
+        null,
+        req.user?.userId ?? null,
+        'GAME_START_SESSION',
+        {
+          eventId,
+          sessionId: session.id,
+          gameTypeId: req.body.game_type_id,
+          startedAsGuest: !!req.guest,
+          guestParticipantId: req.guest?.participantId ?? null,
+        }
+      );
+
+      console.log('[GamesController] startSession created', {
+        eventId,
+        sessionId: session.id,
+        gameTypeId: session.game_type_id,
+        allowParticipantGameControl: allow,
+        startedAsGuest: !!req.guest,
+      });
       res.status(201).json(session);
     } catch (err) { next(err); }
   }

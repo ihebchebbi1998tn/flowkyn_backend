@@ -34,7 +34,7 @@ router.get('/voice/ice-servers', authenticateOrGuest, ctrl.getIceServers);
 router.get('/voice/ice-servers-public', ctrl.getIceServersPublic);
 
 // Game sessions (under events) — admin-only operations
-router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
+router.post('/events/:eventId/game-sessions', authenticateOrGuest, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
 // Strategic Escape Challenge sessions
 router.post(
   '/events/:eventId/strategic-sessions',
