@@ -4,6 +4,8 @@ import { ContactController } from '../controllers/contact.controller';
 import { EarlyAccessController } from '../controllers/earlyAccess.controller';
 import { authenticate } from '../middleware/auth';
 import { requireSuperAdmin } from '../config/superAdmin';
+import { validate } from '../middleware/validate';
+import { earlyAccessAdminSendCredentialsSchema } from '../validators/earlyAccess.validator';
 
 const router = Router();
 const ctrl = new AdminController();
@@ -43,5 +45,6 @@ router.delete('/contact/:id', contactCtrl.delete);
 
 // Early access submissions
 router.get('/early-access', earlyAccessCtrl.list);
+router.post('/early-access/:id/send-credentials', validate(earlyAccessAdminSendCredentialsSchema), earlyAccessCtrl.sendCredentials);
 
 export { router as adminRoutes };

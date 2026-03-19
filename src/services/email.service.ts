@@ -9,6 +9,7 @@ import {
   organizationInvitationTemplate,
   eventInvitationTemplate,
   strategicRoleAssignmentTemplate,
+  earlyAccessCredentialsTemplate,
 } from '../emails';
 
 const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
@@ -53,12 +54,18 @@ verifySMTPWithRetry().catch(err => {
 // Export flag for testing
 export const isSMTPVerified = () => smtpVerified;
 
-type EmailType = 'verify_account' | 'reset_password' | 'organization_invitation' | 'event_invitation' | 'strategic_role_assignment';
+type EmailType =
+  | 'verify_account'
+  | 'reset_password'
+  | 'organization_invitation'
+  | 'event_invitation'
+  | 'strategic_role_assignment'
+  | 'early_access_credentials';
 
 interface EmailOptions {
   to: string;
   type: EmailType;
-  data: Record<string, string | undefined>;
+  data: Record<string, string | boolean | undefined>;
   /** User's preferred language (e.g., 'en', 'fr', 'de'). Defaults to 'en'. */
   lang?: string;
 }
@@ -66,35 +73,45 @@ interface EmailOptions {
 /**
  * Build subject + HTML for an email using the appropriate template.
  */
-function buildEmail(type: EmailType, data: Record<string, string | undefined>, lang?: string): { subject: string; html: string } {
+function buildEmail(type: EmailType, data: Record<string, string | boolean | undefined>, lang?: string): { subject: string; html: string } {
+  const getString = (key: string): string => (typeof data[key] === 'string' ? (data[key] as string) : '');
   switch (type) {
     case 'verify_account':
-      return verifyAccountTemplate({ link: data.link || '', name: data.name || '', otpCode: data.otpCode || '', lang });
+      return verifyAccountTemplate({ link: getString('link'), name: getString('name'), otpCode: getString('otpCode'), lang });
     case 'reset_password':
-      return resetPasswordTemplate({ link: data.link || '', name: data.name || '', lang });
+      return resetPasswordTemplate({ link: getString('link'), name: getString('name'), lang });
     case 'organization_invitation':
-      return organizationInvitationTemplate({ link: data.link || '', orgName: data.orgName || '', lang });
+      return organizationInvitationTemplate({ link: getString('link'), orgName: getString('orgName'), lang });
     case 'event_invitation':
       return eventInvitationTemplate({
-        link: data.link || '',
-        eventTitle: data.eventTitle || '',
-        startTime: data.startTime,
-        endTime: data.endTime,
+        link: getString('link'),
+        eventTitle: getString('eventTitle'),
+        startTime: getString('startTime') || undefined,
+        endTime: getString('endTime') || undefined,
         lang
       });
     case 'strategic_role_assignment':
       return strategicRoleAssignmentTemplate({
         lang,
-        name: data.name || '',
-        orgName: data.orgName || '',
-        eventTitle: data.eventTitle || '',
-        industryLabel: data.industryLabel || '',
-        crisisLabel: data.crisisLabel || '',
-        difficultyLabel: data.difficultyLabel || '',
-        roleName: data.roleName || '',
-        roleBrief: data.roleBrief || '',
-        roleSecretInstructions: data.roleSecretInstructions || '',
-        eventLink: data.eventLink || '',
+        name: getString('name'),
+        orgName: getString('orgName'),
+        eventTitle: getString('eventTitle'),
+        industryLabel: getString('industryLabel'),
+        crisisLabel: getString('crisisLabel'),
+        difficultyLabel: getString('difficultyLabel'),
+        roleName: getString('roleName'),
+        roleBrief: getString('roleBrief'),
+        roleSecretInstructions: getString('roleSecretInstructions'),
+        eventLink: getString('eventLink'),
+      });
+    case 'early_access_credentials':
+      return earlyAccessCredentialsTemplate({
+        name: typeof data.name === 'string' ? data.name : '',
+        email: typeof data.email === 'string' ? data.email : '',
+        password: typeof data.password === 'string' ? data.password : '',
+        passwordResetApplied: typeof data.passwordResetApplied === 'boolean' ? data.passwordResetApplied : true,
+        loginUrl: typeof data.loginUrl === 'string' ? data.loginUrl : '',
+        personalizedMessage: typeof data.personalizedMessage === 'string' ? data.personalizedMessage : '',
       });
   }
 }

@@ -7,3 +7,13 @@ export const earlyAccessSubmissionSchema = z.object({
   companyName: z.string().trim().max(255).optional().default(''),
 });
 
+export const earlyAccessAdminSendCredentialsSchema = z.object({
+  personalizedMessage: z
+    .string()
+    .trim()
+    .max(3000, 'Message is too long')
+    .optional()
+    .default(''),
+  resetPasswordIfExists: z.boolean().optional().default(true),
+});
+
