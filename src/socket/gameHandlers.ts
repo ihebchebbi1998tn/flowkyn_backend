@@ -378,7 +378,7 @@ async function reduceCoffeeState(args: {
   payload: any;
   prev: CoffeeState | null;
 }): Promise<CoffeeState> {
-  const { eventId, actionType, prev } = args;
+  const { eventId, actionType, payload, prev } = args;
 
   const base: CoffeeState = prev || {
     kind: 'coffee-roulette',
@@ -443,16 +443,18 @@ async function reduceCoffeeState(args: {
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
 
+    // Sync requirement:
+    // Pick ONE topic per shuffle so every pair (and both talkers) sees the same
+    // "Today's Topic" at the same prompt index.
+    const topicData = await getDynamicTopic(eventId);
+
     const pairs: CoffeeState['pairs'] = [];
     for (let i = 0; i < shuffled.length; i += 2) {
       if (i + 1 >= shuffled.length) break;
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
       const pairId = crypto.randomUUID();
-      
-      // Get dynamic topic for the pair
-      const topicData = await getDynamicTopic(eventId);
-      
+
       pairs.push({
         id: pairId,
         person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
@@ -492,16 +494,29 @@ async function reduceCoffeeState(args: {
     // Only relevant during an active chat
     if (base.phase !== 'chatting') return base;
 
+    // Prevent stale "next prompt" actions from desyncing state.
+    const expectedPromptsUsed = payload?.expectedPromptsUsed;
+    if (typeof expectedPromptsUsed === 'number' && expectedPromptsUsed !== base.promptsUsed) {
+      console.warn('[CoffeeRoulette] Ignoring stale coffee:next_prompt', {
+        eventId,
+        expectedPromptsUsed,
+        serverPromptsUsed: base.promptsUsed,
+        phase: base.phase,
+      });
+      return base;
+    }
+
     const nextPromptsUsed = (base.promptsUsed || 0) + 1;
     const shouldAsk = nextPromptsUsed >= 6;
 
-    // Get new topics for all pairs from dynamic configuration
-    const updatedPairs = await Promise.all(
-      (base.pairs || []).map(async (pair) => ({
-        ...pair,
-        topic: (await getDynamicTopic(eventId)).text,
-      }))
-    );
+    // Sync requirement:
+    // Pick ONE topic for the whole session/prompt index (not one per pair).
+    const nextTopicData = await getDynamicTopic(eventId);
+    const updatedPairs = (base.pairs || []).map((pair) => ({
+      ...pair,
+      topic: nextTopicData.text,
+      topicId: nextTopicData.id,
+    }));
 
     return {
       ...base,
@@ -514,6 +529,19 @@ async function reduceCoffeeState(args: {
   if (actionType === 'coffee:continue') {
     // Host/any participant chooses to continue; reset the counter and keep chatting
     if (base.phase !== 'chatting') return base;
+
+    // Prevent stale "continue" actions from desyncing state.
+    const expectedPromptsUsed = payload?.expectedPromptsUsed;
+    if (typeof expectedPromptsUsed === 'number' && expectedPromptsUsed !== base.promptsUsed) {
+      console.warn('[CoffeeRoulette] Ignoring stale coffee:continue', {
+        eventId,
+        expectedPromptsUsed,
+        serverPromptsUsed: base.promptsUsed,
+        phase: base.phase,
+      });
+      return base;
+    }
+
     return {
       ...base,
       promptsUsed: 0,
@@ -733,6 +761,10 @@ export function setupGameHandlers(gamesNs: Namespace) {
   // key: `${sessionId}:${pairId}` -> { sdp, fromParticipantId, createdAt }
   const coffeeVoiceOfferCache = new Map<string, { sdp: string; fromParticipantId: string; createdAt: number }>();
   const COFFEE_VOICE_OFFER_TTL_MS = 35 * 60 * 1000; // ~chat duration; prevent cache buildup
+
+  // Serialize Coffee Roulette snapshot transitions per session.
+  // Prevents concurrent next_prompt/continue requests from racing on stale snapshots.
+  const coffeeActionQueue = new Map<string, Promise<void>>();
 
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
@@ -973,25 +1005,34 @@ export function setupGameHandlers(gamesNs: Namespace) {
           const normalizedAction =
             data.actionType === 'coffee:end_and_finish' ? 'coffee:end' : data.actionType;
 
-          const next = await reduceCoffeeState({
-            eventId: session.event_id,
-            actionType: normalizedAction,
-            payload: data.payload,
-            prev: (latest?.state as any) || null,
+          const prevQueue = coffeeActionQueue.get(data.sessionId) ?? Promise.resolve();
+          const run = prevQueue.then(async () => {
+            // Re-read latest snapshot inside the lock to avoid stale prev.
+            const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+
+            const next = await reduceCoffeeState({
+              eventId: session.event_id,
+              actionType: normalizedAction,
+              payload: data.payload,
+              prev: (latestSnapshot?.state as any) || null,
+            });
+
+            await gamesService.saveSnapshot(data.sessionId, next);
+            gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
+
+            // If requested, also close the DB session and broadcast game:ended.
+            if (data.actionType === 'coffee:end_and_finish') {
+              const { results } = await gamesService.finishSession(data.sessionId);
+              gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+                sessionId: data.sessionId,
+                results,
+                timestamp: new Date().toISOString(),
+              });
+            }
           });
 
-          await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', { sessionId: data.sessionId, gameData: next });
-
-          // If requested, also close the DB session and broadcast game:ended.
-          if (data.actionType === 'coffee:end_and_finish') {
-            const { results } = await gamesService.finishSession(data.sessionId);
-            gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
-              sessionId: data.sessionId,
-              results,
-              timestamp: new Date().toISOString(),
-            });
-          }
+          coffeeActionQueue.set(data.sessionId, run.then(() => undefined).catch(() => undefined));
+          await run;
         }
 
         if (gameKey === 'strategic-escape') {
