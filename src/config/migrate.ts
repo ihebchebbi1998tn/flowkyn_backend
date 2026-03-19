@@ -708,6 +708,115 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_strategic_notes_session ON strategic_notes(game_session_id);
     `,
   },
+  {
+    version: 17,
+    name: 'coffee_roulette_dynamic_config_tables',
+    sql: `
+      -- ─── Coffee Roulette Event Configuration ───
+      -- Stores event-specific settings and selection strategies.
+      CREATE TABLE IF NOT EXISTS coffee_roulette_config (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        event_id UUID NOT NULL UNIQUE REFERENCES events(id) ON DELETE CASCADE,
+        duration_minutes INT NOT NULL DEFAULT 30,
+        max_prompts INT NOT NULL DEFAULT 6,
+        topic_selection_strategy VARCHAR(50) NOT NULL DEFAULT 'random',
+        question_selection_strategy VARCHAR(50) NOT NULL DEFAULT 'random',
+        allow_general_questions BOOLEAN NOT NULL DEFAULT true,
+        shuffle_on_repeat BOOLEAN NOT NULL DEFAULT true,
+        -- Nullable to match ON DELETE SET NULL behavior
+        created_by_member_id UUID REFERENCES organization_members(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_config_event ON coffee_roulette_config(event_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_config_org_event ON coffee_roulette_config(created_by_member_id);
+
+      -- ─── Coffee Roulette Topics ───
+      CREATE TABLE IF NOT EXISTS coffee_roulette_topics (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        config_id UUID NOT NULL REFERENCES coffee_roulette_config(id) ON DELETE CASCADE,
+        title VARCHAR(255) NOT NULL,
+        description TEXT,
+        icon VARCHAR(50),
+        weight INT NOT NULL DEFAULT 1,
+        display_order INT NOT NULL DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_by_member_id UUID REFERENCES organization_members(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_topics_config ON coffee_roulette_topics(config_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_topics_active ON coffee_roulette_topics(config_id, is_active);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_topics_order ON coffee_roulette_topics(config_id, display_order);
+
+      -- ─── Coffee Roulette Questions ───
+      CREATE TABLE IF NOT EXISTS coffee_roulette_questions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        config_id UUID NOT NULL REFERENCES coffee_roulette_config(id) ON DELETE CASCADE,
+        text TEXT NOT NULL,
+        category VARCHAR(100),
+        difficulty VARCHAR(50) DEFAULT 'easy',
+        question_type VARCHAR(50) NOT NULL DEFAULT 'general',
+        weight INT NOT NULL DEFAULT 1,
+        display_order INT NOT NULL DEFAULT 0,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_by_member_id UUID REFERENCES organization_members(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_questions_config ON coffee_roulette_questions(config_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_questions_type ON coffee_roulette_questions(config_id, question_type);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_questions_active ON coffee_roulette_questions(config_id, is_active);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_questions_order ON coffee_roulette_questions(config_id, display_order);
+
+      -- ─── Topic -> Question Mapping ───
+      CREATE TABLE IF NOT EXISTS coffee_roulette_topic_questions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        topic_id UUID NOT NULL REFERENCES coffee_roulette_topics(id) ON DELETE CASCADE,
+        question_id UUID NOT NULL REFERENCES coffee_roulette_questions(id) ON DELETE CASCADE,
+        display_order INT NOT NULL DEFAULT 0,
+        UNIQUE(topic_id, question_id),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_topic_questions_topic ON coffee_roulette_topic_questions(topic_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_topic_questions_question ON coffee_roulette_topic_questions(question_id);
+
+      -- ─── Pair Context (optional tracking) ───
+      CREATE TABLE IF NOT EXISTS coffee_roulette_pair_context (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        participant1_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        participant2_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        session_start_time TIMESTAMP NOT NULL DEFAULT NOW(),
+        session_end_time TIMESTAMP,
+        duration_seconds INT,
+        topic_id UUID REFERENCES coffee_roulette_topics(id) ON DELETE SET NULL,
+        questions_used UUID[] DEFAULT '{}',
+        questions_count INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_pair_context_event ON coffee_roulette_pair_context(event_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_pair_context_session ON coffee_roulette_pair_context(session_start_time);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_pair_context_topic ON coffee_roulette_pair_context(topic_id);
+
+      -- ─── Audit: Track configuration changes ───
+      CREATE TABLE IF NOT EXISTS coffee_roulette_config_audit (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        config_id UUID NOT NULL REFERENCES coffee_roulette_config(id) ON DELETE CASCADE,
+        changed_by_member_id UUID REFERENCES organization_members(id) ON DELETE SET NULL,
+        action VARCHAR(50) NOT NULL,
+        entity_type VARCHAR(100) NOT NULL,
+        entity_id UUID,
+        old_values JSONB,
+        new_values JSONB,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_config_audit_config ON coffee_roulette_config_audit(config_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_config_audit_member ON coffee_roulette_config_audit(changed_by_member_id);
+      CREATE INDEX IF NOT EXISTS idx_coffee_roulette_config_audit_timestamp ON coffee_roulette_config_audit(created_at);
+    `,
+  },
 ];
 
 /**

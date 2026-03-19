@@ -390,11 +390,23 @@ async function reduceCoffeeState(args: {
   };
 
   if (actionType === 'coffee:shuffle') {
-    // Get configuration ID for the event
-    const configRow = await queryOne(
-      'SELECT id FROM coffee_roulette_config WHERE event_id = $1',
-      [eventId]
-    );
+    // Get configuration ID for the event.
+    // NOTE: This must be resilient even if the coffee_roulette_config table
+    // doesn't exist yet (e.g. migrations not applied). In that case we
+    // gracefully fallback to default topics.
+    let configRow: { id: string } | null = null;
+    try {
+      configRow = await queryOne(
+        'SELECT id FROM coffee_roulette_config WHERE event_id = $1',
+        [eventId]
+      );
+    } catch (err: any) {
+      console.error('[CoffeeRoulette] Missing coffee_roulette_config table or failed query.', {
+        eventId,
+        error: err?.message || err,
+      });
+      configRow = null;
+    }
 
     const participants = await query<{ id: string; name: string; avatar: string | null }>(
       `SELECT p.id,
