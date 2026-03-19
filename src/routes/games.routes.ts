@@ -16,7 +16,7 @@ import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
 import { debriefRateLimiter } from '../middleware/rateLimiter';
 import { startSessionSchema, submitActionSchema, createStrategicSessionSchema } from '../validators/games.validator';
-import { eventIdParam, uuidParam } from '../validators/common.validator';
+import { eventIdParam, sessionIdParam, uuidParam } from '../validators/common.validator';
 
 const router = Router();
 const ctrl = new GamesController();
@@ -43,10 +43,12 @@ router.get('/game-sessions/:id/actions', authenticate, validate(uuidParam, 'para
 router.get('/game-sessions/:id/snapshots', authenticate, validate(uuidParam, 'params'), ctrl.getSessionSnapshots);
 
 // Strategic Escape Challenge helpers
-router.post('/strategic-sessions/:sessionId/assign-roles', authenticate, validate(uuidParam, 'params'), ctrl.assignStrategicRolesForSession);
-router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(uuidParam, 'params'), ctrl.getMyStrategicRole);
-router.get('/strategic-sessions/:sessionId/debrief-results', authenticate, debriefRateLimiter, validate(uuidParam, 'params'), ctrl.getDebriefResults);
-router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debriefRateLimiter, validate(uuidParam, 'params'), ctrl.startDebrief);
+router.post('/strategic-sessions/:sessionId/assign-roles', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.assignStrategicRolesForSession);
+router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicRole);
+router.post('/strategic-sessions/:sessionId/roles/me/ack', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.acknowledgeMyStrategicRole);
+router.get('/strategic-sessions/:sessionId/roles/reveal-status', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getStrategicRoleRevealStatus);
+router.get('/strategic-sessions/:sessionId/debrief-results', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.getDebriefResults);
+router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.startDebrief);
 
 // Game actions — supports BOTH authenticated users AND guests via authenticateOrGuest
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);

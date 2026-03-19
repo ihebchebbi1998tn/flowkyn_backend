@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { env } from '../config/env';
 
 /**
- * Standardized error codes for the entire API.
+ * Standardized error codes ford the entire API.
  * Frontend can switch on `code` for i18n or custom handling.
  */
 export type ErrorCode =
@@ -52,6 +52,7 @@ export type ErrorCode =
   | 'NAME_TAKEN'
   | 'EVENT_ENDED'
   | 'ROUNDS_COMPLETE'
+  | 'STRATEGIC_ROLE_NOT_ASSIGNED'
   // Infrastructure
   | 'CORS_BLOCKED'
   | 'TIMEOUT'

@@ -67,7 +67,15 @@ function isCoffeeAction(actionType: string) {
 }
 
 function isStrategicAction(actionType: string) {
-  return actionType.startsWith('strategic:');
+  // Future-proofing: only allow known strategic actions to update snapshots.
+  // Unknown strategic:* actions should NOT be persisted, to avoid accidentally
+  // creating a default state that overwrites a configured scenario.
+  return (
+    actionType === 'strategic:configure' ||
+    actionType === 'strategic:assign_roles' ||
+    actionType === 'strategic:start_discussion' ||
+    actionType === 'strategic:end_discussion'
+  );
 }
 
 async function getSessionGameKey(sessionId: string): Promise<string | null> {
@@ -529,6 +537,8 @@ async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:assign_roles') {
+    // Idempotent: don't re-run assignment transitions
+    if (base.rolesAssigned) return base;
     return {
       ...base,
       rolesAssigned: true,
@@ -537,6 +547,8 @@ async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:start_discussion') {
+    // Idempotent: don't reset discussion timer if already started
+    if (base.phase === 'discussion' && base.discussionEndsAt) return base;
     const minutes = typeof payload?.durationMinutes === 'number' ? payload.durationMinutes : 45;
     return {
       ...base,
@@ -546,6 +558,8 @@ async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:end_discussion') {
+    // Idempotent: repeated end should not change anything
+    if (base.phase === 'debrief') return base;
     return {
       ...base,
       phase: 'debrief',
@@ -895,7 +909,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
           }
         }
 
-        if (gameKey === 'strategic-escape' && isStrategicAction(data.actionType)) {
+        if (gameKey === 'strategic-escape') {
+          if (!isStrategicAction(data.actionType)) {
+            console.warn(`[Games] Ignoring unknown strategic action: ${data.actionType}`);
+            socket.emit('error', { message: 'Unknown strategic action', code: 'VALIDATION' });
+            return;
+          }
           const ok = await canControlGameFlow(data.sessionId, user.userId, socket);
           if (!ok) {
             socket.emit('error', { message: 'Only event administrators can perform strategic actions', code: 'FORBIDDEN' });

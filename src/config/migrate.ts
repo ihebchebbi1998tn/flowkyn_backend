@@ -663,6 +663,18 @@ const migrations: { version: number; name: string; sql: string }[] = [
       -- UI/backend will ignore missing dept ids for department-targeted events.
     `,
   },
+  {
+    version: 15,
+    name: 'strategic_roles_revealed_at',
+    sql: `
+      -- Track when a participant has revealed/closed their secret role modal in-app
+      ALTER TABLE strategic_roles
+        ADD COLUMN IF NOT EXISTS revealed_at TIMESTAMP;
+
+      CREATE INDEX IF NOT EXISTS idx_strategic_roles_revealed_at
+        ON strategic_roles(game_session_id, revealed_at);
+    `,
+  },
 ];
 
 /**

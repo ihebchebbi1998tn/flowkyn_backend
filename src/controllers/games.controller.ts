@@ -5,9 +5,6 @@ import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
 import { emitGameUpdate } from '../socket/emitter';
 import { query, queryOne } from '../config/database';
-import { sendEmail } from '../services/email.service';
-import { env } from '../config/env';
-import { getStrategicRoleContent } from '../emails/strategicRoleContent';
 
 const gamesService = new GamesService();
 const audit = new AuditLogsService();
@@ -325,116 +322,41 @@ export class GamesController {
   }
 
   /**
-   * Strategic Escape Challenge — assign roles to participants and send emails.
+   * Strategic Escape Challenge — assign roles to participants.
+   * This endpoint supports both authenticated users and guests (event-scoped guest tokens).
+   *
+   * NOTE: Per requirements, this does NOT send emails. Role delivery is handled in-app.
    */
   async assignStrategicRolesForSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can assign roles', 403, 'FORBIDDEN');
-
       const session = await gamesService.getSession(req.params.sessionId);
-      const member = await queryOne<{ role_name: string }>(
-        `SELECT r.name as role_name
-         FROM organization_members om
-         JOIN roles r ON r.id = om.role_id
-         JOIN events e ON e.organization_id = om.organization_id
-         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
-        [session.event_id, req.user.userId]
-      );
-      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
-      if (!['owner', 'admin', 'moderator'].includes(member.role_name)) {
-        throw new AppError('Only admins and moderators can assign roles', 403, 'INSUFFICIENT_PERMISSIONS');
+
+      // Require caller to be a participant (member or guest) in this event, to avoid blind triggers.
+      let participantId: string | null = null;
+      if (req.guest) {
+        participantId = req.guest.participantId;
+      } else if (req.user) {
+        const row = await queryOne<{ id: string }>(
+          `SELECT p.id
+           FROM participants p
+           JOIN organization_members om ON om.id = p.organization_member_id
+           WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+          [session.event_id, req.user.userId]
+        );
+        participantId = row?.id || null;
       }
+
+      if (!participantId) {
+        throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+      }
+
+      const belongs = await queryOne<{ id: string }>(
+        `SELECT id FROM participants WHERE id = $1 AND event_id = $2 AND left_at IS NULL`,
+        [participantId, session.event_id]
+      );
+      if (!belongs) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
 
       const assignments = await gamesService.assignStrategicRoles(req.params.sessionId);
-
-      if (assignments.length > 0) {
-        // Load context for emails: event + organization and scenario info from latest snapshot
-        const eventRow = await queryOne<{ title: string; organization_name: string }>(
-          `SELECT e.title, o.name as organization_name
-           FROM events e
-           JOIN organizations o ON o.id = e.organization_id
-           WHERE e.id = $1`,
-          [session.event_id]
-        );
-
-        const snapshot = await gamesService.getLatestSnapshot(req.params.sessionId);
-        const state = snapshot?.state as any;
-
-        // Prefer label fields; avoid sending translation-key strings in emails.
-        const industryLabel =
-          state?.industryLabel ||
-          state?.industry ||
-          'General';
-        const crisisLabel =
-          state?.crisisLabel ||
-          state?.crisisType ||
-          'Scenario';
-        const difficultyLabel =
-          state?.difficultyLabel ||
-          state?.difficulty ||
-          'medium';
-
-        const frontendBase = env.frontendUrl;
-        const eventLink = `${frontendBase}/join/${session.event_id}`;
-
-        // Fetch participant + user details for assignments
-        const participantIds = assignments.map(a => a.participantId);
-        const participantRows = await query<{
-          id: string;
-          name: string | null;
-          email: string | null;
-          language: string | null;
-        }>(
-          `SELECT p.id,
-                  COALESCE(ep.display_name, p.guest_name, u.name) as name,
-                  COALESCE(u.email, NULL) as email,
-                  u.language as language
-           FROM participants p
-           LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
-           LEFT JOIN organization_members om ON om.id = p.organization_member_id
-           LEFT JOIN users u ON u.id = om.user_id
-           WHERE p.id = ANY($1::uuid[])`,
-          [participantIds]
-        );
-
-        const byId = new Map(participantRows.map((r: typeof participantRows[0]) => [r.id, r]));
-
-        for (const a of assignments) {
-          const row = byId.get(a.participantId);
-          if (!row || !row.email) continue;
-
-          const roleContent = getStrategicRoleContent(a.roleKey, row.language || 'en');
-          if (!roleContent) continue;
-
-          await sendEmail({
-            to: row.email,
-            type: 'strategic_role_assignment',
-            data: {
-              name: row.name || '',
-              orgName: eventRow?.organization_name || 'Flowkyn',
-              eventTitle: eventRow?.title || 'Strategic Escape Challenge',
-              industryLabel,
-              crisisLabel,
-              difficultyLabel,
-              roleName: roleContent.name,
-              roleBrief: roleContent.brief,
-              roleSecretInstructions: roleContent.secret,
-              eventLink,
-            },
-            lang: row.language || 'en',
-          });
-        }
-
-        // Mark email_sent_at for all newly assigned rows
-        await query(
-          `UPDATE strategic_roles
-           SET email_sent_at = NOW()
-           WHERE game_session_id = $1
-             AND participant_id = ANY($2::uuid[])
-             AND email_sent_at IS NULL`,
-          [req.params.sessionId, participantIds]
-        );
-      }
 
       // Update strategic snapshot so frontends see the new phase/flag even if no socket action is sent
       try {
@@ -460,7 +382,7 @@ export class GamesController {
         console.error('[GamesController] Failed to update strategic snapshot after role assignment', snapshotErr);
       }
 
-      await audit.create(null, req.user.userId, 'GAME_ASSIGN_STRATEGIC_ROLES', {
+      await audit.create(null, req.user?.userId ?? null, 'GAME_ASSIGN_STRATEGIC_ROLES', {
         sessionId: req.params.sessionId,
         assignmentsCount: assignments.length,
       });
@@ -505,6 +427,92 @@ export class GamesController {
       );
 
       res.json(roleRow ? { roleKey: roleRow.role_key } : null);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — acknowledge that the current participant has revealed/closed their role modal.
+   * Supports both authenticated members and guests.
+   */
+  async acknowledgeMyStrategicRole(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+
+      let participantId: string | null = null;
+      if (req.guest) {
+        participantId = req.guest.participantId;
+      } else if (req.user) {
+        const row = await queryOne<{ id: string }>(
+          `SELECT p.id
+           FROM participants p
+           JOIN organization_members om ON om.id = p.organization_member_id
+           WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+          [session.event_id, req.user.userId]
+        );
+        participantId = row?.id || null;
+      }
+
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const result = await query(
+        `UPDATE strategic_roles
+         SET revealed_at = COALESCE(revealed_at, NOW())
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [req.params.sessionId, participantId]
+      );
+
+      if ((result as any)?.rowCount === 0) {
+        throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
+      }
+
+      res.status(204).send();
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Strategic Escape Challenge — get aggregate role reveal acknowledgement status for the session.
+   * Returns counts only (no identities) to avoid leaking who has which role.
+   */
+  async getStrategicRoleRevealStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const session = await gamesService.getSession(req.params.sessionId);
+
+      // Require caller to be a participant (member or guest) in this event.
+      let participantId: string | null = null;
+      if (req.guest) {
+        participantId = req.guest.participantId;
+      } else if (req.user) {
+        const row = await queryOne<{ id: string }>(
+          `SELECT p.id
+           FROM participants p
+           JOIN organization_members om ON om.id = p.organization_member_id
+           WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+          [session.event_id, req.user.userId]
+        );
+        participantId = row?.id || null;
+      }
+
+      if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
+
+      const row = await queryOne<{ total: string; acknowledged: string }>(
+        `WITH assigned AS (
+           SELECT sr.participant_id, sr.revealed_at
+           FROM strategic_roles sr
+           WHERE sr.game_session_id = $1
+         )
+         SELECT
+           (SELECT COUNT(*)::text FROM assigned) as total,
+           (SELECT COUNT(*)::text FROM assigned WHERE revealed_at IS NOT NULL) as acknowledged`,
+        [req.params.sessionId]
+      );
+
+      const total = Number(row?.total || 0);
+      const acknowledged = Number(row?.acknowledged || 0);
+      res.json({ total, acknowledged, allAcknowledged: total > 0 && acknowledged >= total });
     } catch (err) {
       next(err);
     }

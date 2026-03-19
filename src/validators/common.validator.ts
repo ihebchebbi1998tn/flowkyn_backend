@@ -13,6 +13,11 @@ export const uuidParam = z.object({
   id: z.string().uuid('Invalid UUID format'),
 });
 
+/** Validates `sessionId` path parameter as a UUID */
+export const sessionIdParam = z.object({
+  sessionId: z.string().uuid('Invalid UUID format'),
+});
+
 /** Validates `eventId` path parameter as a UUID */
 export const eventIdParam = z.object({
   eventId: z.string().uuid('Invalid UUID format'),

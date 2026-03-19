@@ -279,6 +279,19 @@ CREATE TABLE game_sessions (
 );
 CREATE INDEX idx_game_sessions_event_status ON game_sessions(event_id, status);
 
+-- ─── Strategic Roles (Strategic Escape) ───
+CREATE TABLE strategic_roles (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+  participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+  role_key VARCHAR(50) NOT NULL,
+  email_sent_at TIMESTAMP,
+  revealed_at TIMESTAMP,
+  created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  UNIQUE (game_session_id, participant_id)
+);
+CREATE INDEX idx_strategic_roles_session ON strategic_roles(game_session_id);
+
 -- ─── Game Rounds ───
 CREATE TABLE game_rounds (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
