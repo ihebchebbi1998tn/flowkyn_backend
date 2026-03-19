@@ -23,7 +23,8 @@ import { NotificationsService } from '../services/notifications.service';
 import { EventProfilesService } from '../services/events-profiles.service';
 import { AuthRequest } from '../types';
 import { AppError } from '../middleware/errorHandler';
-import { emitEventUpdate, emitEventNotification } from '../socket/emitter';
+import { emitEventUpdate, emitEventNotification, emitGameUpdate } from '../socket/emitter';
+import { getIO } from '../socket/index';
 import { query, queryOne } from '../config/database';
 
 const eventsService = new EventsService();
@@ -786,6 +787,40 @@ export class EventsController {
         display_name.trim(),
         avatar_url || null,
       );
+
+      const profileUpdatePayload = {
+        eventId: req.params.eventId,
+        participantId,
+        displayName: profile.display_name,
+        avatarUrl: profile.avatar_url,
+        updatedAt: new Date().toISOString(),
+      };
+
+      // Broadcast profile updates in real time so all lobbies/games refresh names+avatars instantly.
+      try {
+        const io = getIO();
+        io.of('/events').to(`event:${req.params.eventId}`).emit('event:participant_profile_updated', profileUpdatePayload);
+      } catch {
+        // Socket may be unavailable in tests/boot edge-cases; non-fatal for HTTP response.
+      }
+
+      // Also notify active game session rooms, so game UIs can react without waiting for periodic sync.
+      try {
+        const activeSessions = await query<{ id: string }>(
+          `SELECT id FROM game_sessions WHERE event_id = $1 AND status = 'active'`,
+          [req.params.eventId],
+        );
+        for (const session of activeSessions) {
+          emitGameUpdate(session.id, 'game:participant_profile_updated', profileUpdatePayload);
+        }
+      } catch (emitErr) {
+        console.warn('[EventsController] Failed to emit game profile update', {
+          eventId: req.params.eventId,
+          participantId,
+          error: emitErr instanceof Error ? emitErr.message : String(emitErr),
+        });
+      }
+
       res.json({
         participant_id: participantId,
         id: profile.id,
