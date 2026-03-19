@@ -1,4 +1,4 @@
-import { Response, NextFunction } from 'express';
+import { Response, NextFunction, Request } from 'express';
 import { GamesService } from '../services/games.service';
 import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
@@ -115,6 +115,47 @@ export class GamesController {
         }
 
         // coturn typical format: turn:host:3478 (or turns:host:5349 for TLS)
+        iceServers.push({
+          urls: [turnUrl],
+          username: turnUsername,
+          credential: turnCredential,
+        });
+      }
+
+      res.json({ iceServers });
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
+   * Testing helper — returns ICE servers (STUN + optional TURN) WITHOUT any Authorization header.
+   * Useful for verifying coturn connectivity/credentials via plain curl.
+   *
+   * SECURITY NOTE: This endpoint exposes TURN credentials to anyone who can reach the API.
+   * Use it only for testing and remove/lock it down in production if needed.
+   */
+  async getIceServersPublic(_req: Request, res: Response, next: NextFunction) {
+    try {
+      const stunUrls = (process.env.WEBRTC_STUN_URLS || 'stun:stun.l.google.com:19302')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> = [
+        { urls: stunUrls },
+      ];
+
+      const turnUrl = process.env.WEBRTC_TURN_URL;
+      const turnUsername = process.env.WEBRTC_TURN_USERNAME;
+      const turnCredential = process.env.WEBRTC_TURN_CREDENTIAL;
+
+      // If TURN is not configured, we still return STUN-only.
+      if (turnUrl) {
+        if (!turnUsername || !turnCredential) {
+          throw new AppError('TURN credentials are not configured', 500, 'INTERNAL_ERROR');
+        }
+
         iceServers.push({
           urls: [turnUrl],
           username: turnUsername,

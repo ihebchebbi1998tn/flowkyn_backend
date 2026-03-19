@@ -29,6 +29,10 @@ router.get('/game-types/:id/prompts', authenticate, ctrl.listPrompts);
 // Supports both authenticated users and guests.
 router.get('/voice/ice-servers', authenticateOrGuest, ctrl.getIceServers);
 
+// Testing helper — returns ICE servers WITHOUT Authorization.
+// SECURITY NOTE: exposes TURN credentials to anyone who can reach the API.
+router.get('/voice/ice-servers-public', ctrl.getIceServersPublic);
+
 // Game sessions (under events) — admin-only operations
 router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
 // Strategic Escape Challenge sessions
