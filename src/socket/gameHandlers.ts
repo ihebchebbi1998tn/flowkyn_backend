@@ -480,6 +480,14 @@ async function reduceCoffeeState(args: {
     // Idempotent: if chat already started, ignore duplicates (prevents timer resets
     // when multiple clients emit automatically on 'matching').
     if (base.startedChatAt) return base;
+    // Safety: chat cannot start without at least one pair.
+    if (!Array.isArray(base.pairs) || base.pairs.length === 0) {
+      console.warn('[CoffeeRoulette] Ignoring coffee:start_chat without pairs', {
+        eventId,
+        phase: base.phase,
+      });
+      return { ...base, phase: 'waiting', startedChatAt: null };
+    }
     const chatDurationMinutes = 30; // Using 30 minutes chat limit
     return { 
       ...base, 
