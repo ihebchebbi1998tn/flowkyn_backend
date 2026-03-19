@@ -1268,6 +1268,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
           createdAt: Date.now(),
         });
 
+        console.log('[CoffeeVoice][telemetry] offer_cached', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: caller.participantId,
+          cacheKey,
+        });
+
         const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
         const partnerSocketId = voiceSocketByKey.get(partnerKey);
         if (!partnerSocketId) {
@@ -1276,6 +1283,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
             pairId: validation.data.pairId,
             partnerParticipantId,
             partnerKey,
+          });
+          console.log('[CoffeeVoice][telemetry] offer_not_forwarded_partner_offline', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            partnerParticipantId,
           });
           // Not fatal: we already cached the offer above.
           // The answerer can later call `coffee:voice_request_offer` to retrieve it.
@@ -1288,6 +1300,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
           pairId: validation.data.pairId,
           fromParticipantId: caller.participantId,
           sdp: validation.data.sdp,
+        });
+
+        console.log('[CoffeeVoice][telemetry] offer_forwarded', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: caller.participantId,
+          toPartnerSocketId: partnerSocketId,
         });
 
         ack?.({ ok: true });
@@ -1318,6 +1337,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         console.log('[CoffeeVoice] voice_request_offer received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+        });
+
+        console.log('[CoffeeVoice][telemetry] offer_requested', {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
           callerParticipantId: caller.participantId,
@@ -1354,6 +1379,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
         const cached = coffeeVoiceOfferCache.get(cacheKey);
         if (!cached) {
+          console.log('[CoffeeVoice][telemetry] offer_requested_no_cache', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            cacheKey,
+          });
           ack?.({ ok: false, error: 'OFFER_NOT_READY' });
           return;
         }
@@ -1361,11 +1391,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const ageMs = Date.now() - cached.createdAt;
         if (ageMs > COFFEE_VOICE_OFFER_TTL_MS) {
           coffeeVoiceOfferCache.delete(cacheKey);
+          console.log('[CoffeeVoice][telemetry] offer_requested_expired', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            cacheKey,
+          });
           ack?.({ ok: false, error: 'OFFER_EXPIRED' });
           return;
         }
 
-        console.log('[CoffeeVoice] forwarding cached offer', {
+        console.log('[CoffeeVoice][telemetry] offer_delivered', {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
           ageSeconds: Math.round(ageMs / 1000),
@@ -1454,9 +1489,21 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
         const partnerSocketId = voiceSocketByKey.get(partnerKey);
         if (!partnerSocketId) {
+          console.log('[CoffeeVoice][telemetry] answer_not_forwarded_partner_offline', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            partnerParticipantId,
+          });
           ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
           return;
         }
+
+        console.log('[CoffeeVoice][telemetry] answer_forwarded', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+          toPartnerSocketId: partnerSocketId,
+        });
 
         gamesNs.to(partnerSocketId).emit('coffee:voice_answer', {
           sessionId: validation.data.sessionId,
@@ -1567,7 +1614,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        console.log('[CoffeeVoice] voice_hangup received', {
+        console.log('[CoffeeVoice][telemetry] hangup_received', {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
           callerParticipantId: caller.participantId,
