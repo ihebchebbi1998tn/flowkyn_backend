@@ -67,12 +67,25 @@ export class EarlyAccessController {
         requestId: req.params.id,
         targetEmail: result.email,
         createdNewAccount: result.createdNewAccount,
+        accountProvisioned: result.accountProvisioned,
+        emailSent: result.emailSent,
+        alreadyProcessed: result.alreadyProcessed,
         passwordResetApplied: result.passwordResetApplied,
       });
 
-      res.json({
-        message: 'Credentials email sent successfully',
+      const message = result.alreadyProcessed
+        ? 'Already processed earlier: account is provisioned and credentials email already sent.'
+        : result.emailSent
+          ? 'Credentials email sent successfully'
+          : 'Account provisioned, but credentials email failed to send. Please retry sending email.';
+
+      res.status(result.emailSent || result.alreadyProcessed ? 200 : 207).json({
+        partialSuccess: !result.emailSent,
+        accountProvisioned: result.accountProvisioned,
+        emailSent: result.emailSent,
+        alreadyProcessed: result.alreadyProcessed,
         data: result,
+        message,
       });
     } catch (err) {
       next(err);
