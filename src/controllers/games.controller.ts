@@ -92,6 +92,42 @@ export class GamesController {
     }
   }
 
+  // WebRTC helpers: returns ICE servers (STUN + optional TURN) for client-side peer connections.
+  async getIceServers(_req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const stunUrls = (process.env.WEBRTC_STUN_URLS || 'stun:stun.l.google.com:19302')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
+      const iceServers: Array<{ urls: string | string[]; username?: string; credential?: string }> = [
+        { urls: stunUrls },
+      ];
+
+      const turnUrl = process.env.WEBRTC_TURN_URL;
+      const turnUsername = process.env.WEBRTC_TURN_USERNAME;
+      const turnCredential = process.env.WEBRTC_TURN_CREDENTIAL;
+
+      // If TURN is not configured, we still return STUN-only.
+      if (turnUrl) {
+        if (!turnUsername || !turnCredential) {
+          throw new AppError('TURN credentials are not configured', 500, 'INTERNAL_ERROR');
+        }
+
+        // coturn typical format: turn:host:3478 (or turns:host:5349 for TLS)
+        iceServers.push({
+          urls: [turnUrl],
+          username: turnUsername,
+          credential: turnCredential,
+        });
+      }
+
+      res.json({ iceServers });
+    } catch (err) {
+      next(err);
+    }
+  }
+
   async startSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       // Authorization: default is admins/moderators only. When ALLOW_PARTICIPANT_GAME_CONTROL=true,

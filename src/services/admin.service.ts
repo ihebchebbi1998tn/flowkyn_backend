@@ -5,9 +5,20 @@ import { buildPaginatedResponse } from '../utils/pagination';
 export class AdminService {
   async getStats() {
     const stats = await queryOne<{
-      total_users: string; total_organizations: string;
-      total_events: string; total_game_sessions: string;
-      active_users_30d: string; new_users_today: string; new_orgs_today: string;
+      total_users: string;
+      total_organizations: string;
+      total_events: string;
+      total_game_sessions: string;
+      active_users_30d: string;
+      new_users_today: string;
+      new_orgs_today: string;
+      two_truths_sessions: string;
+      coffee_roulette_sessions: string;
+      wins_of_week_sessions: string;
+      strategic_escape_sessions: string;
+      trivia_sessions: string;
+      scavenger_hunt_sessions: string;
+      gratitude_sessions: string;
     }>(`
       SELECT
         (SELECT COUNT(*) FROM users) as total_users,
@@ -16,7 +27,43 @@ export class AdminService {
         (SELECT COUNT(*) FROM game_sessions) as total_game_sessions,
         (SELECT COUNT(DISTINCT user_id) FROM user_sessions WHERE created_at > NOW() - INTERVAL '30 days') as active_users_30d,
         (SELECT COUNT(*) FROM users WHERE created_at >= CURRENT_DATE) as new_users_today,
-        (SELECT COUNT(*) FROM organizations WHERE created_at >= CURRENT_DATE) as new_orgs_today
+        (SELECT COUNT(*) FROM organizations WHERE created_at >= CURRENT_DATE) as new_orgs_today,
+        -- Per-activity session counts (by game_types.key)
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'two-truths'
+        ), 0) AS two_truths_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'coffee-roulette'
+        ), 0) AS coffee_roulette_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'wins-of-week'
+        ), 0) AS wins_of_week_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'strategic-escape'
+        ), 0) AS strategic_escape_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'trivia'
+        ), 0) AS trivia_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'scavenger-hunt'
+        ), 0) AS scavenger_hunt_sessions,
+        COALESCE((
+          SELECT COUNT(*) FROM game_sessions gs
+          JOIN game_types gt ON gs.game_type_id = gt.id
+          WHERE gt.key = 'gratitude'
+        ), 0) AS gratitude_sessions
     `);
 
     return {
@@ -27,6 +74,15 @@ export class AdminService {
       activeUsers30d: Number(stats?.active_users_30d || 0),
       newUsersToday: Number(stats?.new_users_today || 0),
       newOrgsToday: Number(stats?.new_orgs_today || 0),
+      sessionsByGame: {
+        twoTruths: Number(stats?.two_truths_sessions || 0),
+        coffeeRoulette: Number(stats?.coffee_roulette_sessions || 0),
+        winsOfWeek: Number(stats?.wins_of_week_sessions || 0),
+        strategicEscape: Number(stats?.strategic_escape_sessions || 0),
+        trivia: Number(stats?.trivia_sessions || 0),
+        scavengerHunt: Number(stats?.scavenger_hunt_sessions || 0),
+        gratitude: Number(stats?.gratitude_sessions || 0),
+      },
     };
   }
 

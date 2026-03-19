@@ -25,6 +25,10 @@ const ctrl = new GamesController();
 router.get('/game-types', authenticate, ctrl.listGameTypes);
 router.get('/game-types/:id/prompts', authenticate, ctrl.listPrompts);
 
+// WebRTC voice helpers (used by Coffee Roulette)
+// Supports both authenticated users and guests.
+router.get('/voice/ice-servers', authenticateOrGuest, ctrl.getIceServers);
+
 // Game sessions (under events) — admin-only operations
 router.post('/events/:eventId/game-sessions', authenticate, validate(eventIdParam, 'params'), validate(startSessionSchema), ctrl.startSession);
 // Strategic Escape Challenge sessions

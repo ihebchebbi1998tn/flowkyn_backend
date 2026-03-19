@@ -21,7 +21,7 @@ import { Router } from 'express';
 import { OrganizationsController } from '../controllers/organizations.controller';
 import { authenticate } from '../middleware/auth';
 import { validate } from '../middleware/validate';
-import { createOrgSchema, updateOrgSchema, inviteMemberSchema, acceptInvitationSchema, departmentCreateSchema, departmentIdParam } from '../validators/organizations.validator';
+import { createOrgSchema, updateOrgSchema, inviteMemberSchema, acceptInvitationSchema, departmentCreateSchema, departmentUpdateSchema, departmentIdParam } from '../validators/organizations.validator';
 import { orgIdParam, orgMemberParams } from '../validators/common.validator';
 import { upload } from '../config/multer';
 
@@ -37,6 +37,7 @@ router.get('/:orgId/invitations', authenticate, validate(orgIdParam, 'params'), 
 router.get('/:orgId/people', authenticate, validate(orgIdParam, 'params'), ctrl.listPeople);
 router.get('/:orgId/departments', authenticate, validate(orgIdParam, 'params'), ctrl.listDepartments);
 router.post('/:orgId/departments', authenticate, validate(orgIdParam, 'params'), validate(departmentCreateSchema), ctrl.createDepartment);
+router.patch('/:orgId/departments/:departmentId', authenticate, validate(orgIdParam, 'params'), validate(departmentIdParam, 'params'), validate(departmentUpdateSchema), ctrl.updateDepartment);
 router.delete('/:orgId/departments/:departmentId', authenticate, validate(orgIdParam, 'params'), validate(departmentIdParam, 'params'), ctrl.deleteDepartment);
 router.delete('/:orgId/members/:memberId', authenticate, validate(orgMemberParams, 'params'), ctrl.removeMember);
 router.post('/:orgId/logo', authenticate, validate(orgIdParam, 'params'), upload.single('logo'), ctrl.uploadLogo);

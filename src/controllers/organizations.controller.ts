@@ -186,4 +186,20 @@ export class OrganizationsController {
       res.json(result);
     } catch (err) { next(err); }
   }
+
+  async updateDepartment(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const member = await requireOrgMember(req.params.orgId, req.user!.userId);
+      requireAdminRole(member, 'update departments');
+
+      const dept = await orgsService.updateDepartment(req.params.orgId, req.params.departmentId, req.body.name);
+      await audit.create(req.params.orgId, req.user!.userId, 'ORG_UPDATE_DEPARTMENT', {
+        departmentId: req.params.departmentId,
+        name: req.body.name,
+      });
+      res.json(dept);
+    } catch (err) {
+      next(err);
+    }
+  }
 }

@@ -217,7 +217,7 @@ export class OrganizationsService {
 
   async listDepartments(orgId: string) {
     return query(
-      `SELECT id, name, created_at, updated_at
+      `SELECT id, organization_id, name, created_at, updated_at
        FROM departments
        WHERE organization_id = $1
        ORDER BY name ASC`,
@@ -226,6 +226,37 @@ export class OrganizationsService {
   }
 
   async deleteDepartment(orgId: string, departmentId: string) {
+    // Prevent deleting departments that are still in use
+    const usage = await queryOne<{ member_count: string; invite_count: string }>(
+      `
+      SELECT
+        (SELECT COUNT(*)::text
+         FROM organization_member_departments omd
+         JOIN organization_members om ON om.id = omd.organization_member_id
+         WHERE omd.department_id = $1
+           AND om.organization_id = $2
+           AND om.status = 'active') AS member_count,
+        (SELECT COUNT(*)::text
+         FROM organization_invitations oi
+         WHERE oi.department_id = $1
+           AND oi.organization_id = $2
+           AND oi.status = 'pending'
+           AND oi.expires_at > NOW()) AS invite_count
+      `,
+      [departmentId, orgId]
+    );
+
+    const membersInDept = Number(usage?.member_count || 0);
+    const invitesInDept = Number(usage?.invite_count || 0);
+
+    if (membersInDept > 0 || invitesInDept > 0) {
+      throw new AppError(
+        'Department still has people assigned',
+        400,
+        'DEPARTMENT_IN_USE'
+      );
+    }
+
     const result = await queryOne(
       `DELETE FROM departments
        WHERE id = $1 AND organization_id = $2
@@ -234,6 +265,31 @@ export class OrganizationsService {
     );
     if (!result) throw new AppError('Department not found', 404, 'NOT_FOUND');
     return { message: 'Department deleted' };
+  }
+
+  async updateDepartment(orgId: string, departmentId: string, name: string) {
+    // Ensure no other department with same name exists in this org
+    const existing = await queryOne<{ id: string }>(
+      `SELECT id
+       FROM departments
+       WHERE organization_id = $1 AND LOWER(name) = LOWER($2) AND id <> $3`,
+      [orgId, name, departmentId]
+    );
+    if (existing) {
+      throw new AppError('Department already exists', 400, 'ALREADY_EXISTS');
+    }
+
+    const dept = await queryOne(
+      `UPDATE departments
+       SET name = $1, updated_at = NOW()
+       WHERE id = $2 AND organization_id = $3
+       RETURNING id, organization_id, name, created_at, updated_at`,
+      [name, departmentId, orgId]
+    );
+    if (!dept) {
+      throw new AppError('Department not found', 404, 'NOT_FOUND');
+    }
+    return dept;
   }
 
   /**

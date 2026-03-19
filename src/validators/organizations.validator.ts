@@ -32,6 +32,10 @@ export const departmentCreateSchema = z.object({
   name: z.string().trim().min(1, 'Department name is required').max(100),
 });
 
+export const departmentUpdateSchema = z.object({
+  name: z.string().trim().min(1, 'Department name is required').max(100),
+});
+
 export const departmentIdParam = z.object({
   departmentId: z.string().uuid('Invalid UUID format'),
 });

@@ -53,6 +53,7 @@ export type ErrorCode =
   | 'EVENT_ENDED'
   | 'ROUNDS_COMPLETE'
   | 'STRATEGIC_ROLE_NOT_ASSIGNED'
+  | 'DEPARTMENT_IN_USE'
   // Infrastructure
   | 'CORS_BLOCKED'
   | 'TIMEOUT'

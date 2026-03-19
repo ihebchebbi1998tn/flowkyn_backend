@@ -58,6 +58,49 @@ const gameStateSyncSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
 });
 
+// ─── Coffee Roulette Voice (WebRTC signaling) ───
+const coffeeVoiceOfferSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  // Pair id generated during `coffee:shuffle` and stored in the coffee snapshot.
+  pairId: z.string().uuid('Invalid pair ID'),
+  sdp: z
+    .string()
+    .min(1)
+    .max(200000, 'SDP too large'),
+});
+
+const coffeeVoiceAnswerSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  pairId: z.string().uuid('Invalid pair ID'),
+  sdp: z
+    .string()
+    .min(1)
+    .max(200000, 'SDP too large'),
+});
+
+const coffeeVoiceIceCandidateSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  pairId: z.string().uuid('Invalid pair ID'),
+  candidate: z
+    .object({
+      candidate: z.string().max(20000),
+      sdpMid: z.string().nullable(),
+      sdpMLineIndex: z.number().int().nullable(),
+      usernameFragment: z.string().nullable().optional(),
+    })
+    .strict(),
+});
+
+const coffeeVoiceRequestOfferSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  pairId: z.string().uuid('Invalid pair ID'),
+});
+
+const coffeeVoiceHangupSchema = z.object({
+  sessionId: z.string().uuid('Invalid session ID'),
+  pairId: z.string().uuid('Invalid pair ID'),
+});
+
 function isTwoTruthsAction(actionType: string) {
   return actionType.startsWith('two_truths:');
 }
@@ -669,6 +712,16 @@ async function canControlGameFlow(sessionId: string, userId: string, socket: Aut
 }
 
 export function setupGameHandlers(gamesNs: Namespace) {
+  // Used for targeted forwarding of WebRTC signaling messages (no media relay through backend).
+  // key: `${sessionId}:${participantId}` -> socket.id
+  const voiceSocketByKey = new Map<string, string>();
+  // socket.id -> Set<key>
+  const voiceKeysBySocket = new Map<string, Set<string>>();
+  // coffee voice offer cache for late joiners:
+  // key: `${sessionId}:${pairId}` -> { sdp, fromParticipantId, createdAt }
+  const coffeeVoiceOfferCache = new Map<string, { sdp: string; fromParticipantId: string; createdAt: number }>();
+  const COFFEE_VOICE_OFFER_TTL_MS = 35 * 60 * 1000; // ~chat duration; prevent cache buildup
+
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
     const user = socket.user;
@@ -703,6 +756,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
         joinedSessions.add(data.sessionId);
+
+        // Register socket mapping for targeted voice signaling.
+        // This is needed because `coffee:voice_*` events must be forwarded only to the paired participant.
+        const voiceKey = `${data.sessionId}:${participant.participantId}`;
+        voiceSocketByKey.set(voiceKey, socket.id);
+        const existing = voiceKeysBySocket.get(socket.id) ?? new Set<string>();
+        existing.add(voiceKey);
+        voiceKeysBySocket.set(socket.id, existing);
 
         // Notify others
         socket.to(roomId).emit('game:player_joined', {
@@ -739,6 +800,18 @@ export function setupGameHandlers(gamesNs: Namespace) {
       const roomId = `game:${data.sessionId}`;
       socket.leave(roomId);
       joinedSessions.delete(data.sessionId);
+
+      // Remove any voice keys associated with this session for this socket.
+      const keys = voiceKeysBySocket.get(socket.id);
+      if (keys) {
+        for (const key of Array.from(keys)) {
+          if (key.startsWith(`${data.sessionId}:`)) {
+            voiceSocketByKey.delete(key);
+            keys.delete(key);
+          }
+        }
+        if (keys.size === 0) voiceKeysBySocket.delete(socket.id);
+      }
 
       socket.to(roomId).emit('game:player_left', {
         userId: user.userId,
@@ -1058,9 +1131,451 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
     });
 
+    // ─── Coffee Roulette Voice Signaling (WebRTC) ───
+    // Offer/Answer are role-gated to avoid glare:
+    // - pair.person1 creates the offer
+    // - pair.person2 answers
+    // ICE + hangup can be sent by either participant (validated against pair membership).
+    socket.on('coffee:voice_offer', async (data: unknown, ack) => {
+      const validation = coffeeVoiceOfferSchema.safeParse(data);
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!caller) {
+          console.warn('[CoffeeVoice] voice_offer: caller not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        console.log('[CoffeeVoice] voice_offer received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+          offerSdpLength: validation.data.sdp.length,
+        });
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          console.warn('[CoffeeVoice] voice_offer rejected: not in chatting phase', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            kind: state?.kind,
+            phase: state?.phase,
+          });
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const callerSide: 'person1' | 'person2' | null =
+          pair.person1?.participantId === caller.participantId ? 'person1'
+          : pair.person2?.participantId === caller.participantId ? 'person2'
+          : null;
+
+        if (!callerSide) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+        if (callerSide !== 'person1') {
+          ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' });
+          return;
+        }
+
+        const partnerParticipantId = pair.person2?.participantId;
+        if (!partnerParticipantId) {
+          console.warn('[CoffeeVoice] voice_offer rejected: partner missing', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            callerParticipantId: caller.participantId,
+          });
+          ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' });
+          return;
+        }
+
+        // Cache offer immediately so the answerer can request it even if they enable voice
+        // slightly after the initial offer was emitted.
+        const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
+        coffeeVoiceOfferCache.set(cacheKey, {
+          sdp: validation.data.sdp,
+          fromParticipantId: caller.participantId,
+          createdAt: Date.now(),
+        });
+
+        const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+        const partnerSocketId = voiceSocketByKey.get(partnerKey);
+        if (!partnerSocketId) {
+          console.warn('[CoffeeVoice] voice_offer rejected: partner socket not connected', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            partnerParticipantId,
+            partnerKey,
+          });
+          ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
+          return;
+        }
+
+        gamesNs.to(partnerSocketId).emit('coffee:voice_offer', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: caller.participantId,
+          sdp: validation.data.sdp,
+        });
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[voice_offer] error:', err);
+        ack?.({ ok: false, error: 'VOICE_OFFER_ERROR' });
+      }
+    });
+
+    // Answerer can request the most recent offer if they enabled voice after the offer was sent.
+    socket.on('coffee:voice_request_offer', async (data: unknown, ack) => {
+      const validation = coffeeVoiceRequestOfferSchema.safeParse(data);
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!caller) {
+          console.warn('[CoffeeVoice] voice_request_offer: caller not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        console.log('[CoffeeVoice] voice_request_offer received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+        });
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const callerSide: 'person1' | 'person2' | null =
+          pair.person1?.participantId === caller.participantId ? 'person1'
+          : pair.person2?.participantId === caller.participantId ? 'person2'
+          : null;
+
+        // Only person2 (answerer) requests the offer to avoid glare.
+        if (!callerSide) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+        if (callerSide !== 'person2') {
+          ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' });
+          return;
+        }
+
+        const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
+        const cached = coffeeVoiceOfferCache.get(cacheKey);
+        if (!cached) {
+          ack?.({ ok: false, error: 'OFFER_NOT_READY' });
+          return;
+        }
+
+        const ageMs = Date.now() - cached.createdAt;
+        if (ageMs > COFFEE_VOICE_OFFER_TTL_MS) {
+          coffeeVoiceOfferCache.delete(cacheKey);
+          ack?.({ ok: false, error: 'OFFER_EXPIRED' });
+          return;
+        }
+
+        console.log('[CoffeeVoice] forwarding cached offer', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          ageSeconds: Math.round(ageMs / 1000),
+          fromParticipantId: cached.fromParticipantId,
+        });
+
+        socket.emit('coffee:voice_offer', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: cached.fromParticipantId,
+          sdp: cached.sdp,
+        });
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[CoffeeVoice] voice_request_offer error:', err);
+        ack?.({ ok: false, error: 'VOICE_REQUEST_OFFER_ERROR' });
+      }
+    });
+
+    socket.on('coffee:voice_answer', async (data: unknown, ack) => {
+      const validation = coffeeVoiceAnswerSchema.safeParse(data);
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!caller) {
+          console.warn('[CoffeeVoice] voice_answer: caller not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        console.log('[CoffeeVoice] voice_answer received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+          answerSdpLength: validation.data.sdp.length,
+        });
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const callerSide: 'person1' | 'person2' | null =
+          pair.person1?.participantId === caller.participantId ? 'person1'
+          : pair.person2?.participantId === caller.participantId ? 'person2'
+          : null;
+
+        if (!callerSide) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+        if (callerSide !== 'person2') {
+          console.warn('[CoffeeVoice] voice_answer rejected: role mismatch', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            callerParticipantId: caller.participantId,
+            callerSide,
+          });
+          ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' });
+          return;
+        }
+
+        const partnerParticipantId = pair.person1?.participantId;
+        if (!partnerParticipantId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' });
+          return;
+        }
+
+        const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+        const partnerSocketId = voiceSocketByKey.get(partnerKey);
+        if (!partnerSocketId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
+          return;
+        }
+
+        gamesNs.to(partnerSocketId).emit('coffee:voice_answer', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: caller.participantId,
+          sdp: validation.data.sdp,
+        });
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[voice_answer] error:', err);
+        ack?.({ ok: false, error: 'VOICE_ANSWER_ERROR' });
+      }
+    });
+
+    socket.on('coffee:voice_ice_candidate', async (data: unknown, ack) => {
+      const validation = coffeeVoiceIceCandidateSchema.safeParse(data);
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!caller) {
+          console.warn('[CoffeeVoice] voice_ice_candidate: caller not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        // ICE candidate payloads can be small; logging key counts helps debugging.
+        console.log('[CoffeeVoice] voice_ice_candidate received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+          hasCandidate: !!validation.data.candidate?.candidate,
+        });
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const isInPair =
+          pair.person1?.participantId === caller.participantId || pair.person2?.participantId === caller.participantId;
+        if (!isInPair) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+
+        const partnerParticipantId =
+          pair.person1?.participantId === caller.participantId ? pair.person2?.participantId : pair.person1?.participantId;
+
+        if (!partnerParticipantId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' });
+          return;
+        }
+
+        const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+        const partnerSocketId = voiceSocketByKey.get(partnerKey);
+        if (!partnerSocketId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
+          return;
+        }
+
+        gamesNs.to(partnerSocketId).emit('coffee:voice_ice_candidate', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          fromParticipantId: caller.participantId,
+          candidate: validation.data.candidate,
+        });
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[voice_ice_candidate] error:', err);
+        ack?.({ ok: false, error: 'VOICE_ICE_ERROR' });
+      }
+    });
+
+    socket.on('coffee:voice_hangup', async (data: unknown, ack) => {
+      const validation = coffeeVoiceHangupSchema.safeParse(data);
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!caller) {
+          console.warn('[CoffeeVoice] voice_hangup: caller not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        console.log('[CoffeeVoice] voice_hangup received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+        });
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const isInPair =
+          pair.person1?.participantId === caller.participantId || pair.person2?.participantId === caller.participantId;
+        if (!isInPair) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+
+        const partnerParticipantId =
+          pair.person1?.participantId === caller.participantId ? pair.person2?.participantId : pair.person1?.participantId;
+        if (!partnerParticipantId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' });
+          return;
+        }
+
+        const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+        const partnerSocketId = voiceSocketByKey.get(partnerKey);
+        if (partnerSocketId) {
+          gamesNs.to(partnerSocketId).emit('coffee:voice_hangup', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            fromParticipantId: caller.participantId,
+          });
+        }
+
+        // Clear cached offer since the call is no longer active.
+        const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
+        coffeeVoiceOfferCache.delete(cacheKey);
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[voice_hangup] error:', err);
+        ack?.({ ok: false, error: 'VOICE_HANGUP_ERROR' });
+      }
+    });
+
     // ─── Disconnect cleanup ───
     socket.on('disconnect', (reason) => {
       console.log(`[Games] User ${user.userId} disconnected: ${reason}`);
+
+      // Cleanup targeted voice signaling mappings.
+      const keys = voiceKeysBySocket.get(socket.id);
+      if (keys) {
+        for (const key of keys) voiceSocketByKey.delete(key);
+        voiceKeysBySocket.delete(socket.id);
+      }
 
       for (const sessionId of joinedSessions) {
         socket.to(`game:${sessionId}`).emit('game:player_left', {
