@@ -99,6 +99,7 @@ describe('Socket Game Handlers — Security', () => {
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
       );
     });
+
   });
 
   // ═══════════════════════════════════════════════════════

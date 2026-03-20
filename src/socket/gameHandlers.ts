@@ -6,7 +6,6 @@ import { z } from 'zod';
 import { AuthenticatedSocket } from './types';
 import { GamesService } from '../services/games.service';
 import { CoffeeRouletteConfigService } from '../services/coffeeRouletteConfig.service';
-import { EventsService } from '../services/events.service';
 import { query, queryOne, transaction } from '../config/database';
 import crypto from 'crypto';
 
@@ -19,8 +18,6 @@ function toSnapshotCreatedAt(value: Date | string | null | undefined): string | 
   if (value instanceof Date) return value.toISOString();
   return null;
 }
-const eventsService = new EventsService();
-
 // Zod schemas for game socket events
 const gameJoinSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
@@ -1919,19 +1916,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
       for (const sessionId of joinedSessions) {
         const participantId = joinedParticipantBySessionId.get(sessionId);
 
-        // Mark participant as left in DB so they disappear from pairing + lobby lists.
-        if (participantId) {
-          try {
-            const session = await gamesService.getSession(sessionId);
-            await eventsService.leaveByParticipantId(session.event_id, participantId);
-          } catch (err) {
-            console.warn('[Games] disconnect leaveByParticipantId failed', {
-              sessionId,
-              participantId,
-              error: err instanceof Error ? err.message : String(err),
-            });
-          }
-        }
+        // IMPORTANT: disconnect/reload must NOT mark event participation as left.
+        // Guests and members should keep their participant identity across temporary socket drops.
 
         socket.to(`game:${sessionId}`).emit('game:player_left', {
           userId: user.userId,

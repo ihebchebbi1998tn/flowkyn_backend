@@ -61,9 +61,16 @@ function requireAdminRole(member: { role_name: string }, action: string) {
 }
 
 /** Get unified auth payload for event endpoints (supports both user JWT and guest token) */
-function getEventAuthPayload(req: AuthRequest): { isGuest: boolean; userId?: string; participantId?: string; eventId?: string } | null {
+function getEventAuthPayload(req: AuthRequest): { isGuest: boolean; userId?: string; participantId?: string; eventId?: string; guestIdentityKey?: string } | null {
   if (req.user) return { ...req.user, isGuest: false };
-  if (req.guest) return { isGuest: true, participantId: req.guest.participantId, eventId: req.guest.eventId };
+  if (req.guest) {
+    return {
+      isGuest: true,
+      participantId: req.guest.participantId,
+      eventId: req.guest.eventId,
+      guestIdentityKey: req.guest.guestIdentityKey,
+    };
+  }
   return null;
 }
 
@@ -129,7 +136,29 @@ async function requireCurrentParticipantId(eventId: string, userPayload: any): P
     if (userPayload.eventId !== eventId) {
       throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
     }
-    return userPayload.participantId;
+    const byId = await queryOne<{ id: string }>(
+      `SELECT id
+       FROM participants
+       WHERE id = $1 AND event_id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
+      [userPayload.participantId, eventId]
+    );
+    if (byId) return byId.id;
+
+    if (typeof userPayload.guestIdentityKey === 'string' && userPayload.guestIdentityKey.trim()) {
+      const byIdentity = await queryOne<{ id: string }>(
+        `SELECT id
+         FROM participants
+         WHERE event_id = $1
+           AND participant_type = 'guest'
+           AND guest_identity_key = $2
+           AND left_at IS NULL
+         ORDER BY joined_at ASC NULLS LAST, created_at ASC NULLS LAST, id ASC
+         LIMIT 1`,
+        [eventId, userPayload.guestIdentityKey]
+      );
+      if (byIdentity) return byIdentity.id;
+    }
+    throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
   }
 
   // Authenticated org member participant
@@ -702,6 +731,7 @@ export class EventsController {
           throw new AppError('You are not a participant in this event', 403, 'NOT_PARTICIPANT');
         }
 
+        const participantId = await requireCurrentParticipantId(req.params.eventId, userPayload);
         const row = await queryOne<{
           id: string;
           participant_type: string;
@@ -711,7 +741,7 @@ export class EventsController {
           `SELECT id, participant_type, guest_name, guest_avatar
            FROM participants
            WHERE id = $1 AND event_id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
-          [userPayload.participantId, req.params.eventId]
+          [participantId, req.params.eventId]
         );
 
         if (!row) {

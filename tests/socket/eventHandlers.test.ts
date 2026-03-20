@@ -125,6 +125,40 @@ describe('Socket Event Handlers — Security', () => {
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'VALIDATION' }) })
       );
     });
+
+    it('should recover guest by guest_identity_key when token participantId is stale', async () => {
+      const socket = createMockSocket({ userId: 'guest:stale-participant', email: '' });
+      socket.isGuest = true;
+      socket.guestPayload = {
+        participantId: 'stale-participant',
+        eventId: 'event-1',
+        guestName: 'Guest',
+        guestIdentityKey: 'identity-key-1',
+        isGuest: true,
+      };
+      connectionHandler(socket);
+
+      // Direct lookup by participantId fails, fallback by identity key succeeds
+      mockedQueryOne
+        .mockResolvedValueOnce(null)
+        .mockResolvedValueOnce({
+          id: 'recovered-participant',
+          display_name: 'Recovered Guest',
+          avatar_url: null,
+          guest_name: 'Recovered Guest',
+          guest_avatar: null,
+        });
+
+      const joinHandler = getHandler(socket, 'event:join');
+      const ack = jest.fn();
+      await joinHandler({ eventId: 'event-1' }, ack);
+
+      expect(ack).toHaveBeenCalledWith(expect.objectContaining({
+        ok: true,
+        data: expect.objectContaining({ participantId: 'recovered-participant' }),
+      }));
+      expect(socket.guestPayload.participantId).toBe('recovered-participant');
+    });
   });
 
   // ═══════════════════════════════════════════════════════
