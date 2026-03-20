@@ -12,6 +12,13 @@ import crypto from 'crypto';
 
 const gamesService = new GamesService();
 const coffeeService = new CoffeeRouletteConfigService();
+
+function toSnapshotCreatedAt(value: Date | string | null | undefined): string | null {
+  if (!value) return null;
+  if (typeof value === 'string') return value;
+  if (value instanceof Date) return value.toISOString();
+  return null;
+}
 const eventsService = new EventsService();
 
 // Zod schemas for game socket events
@@ -425,17 +432,13 @@ async function reduceCoffeeState(args: {
       [eventId]
     );
 
-    // Deduplicate participants to prevent a single user (e.g. guest from multiple tabs) from matching with themselves.
-    // We consider it the same person if they share the same display name and avatar payload.
-    const seenUsers = new Set<string>();
-    const uniqueParticipants = participants.filter(p => {
-      const key = `${p.name.trim().toLowerCase()}||${p.avatar || ''}`;
-      if (seenUsers.has(key)) return false;
-      seenUsers.add(key);
-      return true;
-    });
+    // Participants returned by the DB query are already unique by `p.id`.
+    // We must not dedupe by `name+avatar`, otherwise two different people
+    // with the same display name/avatar can be incorrectly merged, breaking
+    // matching/chat sync correctness.
+    const uniqueParticipants = participants;
 
-    // Guard: need at least 2 unique participants to form pairs
+    // Guard: need at least 2 participants to form pairs
     if (uniqueParticipants.length < 2) {
       return { ...base, phase: 'waiting', pairs: [], startedChatAt: null };
     }
@@ -856,7 +859,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               participantId: participant.participantId,
               snapshot: snapshot?.state || null,
               snapshotRevisionId: snapshot?.id || null,
-              snapshotCreatedAt: snapshot?.created_at || null,
+              snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
               // "Admin" here means "can control game flow" for UI purposes.
               isAdmin: !!admin,
             },
@@ -1039,7 +1042,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             sessionId: data.sessionId,
             gameData: publiclySafeState,
             snapshotRevisionId: savedSnapshot?.id || null,
-            snapshotCreatedAt: savedSnapshot?.created_at || null,
+            snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
           });
         }
 
@@ -1064,7 +1067,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               sessionId: data.sessionId,
               gameData: next,
               snapshotRevisionId: savedSnapshot?.id || null,
-              snapshotCreatedAt: savedSnapshot?.created_at || null,
+              snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
             });
 
             // If requested, also close the DB session and broadcast game:ended.
@@ -1105,7 +1108,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             sessionId: data.sessionId,
             gameData: next,
             snapshotRevisionId: savedSnapshot?.id || null,
-            snapshotCreatedAt: savedSnapshot?.created_at || null,
+            snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
           });
         }
       } catch (err: any) {
@@ -1230,7 +1233,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             activeRoundId: activeRound?.id || null,
             snapshot: snapshot?.state || null,
             snapshotRevisionId: snapshot?.id || null,
-            snapshotCreatedAt: snapshot?.created_at || null,
+            snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
           },
         });
       } catch (err: any) {
@@ -1790,7 +1793,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
                 sessionId,
                 gameData: next,
                 snapshotRevisionId: savedSnapshot?.id || null,
-                snapshotCreatedAt: savedSnapshot?.created_at || null,
+                snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
               });
             } catch (err) {
               console.error('[Games] coffee rematch on disconnect failed', {
