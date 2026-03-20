@@ -49,6 +49,7 @@ export function verifyGuestToken(token: string): GuestPayload {
     participantId: decoded.participantId,
     eventId: decoded.eventId,
     guestName: decoded.guestName,
+    guestIdentityKey: typeof decoded.guestIdentityKey === 'string' ? decoded.guestIdentityKey : undefined,
     isGuest: true,
   };
 }

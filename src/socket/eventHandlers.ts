@@ -50,7 +50,9 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN users u ON u.id = om.user_id
      LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
-     WHERE p.event_id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
+     WHERE p.event_id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL
+     ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+     LIMIT 1`,
     [eventId, userId]
   );
   if (memberRow) return { participantId: memberRow.id, memberId: memberRow.member_id, displayName: memberRow.display_name, avatarUrl: memberRow.avatar_url || null };

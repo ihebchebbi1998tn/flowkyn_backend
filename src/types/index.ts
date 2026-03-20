@@ -9,6 +9,7 @@ export interface GuestPayload {
   participantId: string;
   eventId: string;
   guestName: string;
+  guestIdentityKey?: string;
   isGuest: true;
 }
 

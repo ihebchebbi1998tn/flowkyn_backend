@@ -689,7 +689,9 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
     `SELECT p.id FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      JOIN game_sessions gs ON gs.event_id = p.event_id
-     WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL`,
+     WHERE gs.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending') AND p.left_at IS NULL
+     ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+     LIMIT 1`,
     [sessionId, userId]
   );
   if (row) return { participantId: row.id };

@@ -138,7 +138,7 @@ async function requireCurrentParticipantId(eventId: string, userPayload: any): P
      FROM participants p
      JOIN organization_members om ON om.id = p.organization_member_id
      WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL
-     ORDER BY p.joined_at ASC NULLS LAST
+     ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
      LIMIT 1`,
     [eventId, userPayload.userId],
   );
@@ -377,11 +377,20 @@ export class EventsController {
           const { verifyGuestToken } = await import('../utils/jwt');
           const guestPayload = verifyGuestToken(token);
           if (guestPayload.eventId === _req.params.eventId) {
-            const pt = await queryOne<{ id: string; guest_name: string }>(
-              'SELECT id, guest_name FROM participants WHERE id = $1 AND left_at IS NULL',
+            const pt = await queryOne<{ id: string; guest_name: string; guest_identity_key: string | null }>(
+              'SELECT id, guest_name, guest_identity_key FROM participants WHERE id = $1 AND left_at IS NULL',
               [guestPayload.participantId]
             );
             if (pt) {
+              const incomingIdentityKey = typeof _req.body?.guest_identity_key === 'string' ? _req.body.guest_identity_key : null;
+              if (incomingIdentityKey && !pt.guest_identity_key) {
+                await query(
+                  `UPDATE participants
+                   SET guest_identity_key = $1
+                   WHERE id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
+                  [incomingIdentityKey, pt.id],
+                );
+              }
               return res.status(200).json({
                 participant_id: pt.id,
                 guest_name: pt.guest_name || guestPayload.guestName,
@@ -396,30 +405,34 @@ export class EventsController {
       }
 
       const result = await invitationsService.joinAsGuest(_req.params.eventId, _req.body, event);
-      await audit.create(event.organization_id, null, 'EVENT_GUEST_JOIN', { eventId: req.params.eventId, guestName: result.guest_name, ip: req.ip });
-      emitEventNotification(req.params.eventId, 'participant:joined', {
-        guestName: result.guest_name,
-        participantId: result.participant_id,
-      });
+      if (!result.already_joined) {
+        await audit.create(event.organization_id, null, 'EVENT_GUEST_JOIN', { eventId: req.params.eventId, guestName: result.guest_name, ip: req.ip });
+        emitEventNotification(req.params.eventId, 'participant:joined', {
+          guestName: result.guest_name,
+          participantId: result.participant_id,
+        });
+      }
 
       // Notify the event creator that a guest joined (if we can resolve a user_id).
-      try {
-        const creator = await queryOne<{ user_id: string }>(
-          `SELECT om.user_id
-           FROM organization_members om
-           WHERE om.id = $1`,
-          [event.created_by_member_id]
-        );
-        if (creator?.user_id) {
-          await notificationsService.create(creator.user_id, 'event_participant_joined', {
-            event_id: event.id,
-            title: event.title,
-            participant_id: result.participant_id,
-            guest_name: result.guest_name,
-          });
+      if (!result.already_joined) {
+        try {
+          const creator = await queryOne<{ user_id: string }>(
+            `SELECT om.user_id
+             FROM organization_members om
+             WHERE om.id = $1`,
+            [event.created_by_member_id]
+          );
+          if (creator?.user_id) {
+            await notificationsService.create(creator.user_id, 'event_participant_joined', {
+              event_id: event.id,
+              title: event.title,
+              participant_id: result.participant_id,
+              guest_name: result.guest_name,
+            });
+          }
+        } catch (notifErr) {
+          console.warn('[EventsController] Failed to create guest join notification:', (notifErr as any)?.message);
         }
-      } catch (notifErr) {
-        console.warn('[EventsController] Failed to create guest join notification:', (notifErr as any)?.message);
       }
 
       // Generate a guest token so the guest can participate in games and chat via REST/WebSocket
@@ -428,10 +441,11 @@ export class EventsController {
         participantId: result.participant_id,
         eventId: req.params.eventId,
         guestName: result.guest_name,
+        guestIdentityKey: typeof _req.body?.guest_identity_key === 'string' ? _req.body.guest_identity_key : undefined,
         isGuest: true,
       });
 
-      res.status(201).json({ ...result, guest_token });
+      res.status(result.already_joined ? 200 : 201).json({ ...result, guest_token });
     } catch (err) { next(err); }
   }
 
@@ -718,7 +732,7 @@ export class EventsController {
          LEFT JOIN organization_members om ON om.id = p.organization_member_id
          LEFT JOIN users u ON u.id = om.user_id
          WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL
-         ORDER BY p.joined_at ASC NULLS LAST
+         ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
          LIMIT 1`,
         [req.params.eventId, userPayload.userId]
       );

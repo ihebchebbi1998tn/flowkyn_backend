@@ -158,7 +158,11 @@ export class EventInvitationsService {
    * @param event - Pre-fetched event record with settings
    * @returns Object with participant_id and sanitized guest_name
    */
-  async joinAsGuest(eventId: string, data: { name: string; email?: string; avatar_url?: string; token?: string }, event: any) {
+  async joinAsGuest(
+    eventId: string,
+    data: { name: string; email?: string; avatar_url?: string; token?: string; guest_identity_key?: string },
+    event: any,
+  ) {
     // null means no event_settings row (shouldn't happen, but default to allowing guests)
     if ((event as any).allow_guests === false) {
       throw new AppError('This event does not allow guest participants', 403, 'FORBIDDEN');
@@ -170,7 +174,40 @@ export class EventInvitationsService {
       throw new AppError('A valid invitation token is required to join this private event', 403, 'FORBIDDEN');
     }
 
+    const sanitizedName = sanitizeText(data.name, 100).trim();
+    if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED');
+
+    const identityKey = typeof data.guest_identity_key === 'string' ? data.guest_identity_key.trim() : '';
+    const normalizedIdentityKey = identityKey || null;
+
     return await transaction(async (client) => {
+      if (normalizedIdentityKey) {
+        const existingByIdentity = await client.query<{ id: string; guest_name: string | null }>(
+          `SELECT id, guest_name
+           FROM participants
+           WHERE event_id = $1
+             AND participant_type = 'guest'
+             AND guest_identity_key = $2
+             AND left_at IS NULL
+           ORDER BY joined_at ASC NULLS LAST, created_at ASC NULLS LAST, id ASC
+           LIMIT 1`,
+          [eventId, normalizedIdentityKey],
+        );
+
+        if (existingByIdentity.rows.length > 0) {
+          const row = existingByIdentity.rows[0];
+          const resolvedName = sanitizedName || row.guest_name || 'Guest';
+          await client.query(
+            `UPDATE participants
+             SET guest_name = $1,
+                 guest_avatar = $2
+             WHERE id = $3`,
+            [resolvedName, data.avatar_url || null, row.id],
+          );
+          return { participant_id: row.id, guest_name: resolvedName, already_joined: true };
+        }
+      }
+
       const { rows: [{ count }] } = await client.query(
         'SELECT COUNT(*) as count FROM participants WHERE event_id = $1 AND left_at IS NULL',
         [eventId]
@@ -180,8 +217,6 @@ export class EventInvitationsService {
       }
 
       const participantId = uuid();
-      const sanitizedName = sanitizeText(data.name, 100).trim();
-      if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED');
 
       // Check for name conflicts across both guest_name and event_profiles.display_name
       // Exclude the new guest being added (since this is a new participant, there's no existing ID to exclude)
@@ -203,9 +238,9 @@ export class EventInvitationsService {
       }
 
       await client.query(
-        `INSERT INTO participants (id, event_id, guest_name, guest_avatar, participant_type, joined_at, created_at)
-         VALUES ($1, $2, $3, $4, 'guest', NOW(), NOW())`,
-        [participantId, eventId, sanitizedName, data.avatar_url || null]
+        `INSERT INTO participants (id, event_id, guest_name, guest_avatar, guest_identity_key, participant_type, joined_at, created_at)
+         VALUES ($1, $2, $3, $4, $5, 'guest', NOW(), NOW())`,
+        [participantId, eventId, sanitizedName, data.avatar_url || null, normalizedIdentityKey]
       );
 
       if (data.token) {
@@ -215,7 +250,7 @@ export class EventInvitationsService {
         );
       }
 
-      return { participant_id: participantId, guest_name: sanitizedName };
+      return { participant_id: participantId, guest_name: sanitizedName, already_joined: false };
     });
   }
 

@@ -203,6 +203,7 @@ CREATE TABLE participants (
   organization_member_id UUID REFERENCES organization_members(id),
   guest_name VARCHAR(100),
   guest_avatar VARCHAR(255),
+  guest_identity_key VARCHAR(128),
   participant_type VARCHAR(20) NOT NULL DEFAULT 'member', -- member, guest
   invited_by_member_id UUID REFERENCES organization_members(id),
   joined_at TIMESTAMP,
@@ -214,6 +215,8 @@ CREATE INDEX idx_participants_event ON participants(event_id);
 CREATE INDEX idx_participants_active_range ON participants(event_id, left_at, joined_at);
 -- Prevent duplicate active participants
 CREATE UNIQUE INDEX idx_participants_active ON participants(event_id, organization_member_id) WHERE left_at IS NULL AND organization_member_id IS NOT NULL;
+CREATE INDEX idx_participants_guest_identity_lookup ON participants(event_id, guest_identity_key) WHERE participant_type = 'guest' AND left_at IS NULL AND guest_identity_key IS NOT NULL;
+CREATE UNIQUE INDEX idx_participants_guest_identity_unique_active ON participants(event_id, guest_identity_key) WHERE participant_type = 'guest' AND left_at IS NULL AND guest_identity_key IS NOT NULL;
 
 -- ─── Event Profiles (per-event nickname + avatar) ───
 CREATE TABLE event_profiles (

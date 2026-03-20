@@ -75,4 +75,5 @@ export const guestJoinSchema = z.object({
   email: z.string().trim().email().max(255).optional().or(z.literal('')).transform(v => v || undefined),
   avatar_url: z.string().max(500).optional().nullable().transform(v => v || undefined),
   token: z.string().max(255).optional(),
+  guest_identity_key: z.string().trim().min(16).max(128).regex(/^[A-Za-z0-9_-]+$/, 'Invalid guest identity key').optional(),
 });
