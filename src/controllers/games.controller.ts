@@ -188,17 +188,17 @@ export class GamesController {
       const allow = await allowParticipantGameControlForEvent(eventId);
 
       if (req.user) {
-        const member = await queryOne<{ id: string; role_name: string }>(
-          `SELECT om.id, r.name as role_name FROM organization_members om
-           JOIN roles r ON r.id = om.role_id
-           JOIN events e ON e.organization_id = om.organization_id
-           WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
+      const member = await queryOne<{ id: string; role_name: string }>(
+        `SELECT om.id, r.name as role_name FROM organization_members om
+         JOIN roles r ON r.id = om.role_id
+         JOIN events e ON e.organization_id = om.organization_id
+         WHERE e.id = $1 AND om.user_id = $2 AND om.status IN ('active', 'pending')`,
           [eventId, req.user.userId]
-        );
-        if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
+      );
+      if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
 
-        if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
-          throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
+      if (!allow && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
+        throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
         }
       } else if (req.guest) {
         // Defense-in-depth: make sure the guest token is for the same event being requested.

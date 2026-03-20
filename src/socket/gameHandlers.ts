@@ -316,6 +316,7 @@ type CoffeeState = {
     person1: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
     person2: { participantId: string; name: string; avatar: string; avatarUrl?: string | null };
     topic: string;
+    topicKey?: string; // i18n key (used for fallback topics so all clients can translate locally)
     topicId?: string; // ID of the selected topic
     sessionId?: string; // Pair session ID for tracking
   }>;
@@ -346,7 +347,7 @@ async function getDynamicTopic(eventId: string): Promise<{ text: string; id?: st
       const selectedTopic = await coffeeService.selectTopic(config.id);
       if (selectedTopic) {
         return {
-          text: selectedTopic.title || 'Let\'s chat!',
+          text: selectedTopic.title || 'gamePlay.coffeeRoulette.defaultTopic',
           id: selectedTopic.id,
         };
       }
@@ -356,22 +357,23 @@ async function getDynamicTopic(eventId: string): Promise<{ text: string; id?: st
   }
 
   // Fallback to default topics if no configuration or selection failed
-  const FALLBACK_TOPICS = [
-    "What's the most interesting thing you've learned recently?",
-    "If you could have dinner with anyone (alive or dead), who would it be?",
-    "What's a hobby or skill you'd love to pick up?",
-    "What was your first job? What did you learn from it?",
-    "If you could live anywhere in the world for a year, where would you go?",
-    "What's the best piece of advice you've ever received?",
-    "What's a book or movie that completely changed your perspective?",
-    "If you had to eat one meal for the rest of your life, what would it be?",
-    "What's the most spontaneous thing you've ever done?",
-    "Which fictional character do you relate to the most?",
-    "What's something you're surprisingly good at?",
+  const FALLBACK_TOPIC_KEYS = [
+    'gamePlay.coffeeRoulette.fallbackTopics.t1',
+    'gamePlay.coffeeRoulette.fallbackTopics.t2',
+    'gamePlay.coffeeRoulette.fallbackTopics.t3',
+    'gamePlay.coffeeRoulette.fallbackTopics.t4',
+    'gamePlay.coffeeRoulette.fallbackTopics.t5',
+    'gamePlay.coffeeRoulette.fallbackTopics.t6',
+    'gamePlay.coffeeRoulette.fallbackTopics.t7',
+    'gamePlay.coffeeRoulette.fallbackTopics.t8',
+    'gamePlay.coffeeRoulette.fallbackTopics.t9',
+    'gamePlay.coffeeRoulette.fallbackTopics.t10',
+    'gamePlay.coffeeRoulette.fallbackTopics.t11',
   ];
 
-  const randomTopic = FALLBACK_TOPICS[Math.floor(Math.random() * FALLBACK_TOPICS.length)];
-  return { text: randomTopic };
+  const randomKey = FALLBACK_TOPIC_KEYS[Math.floor(Math.random() * FALLBACK_TOPIC_KEYS.length)];
+  // We also set `text` to the key for backward-compat if a client doesn't support topicKey translation.
+  return { text: randomKey, id: undefined };
 }
 
 async function reduceCoffeeState(args: {
@@ -449,6 +451,7 @@ async function reduceCoffeeState(args: {
     // Pick ONE topic per shuffle so every pair (and both talkers) sees the same
     // "Today's Topic" at the same prompt index.
     const topicData = await getDynamicTopic(eventId);
+    const topicKey = topicData.text.startsWith('gamePlay.coffeeRoulette.') ? topicData.text : undefined;
 
     const pairs: CoffeeState['pairs'] = [];
     for (let i = 0; i < shuffled.length; i += 2) {
@@ -462,6 +465,7 @@ async function reduceCoffeeState(args: {
         person1: { participantId: p1.id, name: p1.name, avatar: (p1.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p1.avatar || null },
         person2: { participantId: p2.id, name: p2.name, avatar: (p2.name || '??').slice(0, 2).toUpperCase(), avatarUrl: p2.avatar || null },
         topic: topicData.text,
+        topicKey,
         topicId: topicData.id,
       });
     }
@@ -522,9 +526,11 @@ async function reduceCoffeeState(args: {
     // Sync requirement:
     // Pick ONE topic for the whole session/prompt index (not one per pair).
     const nextTopicData = await getDynamicTopic(eventId);
+    const nextTopicKey = nextTopicData.text.startsWith('gamePlay.coffeeRoulette.') ? nextTopicData.text : undefined;
     const updatedPairs = (base.pairs || []).map((pair) => ({
       ...pair,
       topic: nextTopicData.text,
+      topicKey: nextTopicKey,
       topicId: nextTopicData.id,
     }));
 
