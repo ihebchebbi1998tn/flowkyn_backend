@@ -796,7 +796,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
       const validation = gameJoinSchema.safeParse(data);
       if (!validation.success) {
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
-        ack?.({ ok: false, error: 'Invalid session ID' });
+        ack?.({
+          ok: false,
+          error: 'Invalid session ID',
+          code: 'VALIDATION',
+          details: { issue: validation.error.issues[0] },
+        });
         return;
       }
 
@@ -805,7 +810,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
-          ack?.({ ok: false, error: 'Not a participant' });
+          ack?.({
+            ok: false,
+            error: 'Not a participant',
+            code: 'FORBIDDEN',
+            details: { isGuest: !!socket.isGuest, userId: user.userId, sessionId: data.sessionId },
+          });
           return;
         }
 
@@ -854,7 +864,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
       } catch (err: any) {
         console.error(`[Games] game:join error:`, err.message);
         socket.emit('error', { message: err.message, code: 'JOIN_ERROR' });
-        ack?.({ ok: false, error: err.message });
+        ack?.({
+          ok: false,
+          error: err.message,
+          code: 'JOIN_ERROR',
+          details: { message: err?.message || String(err) },
+        });
       }
     });
 

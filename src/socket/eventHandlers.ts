@@ -107,6 +107,12 @@ export function setupEventHandlers(eventsNs: Namespace) {
     socket.on('event:join', async (data: { eventId: string }, ack) => {
       if (!validateFields(data, ['eventId'])) {
         socket.emit('error', { message: 'Invalid event:join data', code: 'VALIDATION' });
+        ack?.({
+          ok: false,
+          error: 'Invalid event:join data',
+          code: 'VALIDATION',
+          details: { received: data },
+        });
         return;
       }
 
@@ -117,7 +123,12 @@ export function setupEventHandlers(eventsNs: Namespace) {
         if (!participant) {
           console.warn(`[Events] User ${user.userId} tried to join event ${data.eventId} but is not a participant or org member`);
           socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
-          ack?.({ ok: false, error: 'Not a participant' });
+          ack?.({
+            ok: false,
+            error: 'Not a participant',
+            code: 'FORBIDDEN',
+            details: { isGuest: !!socket.isGuest, userId: user.userId, eventId: data.eventId },
+          });
           return;
         }
 
@@ -144,7 +155,12 @@ export function setupEventHandlers(eventsNs: Namespace) {
       } catch (err: any) {
         console.error(`[Events] event:join error for user ${user.userId} in event ${data.eventId}:`, err.message, err.stack);
         socket.emit('error', { message: 'Failed to join event room', code: 'INTERNAL' });
-        ack?.({ ok: false, error: 'Server error' });
+        ack?.({
+          ok: false,
+          error: 'Server error',
+          code: 'INTERNAL',
+          details: { message: err?.message || String(err) },
+        });
       }
     });
 

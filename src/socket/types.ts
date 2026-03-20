@@ -70,5 +70,7 @@ export interface NotificationsServerToClient {
 export interface SocketAck {
   ok: boolean;
   error?: string;
+  code?: string;
+  details?: any;
   data?: any;
 }
