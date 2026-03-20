@@ -675,31 +675,80 @@ async function reduceStrategicState(args: {
 async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
   // If this is a guest socket, use the guest payload directly
   if (socket?.isGuest && socket.guestPayload) {
+    console.log('[Games] Guest socket detected, attempting verification', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      participantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
+      hasIdentityKey: !!socket.guestPayload.guestIdentityKey,
+      socketId: socket.id,
+    });
+    
     let guestRow = await queryOne<{ id: string }>(
       `SELECT p.id FROM participants p
        JOIN game_sessions gs ON gs.event_id = p.event_id
        WHERE gs.id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
       [sessionId, socket.guestPayload.participantId]
     );
-    // Reload/self-heal fallback: recover by stable guest_identity_key when token participantId is stale.
-    if (!guestRow && socket.guestPayload.guestIdentityKey) {
-      guestRow = await queryOne<{ id: string }>(
-        `SELECT p.id
-         FROM participants p
-         JOIN game_sessions gs ON gs.event_id = p.event_id
-         WHERE gs.id = $1
-           AND p.participant_type = 'guest'
-           AND p.guest_identity_key = $2
-           AND p.left_at IS NULL
-         ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
-         LIMIT 1`,
-        [sessionId, socket.guestPayload.guestIdentityKey]
-      );
-      if (guestRow) {
-        socket.guestPayload.participantId = guestRow.id;
-      }
+    
+    if (guestRow) {
+      console.log('[Games] Direct participant verification SUCCESS', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        participantId: guestRow.id.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return { participantId: guestRow.id };
     }
-    return guestRow ? { participantId: guestRow.id } : null;
+    
+    console.warn('[Games] Direct participant verification FAILED: participant not found in session', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      participantIdFromToken: socket.guestPayload.participantId?.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    
+    // Reload/self-heal fallback: recover by stable guest_identity_key when token participantId is stale.
+    if (!socket.guestPayload.guestIdentityKey) {
+      console.warn('[Games] Recovery BLOCKED: no identity key in guest payload', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return null;
+    }
+    
+    console.log('[Games] Attempting fallback recovery via identity key', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    
+    guestRow = await queryOne<{ id: string }>(
+      `SELECT p.id
+       FROM participants p
+       JOIN game_sessions gs ON gs.event_id = p.event_id
+       WHERE gs.id = $1
+         AND p.participant_type = 'guest'
+         AND p.guest_identity_key = $2
+         AND p.left_at IS NULL
+       ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+       LIMIT 1`,
+      [sessionId, socket.guestPayload.guestIdentityKey]
+    );
+    
+    if (guestRow) {
+      console.log('[Games] Fallback recovery SUCCESS via identity key', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        oldParticipantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
+        newParticipantId: guestRow.id.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      socket.guestPayload.participantId = guestRow.id;
+      return { participantId: guestRow.id };
+    }
+    
+    console.error('[Games] Fallback recovery FAILED: no participant found with identity key', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    return null;
   }
 
   // Recovery mode: token may be missing/expired, recover guest by stable identity key.

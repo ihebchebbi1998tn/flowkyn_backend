@@ -22,6 +22,13 @@ function validateFields(data: any, fields: string[]): boolean {
 async function verifyParticipant(eventId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string; memberId: string | null; displayName: string; avatarUrl: string | null } | null> {
   // If this is a guest socket, use the guest payload directly (prefer event profile if set)
   if (socket?.isGuest && socket.guestPayload) {
+    console.log('[Events] Guest socket detected, attempting verification', {
+      eventId: eventId.substring(0, 8) + '...',
+      participantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
+      hasIdentityKey: !!socket.guestPayload.guestIdentityKey,
+      socketId: socket.id,
+    });
+    
     let guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
       `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
        FROM participants p
@@ -29,26 +36,13 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
        WHERE p.event_id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
       [eventId, socket.guestPayload.participantId]
     );
-    // Reload/self-heal fallback: if participantId from token no longer resolves,
-    // recover by stable guest_identity_key for this event.
-    if (!guestRow && socket.guestPayload.guestIdentityKey) {
-      guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
-        `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
-         FROM participants p
-         LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
-         WHERE p.event_id = $1
-           AND p.participant_type = 'guest'
-           AND p.guest_identity_key = $2
-           AND p.left_at IS NULL
-         ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
-         LIMIT 1`,
-        [eventId, socket.guestPayload.guestIdentityKey]
-      );
-      if (guestRow) {
-        socket.guestPayload.participantId = guestRow.id;
-      }
-    }
+    
     if (guestRow) {
+      console.log('[Events] Direct participant verification SUCCESS', {
+        eventId: eventId.substring(0, 8) + '...',
+        participantId: guestRow.id.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
       return {
         participantId: guestRow.id,
         memberId: null,
@@ -56,6 +50,63 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
         avatarUrl: guestRow.avatar_url || guestRow.guest_avatar || null
       };
     }
+    
+    console.warn('[Events] Direct participant verification FAILED: participant not found in event', {
+      eventId: eventId.substring(0, 8) + '...',
+      participantIdFromToken: socket.guestPayload.participantId?.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    
+    // Reload/self-heal fallback: if participantId from token no longer resolves,
+    // recover by stable guest_identity_key for this event.
+    if (!socket.guestPayload.guestIdentityKey) {
+      console.warn('[Events] Recovery BLOCKED: no identity key in guest payload', {
+        eventId: eventId.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return null;
+    }
+    
+    console.log('[Events] Attempting fallback recovery via identity key', {
+      eventId: eventId.substring(0, 8) + '...',
+      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    
+    guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
+      `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
+       FROM participants p
+       LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+       WHERE p.event_id = $1
+         AND p.participant_type = 'guest'
+         AND p.guest_identity_key = $2
+         AND p.left_at IS NULL
+       ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+       LIMIT 1`,
+      [eventId, socket.guestPayload.guestIdentityKey]
+    );
+    
+    if (guestRow) {
+      console.log('[Events] Fallback recovery SUCCESS via identity key', {
+        eventId: eventId.substring(0, 8) + '...',
+        oldParticipantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
+        newParticipantId: guestRow.id.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      socket.guestPayload.participantId = guestRow.id;
+      return {
+        participantId: guestRow.id,
+        memberId: null,
+        displayName: guestRow.display_name || guestRow.guest_name || 'Guest',
+        avatarUrl: guestRow.avatar_url || guestRow.guest_avatar || null
+      };
+    }
+    
+    console.error('[Events] Fallback recovery FAILED: no participant found with identity key', {
+      eventId: eventId.substring(0, 8) + '...',
+      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
     return null;
   }
 
