@@ -841,6 +841,37 @@ const migrations: { version: number; name: string; sql: string }[] = [
         ON early_access_requests(credentials_email_sent_at);
     `,
   },
+  {
+    version: 19,
+    name: 'activity_feedbacks_table',
+    sql: `
+      -- ─── Activity Feedbacks (end-of-activity ratings/comments) ───
+      CREATE TABLE IF NOT EXISTS activity_feedbacks (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        game_session_id UUID REFERENCES game_sessions(id) ON DELETE SET NULL,
+        game_type_key VARCHAR(50) NOT NULL, -- e.g. two-truths, coffee-roulette
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        reporter_name VARCHAR(200) NOT NULL,
+        reporter_avatar_url TEXT,
+        rating SMALLINT NOT NULL CHECK (rating >= 1 AND rating <= 5),
+        category VARCHAR(50),
+        comment TEXT NOT NULL,
+        source VARCHAR(50) NOT NULL DEFAULT 'end_clicked', -- end_clicked, activity_completed, etc
+        ip_address VARCHAR(45),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_activity_feedbacks_event_created
+        ON activity_feedbacks(event_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_activity_feedbacks_participant_created
+        ON activity_feedbacks(participant_id, created_at);
+      CREATE INDEX IF NOT EXISTS idx_activity_feedbacks_game_type_created
+        ON activity_feedbacks(game_type_key, created_at);
+      CREATE INDEX IF NOT EXISTS idx_activity_feedbacks_rating
+        ON activity_feedbacks(rating);
+    `,
+  },
 ];
 
 /**

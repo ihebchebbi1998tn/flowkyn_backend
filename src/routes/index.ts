@@ -13,6 +13,7 @@ import { adminRoutes } from './admin.routes';
 import { contactRoutes } from './contact.routes';
 import { smtpTestRoutes } from './smtpTest.routes';
 import { bugReportsRoutes } from './bugReports.routes';
+import { activityFeedbacksRoutes } from './activityFeedbacks.routes';
 import { earlyAccessRoutes } from './earlyAccess.routes';
 import coffeeRouletteConfigRoutes from './coffeeRouletteConfig.routes';
 
@@ -32,6 +33,7 @@ router.use('/audit-logs', auditLogsRoutes);
 router.use('/admin', adminRoutes);
 router.use('/contact', contactRoutes);
 router.use('/bug-reports', bugReportsRoutes);
+router.use('/activity-feedbacks', activityFeedbacksRoutes);
 router.use('/smtp-test', smtpTestRoutes);
 router.use('/early-access', earlyAccessRoutes);
 router.use('/coffee-roulette', coffeeRouletteConfigRoutes);
