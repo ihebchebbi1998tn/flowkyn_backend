@@ -391,10 +391,24 @@ export class EventsController {
                   [incomingIdentityKey, pt.id],
                 );
               }
+              // Re-sign token with current display name so guestName stays in sync (display can be updated via event_profiles)
+              const displayRow = await queryOne<{ display_name: string | null }>(
+                `SELECT ep.display_name FROM event_profiles ep WHERE ep.event_id = $1 AND ep.participant_id = $2`,
+                [_req.params.eventId, pt.id]
+              );
+              const currentGuestName = (displayRow?.display_name || pt.guest_name || guestPayload.guestName || 'Guest').trim() || 'Guest';
+              const { signGuestToken } = await import('../utils/jwt');
+              const fresh_token = signGuestToken({
+                participantId: pt.id,
+                eventId: _req.params.eventId,
+                guestName: currentGuestName,
+                guestIdentityKey: incomingIdentityKey || undefined,
+                isGuest: true,
+              });
               return res.status(200).json({
                 participant_id: pt.id,
-                guest_name: pt.guest_name || guestPayload.guestName,
-                guest_token: token,
+                guest_name: currentGuestName,
+                guest_token: fresh_token,
                 already_joined: true
               });
             }

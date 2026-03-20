@@ -69,6 +69,13 @@ export class EventProfilesService {
        RETURNING id, display_name, avatar_url`,
       [eventId, participantId, sanitizedName, avatarUrl || null],
     );
+    // Keep participants.guest_name in sync for guests so token re-sign uses correct name
+    await query(
+      `UPDATE participants
+       SET guest_name = $1
+       WHERE id = $2 AND participant_type = 'guest' AND event_id = $3`,
+      [sanitizedName, participantId, eventId],
+    );
     return row;
   }
 }
