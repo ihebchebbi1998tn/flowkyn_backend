@@ -1433,7 +1433,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        // Cache offer immediately so the answerer can request it even if they enable voice
+        // FIX #2: Cache offer immediately so the answerer can request it even if they enable voice
         // slightly after the initial offer was emitted.
         const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
         coffeeVoiceOfferCache.set(cacheKey, {
@@ -1442,29 +1442,48 @@ export function setupGameHandlers(gamesNs: Namespace) {
           createdAt: Date.now(),
         });
 
+        console.log('[CoffeeVoice] Offer cached for partner retrieval', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+        });
+
         const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
         const partnerSocketId = voiceSocketByKey.get(partnerKey);
-        if (!partnerSocketId) {
-          console.warn('[CoffeeVoice] voice_offer rejected: partner socket not connected', {
+
+        if (partnerSocketId) {
+          // Partner is already listening for voice - send offer immediately
+          console.log('[CoffeeVoice] Sending offer directly to connected partner', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            partnerSocketId,
+          });
+
+          gamesNs.to(partnerSocketId).emit('coffee:voice_offer', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            fromParticipantId: caller.participantId,
+            sdp: validation.data.sdp,
+          });
+
+          ack?.({ ok: true });
+        } else {
+          // FIX #2: Partner not yet listening for voice - send notification
+          // so they know to request the cached offer
+          console.log('[CoffeeVoice] Partner socket not found, sending awaiting notification', {
             sessionId: validation.data.sessionId,
             pairId: validation.data.pairId,
             partnerParticipantId,
-            partnerKey,
           });
-          // Not fatal: we already cached the offer above.
-          // The answerer can later call `coffee:voice_request_offer` to retrieve it.
-          ack?.({ ok: true });
-          return;
+
+          const roomId = `game:${validation.data.sessionId}`;
+          gamesNs.to(roomId).emit('coffee:voice_offer_awaiting', {
+            pairId: validation.data.pairId,
+            fromParticipantId: caller.participantId,
+            toParticipantId: partnerParticipantId,
+          });
+
+          ack?.({ ok: true, waiting: true });
         }
-
-        gamesNs.to(partnerSocketId).emit('coffee:voice_offer', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          fromParticipantId: caller.participantId,
-          sdp: validation.data.sdp,
-        });
-
-        ack?.({ ok: true });
       } catch (err) {
         console.error('[voice_offer] error:', err);
         ack?.({ ok: false, error: 'VOICE_OFFER_ERROR' });
