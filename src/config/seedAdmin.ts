@@ -39,10 +39,7 @@ export async function seedSuperAdmin(): Promise<void> {
     [email]
   );
 
-  if (existing) {
-    console.log(`✅ Super admin already exists (${email})`);
-    return;
-  }
+  if (existing) return;
 
   // Create the admin user with active status (skip email verification)
   const userId = uuid();
@@ -56,8 +53,4 @@ export async function seedSuperAdmin(): Promise<void> {
     [userId, email, passwordHash, name]
   );
 
-  console.log(`🔐 Super admin created:`);
-  console.log(`   Email:    ${email}`);
-  console.log(`   Password: ${password}`);
-  console.log(`   ⚠️  Change the password after first login!`);
 }

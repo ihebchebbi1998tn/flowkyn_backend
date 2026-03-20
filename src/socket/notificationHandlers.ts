@@ -9,7 +9,6 @@ export function setupNotificationHandlers(notificationsNs: Namespace) {
   notificationsNs.on('connection', async (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
     const user = socket.user;
-    console.log(`[Notifications] User ${user.userId} connected`);
 
     // Auto-join a personal room for targeted notifications
     socket.join(`user:${user.userId}`);
@@ -25,8 +24,6 @@ export function setupNotificationHandlers(notificationsNs: Namespace) {
       console.error(`[Notifications] Error fetching unread count:`, err.message);
     }
 
-    socket.on('disconnect', () => {
-      console.log(`[Notifications] User ${user.userId} disconnected`);
-    });
+    socket.on('disconnect', () => {});
   });
 }

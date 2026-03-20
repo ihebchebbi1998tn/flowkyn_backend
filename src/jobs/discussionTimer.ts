@@ -56,9 +56,6 @@ export async function enforceDiscussionTimeouts() {
       };
     }
 
-    console.log(
-      `[DiscussionTimer] Found ${expiredSessions.length} expired discussions to auto-close`
-    );
 
     let debriefs_triggered = 0;
 
@@ -114,9 +111,6 @@ async function transitionToDebriefAuto(sessionId: string, eventId: string) {
       [sessionId]
     );
 
-    console.log(
-      `[DiscussionTimer] Auto-closed discussion for session ${sessionId} and triggered debrief`
-    );
 
     // Emit socket event to notify all participants in real-time
     // This tells all connected clients to update their UI to debrief phase
@@ -143,19 +137,12 @@ async function transitionToDebriefAuto(sessionId: string, eventId: string) {
  * Returns the interval ID so it can be cleared during graceful shutdown.
  */
 export function scheduleDiscussionTimer(intervalMs = 30000) {
-  console.log(
-    `[DiscussionTimer] Starting job - will check for expired discussions every ${intervalMs}ms`
-  );
 
   const interval = setInterval(async () => {
     try {
       const result = await enforceDiscussionTimeouts();
 
-      if (result.debriefs_triggered > 0) {
-        console.log(
-          `[DiscussionTimer] Processed ${result.processed} expired sessions, triggered ${result.debriefs_triggered} debriefs`
-        );
-      }
+      void result;
     } catch (err) {
       console.error('[DiscussionTimer] Interval job failed:', err);
     }
@@ -169,5 +156,4 @@ export function scheduleDiscussionTimer(intervalMs = 30000) {
  */
 export function stopDiscussionTimer(intervalId: NodeJS.Timeout) {
   clearInterval(intervalId);
-  console.log('[DiscussionTimer] Job stopped');
 }

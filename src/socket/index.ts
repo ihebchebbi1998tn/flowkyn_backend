@@ -217,7 +217,6 @@ export function initializeSocket(server: HttpServer) {
           presenceClient.connect(),
         ]).then(() => {
           io.adapter(createAdapter(pubClient, subClient));
-          console.log('🔁 Socket.io Redis adapter attached (rooms + presence + rate limits)');
         });
       })
       .catch((err) => {
@@ -244,16 +243,7 @@ export function initializeSocket(server: HttpServer) {
   setupNotificationHandlers(notificationsNs);
 
   // ─── Default namespace — connection status only ───
-  io.on('connection', (socket) => {
-    const user = (socket as any).user;
-    console.log(`[Socket] User ${user.userId} connected (default ns)`);
-
-    socket.on('disconnect', (reason) => {
-      console.log(`[Socket] User ${user.userId} disconnected: ${reason}`);
-    });
-  });
-
-  console.log('🔌 Socket.io initialized with /events, /games, /notifications namespaces');
+  io.on('connection', () => {});
 }
 
 /**

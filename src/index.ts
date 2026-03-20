@@ -15,7 +15,6 @@ async function bootstrap() {
     console.error('❌ Cannot connect to database. Exiting.');
     process.exit(1);
   }
-  console.log('✅ Database connected');
 
   const shouldRunMigrations = String(process.env.RUN_MIGRATIONS || '').toLowerCase() === 'true';
   const shouldSeedSuperAdmin = String(process.env.SEED_SUPER_ADMIN || '').toLowerCase() === 'true';
@@ -23,16 +22,12 @@ async function bootstrap() {
   // 2. Run auto-migrations (opt-in)
   if (shouldRunMigrations) {
     await runMigrations();
-  } else {
-    console.log('ℹ️  Skipping migrations (set RUN_MIGRATIONS=true to enable)');
-  }
+  } else {}
 
   // 3. Seed super admin (opt-in)
   if (shouldSeedSuperAdmin) {
     await seedSuperAdmin();
-  } else {
-    console.log('ℹ️  Skipping super admin seed (set SEED_SUPER_ADMIN=true to enable)');
-  }
+  } else {}
 
   // 4. Create HTTP server & attach Socket.io
   const server = createServer(app);
@@ -49,28 +44,19 @@ async function bootstrap() {
   // 6b. Start discussion timer job (every 60 seconds)
   // This auto-closes expired discussions and transitions to debrief phase
   scheduleDiscussionTimer();
-  console.log('✅ Discussion timer job scheduled (runs every 60s)');
 
   // 7. Start listening
-  server.listen(env.port, () => {
-    console.log(`🚀 Flowkyn API running on port ${env.port} [${env.nodeEnv}]`);
-    console.log(`   Health:  http://localhost:${env.port}/health`);
-    console.log(`   API:     http://localhost:${env.port}/v1`);
-    console.log(`   Monitor: http://localhost:${env.port}/monitor`);
-  });
+  server.listen(env.port, () => {});
 
   // Graceful shutdown — wait for in-flight requests
   let isShuttingDown = false;
   const shutdown = async (signal: string) => {
     if (isShuttingDown) return; // Prevent double shutdown
     isShuttingDown = true;
-    console.log(`\n⏳ ${signal} received — shutting down gracefully...`);
 
     stopPoolMonitor();
-    console.log('  ✅ Pool monitor stopped');
 
     stopCleanupCron();
-    console.log('  ✅ Cleanup cron stopped');
 
     // Stop accepting new connections, wait for existing to finish (max 30s)
     const forceTimeout = setTimeout(() => {
@@ -79,12 +65,10 @@ async function bootstrap() {
     }, 30000);
 
     server.close(() => {
-      console.log('  ✅ HTTP server closed');
       clearTimeout(forceTimeout);
     });
 
     await pool.end();
-    console.log('  ✅ Database pool closed');
     process.exit(0);
   };
 

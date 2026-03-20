@@ -53,7 +53,6 @@ router.get('/api/metrics', (req, res) => {
 router.post('/api/clear', (req, res) => {
   if (!checkMonitorAuth(req, res)) return;
   clearLogs();
-  console.log('[Monitor] Logs cleared');
   res.json({ message: 'Logs cleared', timestamp: new Date().toISOString() });
 });
 

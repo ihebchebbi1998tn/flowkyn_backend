@@ -672,13 +672,6 @@ async function reduceStrategicState(args: {
 async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
   // If this is a guest socket, use the guest payload directly
   if (socket?.isGuest && socket.guestPayload) {
-    console.log('[Games] Guest socket detected, attempting verification', {
-      sessionId: sessionId.substring(0, 8) + '...',
-      participantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
-      hasIdentityKey: !!socket.guestPayload.guestIdentityKey,
-      socketId: socket.id,
-    });
-    
     let guestRow = await queryOne<{ id: string }>(
       `SELECT p.id FROM participants p
        JOIN game_sessions gs ON gs.event_id = p.event_id
@@ -687,11 +680,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
     );
     
     if (guestRow) {
-      console.log('[Games] Direct participant verification SUCCESS', {
-        sessionId: sessionId.substring(0, 8) + '...',
-        participantId: guestRow.id.substring(0, 8) + '...',
-        socketId: socket.id,
-      });
       return { participantId: guestRow.id };
     }
     
@@ -710,12 +698,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
       return null;
     }
     
-    console.log('[Games] Attempting fallback recovery via identity key', {
-      sessionId: sessionId.substring(0, 8) + '...',
-      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
-      socketId: socket.id,
-    });
-    
     guestRow = await queryOne<{ id: string }>(
       `SELECT p.id
        FROM participants p
@@ -730,12 +712,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
     );
     
     if (guestRow) {
-      console.log('[Games] Fallback recovery SUCCESS via identity key', {
-        sessionId: sessionId.substring(0, 8) + '...',
-        oldParticipantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
-        newParticipantId: guestRow.id.substring(0, 8) + '...',
-        socketId: socket.id,
-      });
       socket.guestPayload.participantId = guestRow.id;
       return { participantId: guestRow.id };
     }
@@ -752,13 +728,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
   if (socket?.isGuestByKey && typeof socket?.handshake?.auth?.guestIdentityKey === 'string') {
     const recoveryEventId = typeof socket.handshake.auth.eventId === 'string' ? socket.handshake.auth.eventId : '';
     const recoveryKey = socket.handshake.auth.guestIdentityKey;
-    
-    console.log('[Games] Attempting guest recovery via identity key', {
-      sessionId: sessionId.substring(0, 8) + '...',
-      recoveryEventId: recoveryEventId.substring(0, 8) + '...',
-      recoveryKeyPrefix: recoveryKey.substring(0, 8) + '...',
-      socketId: socket.id,
-    });
     
     if (!recoveryEventId) {
       console.warn('[Games] Guest recovery blocked: missing eventId', { sessionId: sessionId.substring(0, 8) + '...' });
@@ -796,13 +765,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
       return null;
     }
 
-    console.log('[Games] Guest recovery SUCCESS', {
-      sessionId: sessionId.substring(0, 8) + '...',
-      participantId: guestRow.id.substring(0, 8) + '...',
-      guestName: guestRow.guest_name,
-      socketId: socket.id,
-    });
-
     // Upgrade socket to normal guest mode for all future operations.
     socket.guestPayload = {
       participantId: guestRow.id,
@@ -814,13 +776,6 @@ async function verifyGameParticipant(sessionId: string, userId: string, socket?:
     socket.isGuest = true;
     socket.isGuestByKey = false;
     socket.user = { userId: `guest:${guestRow.id}`, email: '' };
-
-    console.log('[Games] Socket upgraded from recovery mode', {
-      participantId: guestRow.id.substring(0, 8) + '...',
-      socketIsGuest: socket.isGuest,
-      socketIsGuestByKey: socket.isGuestByKey,
-      socketId: socket.id,
-    });
 
     return { participantId: guestRow.id };
   }
@@ -931,7 +886,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
     const user = socket.user;
-    console.log(`[Games] User ${user.userId} connected`);
 
     const joinedSessions = new Set<string>();
     // Track participant IDs per joined session so disconnect cleanup can soft-delete correctly.
@@ -1233,13 +1187,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
             const roomId = `game:${data.sessionId}`;
             const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
             const roomSize = room && typeof room.size === 'number' ? room.size : 0;
-            console.log('[Games] Coffee Roulette game:data broadcast', {
-              sessionId: data.sessionId,
-              action: normalizedAction,
-              phase: next?.phase,
-              pairsCount: Array.isArray(next?.pairs) ? next.pairs.length : 0,
-              roomSize,
-            });
             gamesNs.to(roomId).emit('game:data', {
               sessionId: data.sessionId,
               gameData: next,
@@ -1442,13 +1389,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        console.log('[CoffeeVoice] voice_offer received', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-          offerSdpLength: validation.data.sdp.length,
-        });
-
         const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
         const state = latest?.state as any;
         if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
@@ -1502,13 +1442,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           createdAt: Date.now(),
         });
 
-        console.log('[CoffeeVoice][telemetry] offer_cached', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          fromParticipantId: caller.participantId,
-          cacheKey,
-        });
-
         const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
         const partnerSocketId = voiceSocketByKey.get(partnerKey);
         if (!partnerSocketId) {
@@ -1517,11 +1450,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
             pairId: validation.data.pairId,
             partnerParticipantId,
             partnerKey,
-          });
-          console.log('[CoffeeVoice][telemetry] offer_not_forwarded_partner_offline', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            partnerParticipantId,
           });
           // Not fatal: we already cached the offer above.
           // The answerer can later call `coffee:voice_request_offer` to retrieve it.
@@ -1534,13 +1462,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           pairId: validation.data.pairId,
           fromParticipantId: caller.participantId,
           sdp: validation.data.sdp,
-        });
-
-        console.log('[CoffeeVoice][telemetry] offer_forwarded', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          fromParticipantId: caller.participantId,
-          toPartnerSocketId: partnerSocketId,
         });
 
         ack?.({ ok: true });
@@ -1569,18 +1490,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           ack?.({ ok: false, error: 'FORBIDDEN' });
           return;
         }
-
-        console.log('[CoffeeVoice] voice_request_offer received', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-        });
-
-        console.log('[CoffeeVoice][telemetry] offer_requested', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-        });
 
         const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
         const state = latest?.state as any;
@@ -1613,11 +1522,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
         const cached = coffeeVoiceOfferCache.get(cacheKey);
         if (!cached) {
-          console.log('[CoffeeVoice][telemetry] offer_requested_no_cache', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            cacheKey,
-          });
           ack?.({ ok: false, error: 'OFFER_NOT_READY' });
           return;
         }
@@ -1625,21 +1529,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const ageMs = Date.now() - cached.createdAt;
         if (ageMs > COFFEE_VOICE_OFFER_TTL_MS) {
           coffeeVoiceOfferCache.delete(cacheKey);
-          console.log('[CoffeeVoice][telemetry] offer_requested_expired', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            cacheKey,
-          });
           ack?.({ ok: false, error: 'OFFER_EXPIRED' });
           return;
         }
-
-        console.log('[CoffeeVoice][telemetry] offer_delivered', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          ageSeconds: Math.round(ageMs / 1000),
-          fromParticipantId: cached.fromParticipantId,
-        });
 
         socket.emit('coffee:voice_offer', {
           sessionId: validation.data.sessionId,
@@ -1673,13 +1565,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           ack?.({ ok: false, error: 'FORBIDDEN' });
           return;
         }
-
-        console.log('[CoffeeVoice] voice_answer received', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-          answerSdpLength: validation.data.sdp.length,
-        });
 
         const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
         const state = latest?.state as any;
@@ -1723,21 +1608,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
         const partnerSocketId = voiceSocketByKey.get(partnerKey);
         if (!partnerSocketId) {
-          console.log('[CoffeeVoice][telemetry] answer_not_forwarded_partner_offline', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            partnerParticipantId,
-          });
           ack?.({ ok: false, error: 'PARTNER_NOT_CONNECTED' });
           return;
         }
-
-        console.log('[CoffeeVoice][telemetry] answer_forwarded', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-          toPartnerSocketId: partnerSocketId,
-        });
 
         gamesNs.to(partnerSocketId).emit('coffee:voice_answer', {
           sessionId: validation.data.sessionId,
@@ -1771,14 +1644,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           ack?.({ ok: false, error: 'FORBIDDEN' });
           return;
         }
-
-        // ICE candidate payloads can be small; logging key counts helps debugging.
-        console.log('[CoffeeVoice] voice_ice_candidate received', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-          hasCandidate: !!validation.data.candidate?.candidate,
-        });
 
         const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
         const state = latest?.state as any;
@@ -1848,12 +1713,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        console.log('[CoffeeVoice][telemetry] hangup_received', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          callerParticipantId: caller.participantId,
-        });
-
         const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
         const state = latest?.state as any;
         if (state?.kind !== 'coffee-roulette') {
@@ -1904,7 +1763,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Disconnect cleanup ───
     socket.on('disconnect', async (reason) => {
-      console.log(`[Games] User ${user.userId} disconnected: ${reason}`);
 
       // Cleanup targeted voice signaling mappings.
       const keys = voiceKeysBySocket.get(socket.id);

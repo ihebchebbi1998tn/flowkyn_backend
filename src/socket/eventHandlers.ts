@@ -22,13 +22,6 @@ function validateFields(data: any, fields: string[]): boolean {
 async function verifyParticipant(eventId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string; memberId: string | null; displayName: string; avatarUrl: string | null } | null> {
   // If this is a guest socket, use the guest payload directly (prefer event profile if set)
   if (socket?.isGuest && socket.guestPayload) {
-    console.log('[Events] Guest socket detected, attempting verification', {
-      eventId: eventId.substring(0, 8) + '...',
-      participantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
-      hasIdentityKey: !!socket.guestPayload.guestIdentityKey,
-      socketId: socket.id,
-    });
-    
     let guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
       `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
        FROM participants p
@@ -38,11 +31,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
     );
     
     if (guestRow) {
-      console.log('[Events] Direct participant verification SUCCESS', {
-        eventId: eventId.substring(0, 8) + '...',
-        participantId: guestRow.id.substring(0, 8) + '...',
-        socketId: socket.id,
-      });
       return {
         participantId: guestRow.id,
         memberId: null,
@@ -67,12 +55,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
       return null;
     }
     
-    console.log('[Events] Attempting fallback recovery via identity key', {
-      eventId: eventId.substring(0, 8) + '...',
-      identityKeyPrefix: socket.guestPayload.guestIdentityKey.substring(0, 8) + '...',
-      socketId: socket.id,
-    });
-    
     guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
       `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
        FROM participants p
@@ -87,12 +69,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
     );
     
     if (guestRow) {
-      console.log('[Events] Fallback recovery SUCCESS via identity key', {
-        eventId: eventId.substring(0, 8) + '...',
-        oldParticipantId: socket.guestPayload.participantId?.substring(0, 8) + '...',
-        newParticipantId: guestRow.id.substring(0, 8) + '...',
-        socketId: socket.id,
-      });
       socket.guestPayload.participantId = guestRow.id;
       return {
         participantId: guestRow.id,
@@ -114,14 +90,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
   if (socket?.isGuestByKey && typeof socket?.handshake?.auth?.guestIdentityKey === 'string') {
     const recoveryEventId = typeof socket.handshake.auth.eventId === 'string' ? socket.handshake.auth.eventId : '';
     const recoveryKey = socket.handshake.auth.guestIdentityKey;
-    
-    console.log('[Events] Attempting guest recovery via identity key', {
-      requestedEventId: eventId,
-      recoveryEventId,
-      recoveryKeyPrefix: recoveryKey.substring(0, 8) + '...',
-      eventIdMatch: recoveryEventId === eventId,
-      socketId: socket.id,
-    });
     
     if (!recoveryEventId || recoveryEventId !== eventId) {
       console.warn('[Events] Guest recovery blocked: eventId mismatch', {
@@ -154,13 +122,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
       return null;
     }
 
-    console.log('[Events] Guest recovery SUCCESS', {
-      eventId: eventId.substring(0, 8) + '...',
-      participantId: guestRow.id.substring(0, 8) + '...',
-      guestName: guestRow.guest_name,
-      socketId: socket.id,
-    });
-
     // Upgrade socket to normal guest mode for all future operations.
     socket.guestPayload = {
       participantId: guestRow.id,
@@ -172,13 +133,6 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
     socket.isGuest = true;
     socket.isGuestByKey = false;
     socket.user = { userId: `guest:${guestRow.id}`, email: '' };
-
-    console.log('[Events] Socket upgraded from recovery mode', {
-      participantId: guestRow.id.substring(0, 8) + '...',
-      socketIsGuest: socket.isGuest,
-      socketIsGuestByKey: socket.isGuestByKey,
-      socketId: socket.id,
-    });
 
     return {
       participantId: guestRow.id,
@@ -248,7 +202,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
   eventsNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
     const user = socket.user;
-    console.log(`[Events] User ${user.userId} connected`);
 
     // Track which event rooms this socket is in (for cleanup on disconnect)
     const joinedRooms = new Set<string>();
@@ -267,7 +220,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
       }
 
       try {
-        console.log(`[Events] User ${user.userId} attempting to join event ${data.eventId}`);
         // Verify user is a participant in this event (auto-inserts org members who bypassed the Lobby)
         const participant = await verifyParticipant(data.eventId, user.userId, socket);
         if (!participant) {
@@ -287,7 +239,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
         joinedRooms.add(data.eventId);
         await addPresence(data.eventId, user.userId);
 
-        console.log(`[Events] User ${user.userId} joined event ${data.eventId} in room ${roomId}. Socket ID: ${socket.id}`);
 
         // Notify others
         socket.to(roomId).emit('event:user_joined', {
@@ -330,7 +281,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
     });
     // ─── Chat message (persisted to DB) ───
     socket.on('chat:message', async (data: { eventId: string; message: string }, ack) => {
-      console.log(`[Events] chat:message received from user ${user.userId}:`, data);
       
       if (!validateFields(data, ['eventId', 'message'])) {
         console.warn(`[Events] Invalid chat:message data from user ${user.userId}`);
@@ -362,7 +312,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
         const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
 
         const roomId = `event:${data.eventId}`;
-        console.log(`[Events] Broadcasting message from ${participant.displayName} (${user.userId}) to room ${roomId}. Message ID: ${saved.id}`);
 
         // Broadcast to all in room (including sender for confirmation)
         // Include senderName and senderAvatarUrl for proper display
@@ -378,7 +327,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
         
         eventsNs.to(roomId).emit('chat:message', broadcastData);
 
-        console.log(`[Events] Message broadcast complete to room ${roomId}. Sent to all members.`);
         ack?.({ ok: true }); // Send acknowledgment after broadcasting
       } catch (err: any) {
         console.error(`[Events] chat:message error:`, err.message, err.stack);
@@ -469,7 +417,6 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
     // ─── Disconnect cleanup ───
     socket.on('disconnect', (reason) => {
-      console.log(`[Events] User ${user.userId} disconnected: ${reason}`);
 
       // Remove from all joined rooms' presence
       for (const eventId of joinedRooms) {

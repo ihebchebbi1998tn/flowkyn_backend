@@ -11,7 +11,6 @@ const SKIP_PATHS = ['/monitor', '/health/live', '/metrics', '/docs', '/docs.json
 
 let logCount = 0;
 
-console.log('[Monitor] ✓ Middleware initialized. Capturing all API requests.');
 
 function redactSensitiveObject(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
@@ -161,31 +160,9 @@ export function monitorMiddleware(req: Request, res: Response, next: NextFunctio
       addLog(log);
       logCount++;
 
-      // PROFESSIONAL CONSOLE LOGGING - clean, single-line format
-      const statusIcon = statusCode >= 500 ? '❌' : statusCode >= 400 ? '⚠️' : '✓';
-      const slowIcon = duration > 1000 ? '⏱️' : '';
-      
-      console.log(
-        `${statusIcon} [${log.method}] ${log.path} → ${statusCode} (${duration}ms)${slowIcon}${userId ? ` [${userId}]` : ''}`
-      );
-
-      // Only log detailed info for errors and slow requests
-      if (statusCode >= 400) {
-        if (log.queryParams && Object.keys(log.queryParams).length > 0) {
-          console.log(`    Query: ${JSON.stringify(log.queryParams).substring(0, 150)}`);
-        }
-        if (log.error) {
-          console.log(`    Error: ${log.error.substring(0, 200)}`);
-        }
-        if (log.requestBody) {
-          const bodyStr = JSON.stringify(log.requestBody);
-          console.log(`    Request: ${bodyStr.substring(0, 150)}`);
-        }
-      }
-
-      // Report every 100 requests
+      // Report every 100 requests internally to keep parity with old logic.
       if (logCount % 100 === 0) {
-        console.log(`\n[Monitor] ✓ Logged ${logCount} requests (${totalRequestLog()})\n`);
+        void totalRequestLog();
       }
     } catch (e) {
       console.error('[Monitor] Error adding log:', e);

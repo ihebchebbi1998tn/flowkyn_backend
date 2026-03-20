@@ -897,7 +897,6 @@ export async function runMigrations(): Promise<void> {
     for (const migration of migrations) {
       if (appliedVersions.has(migration.version)) continue;
 
-      console.log(`⬆️  Running migration v${migration.version}: ${migration.name}`);
       await client.query('BEGIN');
       try {
         await client.query(migration.sql);
@@ -906,7 +905,6 @@ export async function runMigrations(): Promise<void> {
           [migration.version, migration.name]
         );
         await client.query('COMMIT');
-        console.log(`  ✅ Migration v${migration.version} applied`);
       } catch (err) {
         await client.query('ROLLBACK');
         console.error(`  ❌ Migration v${migration.version} failed:`, err);
@@ -914,7 +912,6 @@ export async function runMigrations(): Promise<void> {
       }
     }
 
-    console.log('✅ All migrations up to date');
   } finally {
     client.release();
   }
@@ -931,9 +928,7 @@ export async function runMigrations(): Promise<void> {
 // tsx honours it correctly even when transpiling TypeScript directly.
 if (require.main === module) {
   runMigrations()
-    .then(() => {
-      console.log('Migration script finished — closing pool.');
-    })
+    .then(() => {})
     .catch((err) => {
       console.error('Migration script failed:', err);
       process.exitCode = 1;

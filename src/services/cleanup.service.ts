@@ -58,12 +58,9 @@ let cleanupInterval: NodeJS.Timeout | null = null;
 export function startCleanupCron(intervalMs = 30 * 60 * 1000): void {
   if (cleanupInterval) return;
 
-  console.log(`🧹 Cleanup cron started (every ${intervalMs / 60000}m)`);
-
   runCleanup()
     .then((c) => {
-      const parts = Object.entries(c).map(([k, v]) => `${k}=${v}`);
-      console.log(`🧹 Initial cleanup: ${parts.join(' ')}`);
+      void c;
     })
     .catch((err) => console.error('🧹 Cleanup error:', err));
 
@@ -71,10 +68,7 @@ export function startCleanupCron(intervalMs = 30 * 60 * 1000): void {
     try {
       const c = await runCleanup();
       const total = Object.values(c).reduce((a, b) => a + b, 0);
-      if (total > 0) {
-        const parts = Object.entries(c).map(([k, v]) => `${k}=${v}`);
-        console.log(`🧹 Cleanup: ${parts.join(' ')}`);
-      }
+      if (total > 0) void c;
     } catch (err) {
       console.error('🧹 Cleanup error:', err);
     }

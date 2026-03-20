@@ -44,7 +44,6 @@ const ENABLE_FILE_LOGGING = true; // Enable persistent file logs
 if (ENABLE_FILE_LOGGING && !fs.existsSync(LOG_DIR)) {
   try {
     fs.mkdirSync(LOG_DIR, { recursive: true });
-    console.log(`[Monitor] Log directory created: ${LOG_DIR}`);
   } catch (err) {
     console.error('[Monitor] Failed to create log directory:', err);
   }

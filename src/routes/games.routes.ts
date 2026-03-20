@@ -11,6 +11,7 @@
 
 import { Router } from 'express';
 import { GamesController } from '../controllers/games.controller';
+import { StrategicGamesController } from '../controllers/strategicGames.controller';
 import { authenticate } from '../middleware/auth';
 import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
@@ -20,6 +21,7 @@ import { eventIdParam, sessionIdParam, uuidParam } from '../validators/common.va
 
 const router = Router();
 const ctrl = new GamesController();
+const strategicCtrl = new StrategicGamesController();
 
 // Game types (authenticated users only)
 router.get('/game-types', authenticate, ctrl.listGameTypes);
@@ -41,7 +43,7 @@ router.post(
   authenticate,
   validate(eventIdParam, 'params'),
   validate(createStrategicSessionSchema),
-  ctrl.createStrategicSession
+  strategicCtrl.createStrategicSession
 );
 // Resolve currently active session for an event + game key (supports guests)
 router.get('/events/:eventId/game-sessions/active', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getActiveSessionForEvent);
@@ -51,24 +53,24 @@ router.get('/game-sessions/:id/actions', authenticate, validate(uuidParam, 'para
 router.get('/game-sessions/:id/snapshots', authenticate, validate(uuidParam, 'params'), ctrl.getSessionSnapshots);
 
 // Strategic Escape Challenge helpers
-router.post('/strategic-sessions/:sessionId/assign-roles', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.assignStrategicRolesForSession);
-router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicRole);
-router.post('/strategic-sessions/:sessionId/roles/me/ack', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.acknowledgeMyStrategicRole);
-router.get('/strategic-sessions/:sessionId/roles/reveal-status', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getStrategicRoleRevealStatus);
-router.post('/strategic-sessions/:sessionId/roles/me/ready', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.readyMyStrategicRole);
-router.get('/strategic-sessions/:sessionId/roles/ready-status', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getStrategicRoleReadyStatus);
-router.get('/strategic-sessions/:sessionId/roles/me/prompts', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicRolePromptState);
-router.post('/strategic-sessions/:sessionId/roles/me/prompts/next', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.advanceMyStrategicRolePrompt);
-router.get('/strategic-sessions/:sessionId/roles/me/notes', authenticateOrGuest, validate(sessionIdParam, 'params'), ctrl.getMyStrategicNotes);
+router.post('/strategic-sessions/:sessionId/assign-roles', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.assignStrategicRolesForSession);
+router.get('/strategic-sessions/:sessionId/roles/me', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.getMyStrategicRole);
+router.post('/strategic-sessions/:sessionId/roles/me/ack', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.acknowledgeMyStrategicRole);
+router.get('/strategic-sessions/:sessionId/roles/reveal-status', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.getStrategicRoleRevealStatus);
+router.post('/strategic-sessions/:sessionId/roles/me/ready', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.readyMyStrategicRole);
+router.get('/strategic-sessions/:sessionId/roles/ready-status', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.getStrategicRoleReadyStatus);
+router.get('/strategic-sessions/:sessionId/roles/me/prompts', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.getMyStrategicRolePromptState);
+router.post('/strategic-sessions/:sessionId/roles/me/prompts/next', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.advanceMyStrategicRolePrompt);
+router.get('/strategic-sessions/:sessionId/roles/me/notes', authenticateOrGuest, validate(sessionIdParam, 'params'), strategicCtrl.getMyStrategicNotes);
 router.put(
   '/strategic-sessions/:sessionId/roles/me/notes',
   authenticateOrGuest,
   validate(sessionIdParam, 'params'),
   validate(updateStrategicNotesSchema),
-  ctrl.updateMyStrategicNotes
+  strategicCtrl.updateMyStrategicNotes
 );
-router.get('/strategic-sessions/:sessionId/debrief-results', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.getDebriefResults);
-router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), ctrl.startDebrief);
+router.get('/strategic-sessions/:sessionId/debrief-results', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), strategicCtrl.getDebriefResults);
+router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debriefRateLimiter, validate(sessionIdParam, 'params'), strategicCtrl.startDebrief);
 
 // Game actions — supports BOTH authenticated users AND guests via authenticateOrGuest
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);

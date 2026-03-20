@@ -32,7 +32,6 @@ async function verifySMTPWithRetry(attempts = 3): Promise<void> {
   for (let i = 0; i < attempts; i++) {
     try {
       await transporter.verify();
-      console.log('✅ SMTP connection verified successfully');
       smtpVerified = true;
       return;
     } catch (err: any) {
