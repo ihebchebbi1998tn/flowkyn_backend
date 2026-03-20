@@ -824,12 +824,36 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const [session, activeRound, snapshot, admin] = await Promise.all([
+        const [session, activeRound, snapshotRaw, admin] = await Promise.all([
           gamesService.getSession(data.sessionId),
           gamesService.getActiveRound(data.sessionId),
           gamesService.getLatestSnapshot(data.sessionId),
           canControlGameFlow(data.sessionId, user.userId, socket).catch(() => false),
         ]);
+        let snapshot = snapshotRaw;
+
+        // Backfill legacy Coffee Roulette sessions that were created before
+        // initial snapshot bootstrapping was added.
+        if (!snapshot) {
+          const typeRow = await queryOne<{ key: string }>(
+            `SELECT gt.key
+             FROM game_sessions gs
+             JOIN game_types gt ON gt.id = gs.game_type_id
+             WHERE gs.id = $1`,
+            [data.sessionId],
+          );
+          if (typeRow?.key === 'coffee-roulette') {
+            const state = {
+              kind: 'coffee-roulette',
+              phase: 'waiting',
+              pairs: [],
+              startedChatAt: null,
+              promptsUsed: 0,
+              decisionRequired: false,
+            };
+            snapshot = await gamesService.saveSnapshot(data.sessionId, state);
+          }
+        }
         const roomId = `game:${data.sessionId}`;
         socket.join(roomId);
         joinedSessions.add(data.sessionId);

@@ -64,7 +64,7 @@ export class GamesService {
 
     if (event.status !== 'active') throw new AppError('Cannot start a game — event is not active (current status: ' + event.status + ')', 400, 'SESSION_NOT_ACTIVE');
 
-    const gameType = await queryOne('SELECT id FROM game_types WHERE id = $1', [gameTypeId]);
+    const gameType = await queryOne<{ id: string; key: string }>('SELECT id, key FROM game_types WHERE id = $1', [gameTypeId]);
     if (!gameType) throw new AppError('Game type not found', 404, 'NOT_FOUND');
 
     const result = await transaction(async (client) => {
@@ -138,6 +138,23 @@ export class GamesService {
       // Just fetch the full existing session to return it
       const fullExistingSession = await queryOne('SELECT * FROM game_sessions WHERE id = $1', [result.session.id]);
       return { ...fullExistingSession, active_round_id: result.roundId } as any;
+    }
+
+    // Ensure a baseline snapshot exists for Coffee Roulette immediately on session creation.
+    // This makes join/game state hydration deterministic even before the first shuffle action.
+    if (gameType.key === 'coffee-roulette') {
+      try {
+        await this.saveSnapshot(result.session.id, {
+          kind: 'coffee-roulette',
+          phase: 'waiting',
+          pairs: [],
+          startedChatAt: null,
+          promptsUsed: 0,
+          decisionRequired: false,
+        });
+      } catch (err) {
+        console.warn('[GamesService] Failed to create initial Coffee Roulette snapshot:', (err as any)?.message || err);
+      }
     }
 
     // Include roundId for convenience to callers that need it.
