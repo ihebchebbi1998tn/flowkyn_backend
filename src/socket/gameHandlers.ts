@@ -675,13 +675,108 @@ async function reduceStrategicState(args: {
 async function verifyGameParticipant(sessionId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string } | null> {
   // If this is a guest socket, use the guest payload directly
   if (socket?.isGuest && socket.guestPayload) {
-    const guestRow = await queryOne<{ id: string }>(
+    let guestRow = await queryOne<{ id: string }>(
       `SELECT p.id FROM participants p
        JOIN game_sessions gs ON gs.event_id = p.event_id
        WHERE gs.id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
       [sessionId, socket.guestPayload.participantId]
     );
+    // Reload/self-heal fallback: recover by stable guest_identity_key when token participantId is stale.
+    if (!guestRow && socket.guestPayload.guestIdentityKey) {
+      guestRow = await queryOne<{ id: string }>(
+        `SELECT p.id
+         FROM participants p
+         JOIN game_sessions gs ON gs.event_id = p.event_id
+         WHERE gs.id = $1
+           AND p.participant_type = 'guest'
+           AND p.guest_identity_key = $2
+           AND p.left_at IS NULL
+         ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+         LIMIT 1`,
+        [sessionId, socket.guestPayload.guestIdentityKey]
+      );
+      if (guestRow) {
+        socket.guestPayload.participantId = guestRow.id;
+      }
+    }
     return guestRow ? { participantId: guestRow.id } : null;
+  }
+
+  // Recovery mode: token may be missing/expired, recover guest by stable identity key.
+  if (socket?.isGuestByKey && typeof socket?.handshake?.auth?.guestIdentityKey === 'string') {
+    const recoveryEventId = typeof socket.handshake.auth.eventId === 'string' ? socket.handshake.auth.eventId : '';
+    const recoveryKey = socket.handshake.auth.guestIdentityKey;
+    
+    console.log('[Games] Attempting guest recovery via identity key', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      recoveryEventId: recoveryEventId.substring(0, 8) + '...',
+      recoveryKeyPrefix: recoveryKey.substring(0, 8) + '...',
+      socketId: socket.id,
+    });
+    
+    if (!recoveryEventId) {
+      console.warn('[Games] Guest recovery blocked: missing eventId', { sessionId: sessionId.substring(0, 8) + '...' });
+      return null;
+    }
+
+    const guestRow = await queryOne<{ id: string; event_id: string; guest_name: string | null }>(
+      `SELECT p.id, p.event_id, p.guest_name
+       FROM participants p
+       JOIN game_sessions gs ON gs.event_id = p.event_id
+       WHERE gs.id = $1
+         AND p.participant_type = 'guest'
+         AND p.guest_identity_key = $2
+         AND p.left_at IS NULL
+       ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+       LIMIT 1`,
+      [sessionId, recoveryKey]
+    );
+    
+    if (!guestRow) {
+      console.warn('[Games] Guest recovery FAILED: no participant found', {
+        sessionId: sessionId.substring(0, 8) + '...',
+        recoveryKey: recoveryKey.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return null;
+    }
+    
+    if (guestRow.event_id !== recoveryEventId) {
+      console.warn('[Games] Guest recovery FAILED: eventId mismatch', {
+        recoveryEventId: recoveryEventId.substring(0, 8) + '...',
+        foundEventId: guestRow.event_id.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return null;
+    }
+
+    console.log('[Games] Guest recovery SUCCESS', {
+      sessionId: sessionId.substring(0, 8) + '...',
+      participantId: guestRow.id.substring(0, 8) + '...',
+      guestName: guestRow.guest_name,
+      socketId: socket.id,
+    });
+
+    // Upgrade socket to normal guest mode for all future operations.
+    socket.guestPayload = {
+      participantId: guestRow.id,
+      eventId: guestRow.event_id,
+      guestName: guestRow.guest_name || 'Guest',
+      guestIdentityKey: recoveryKey,
+      isGuest: true,
+    };
+    socket.isGuest = true;
+    socket.isGuestByKey = false;
+    socket.user = { userId: `guest:${guestRow.id}`, email: '' };
+
+    console.log('[Games] Socket upgraded from recovery mode', {
+      participantId: guestRow.id.substring(0, 8) + '...',
+      socketIsGuest: socket.isGuest,
+      socketIsGuestByKey: socket.isGuestByKey,
+      socketId: socket.id,
+    });
+
+    return { participantId: guestRow.id };
   }
 
   // Authenticated user: match via organization_members

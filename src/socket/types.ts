@@ -9,6 +9,8 @@ export interface AuthenticatedSocket extends Socket {
   user: AuthPayload;
   /** True if the socket is authenticated with a guest token */
   isGuest?: boolean;
+  /** True when guest is authenticated via identity-key recovery mode */
+  isGuestByKey?: boolean;
   /** Present only for guest connections */
   guestPayload?: GuestPayload;
 }

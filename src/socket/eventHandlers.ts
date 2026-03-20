@@ -22,13 +22,32 @@ function validateFields(data: any, fields: string[]): boolean {
 async function verifyParticipant(eventId: string, userId: string, socket?: AuthenticatedSocket): Promise<{ participantId: string; memberId: string | null; displayName: string; avatarUrl: string | null } | null> {
   // If this is a guest socket, use the guest payload directly (prefer event profile if set)
   if (socket?.isGuest && socket.guestPayload) {
-    const guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
+    let guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
       `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
        FROM participants p
        LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
        WHERE p.event_id = $1 AND p.id = $2 AND p.participant_type = 'guest' AND p.left_at IS NULL`,
       [eventId, socket.guestPayload.participantId]
     );
+    // Reload/self-heal fallback: if participantId from token no longer resolves,
+    // recover by stable guest_identity_key for this event.
+    if (!guestRow && socket.guestPayload.guestIdentityKey) {
+      guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
+        `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
+         FROM participants p
+         LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+         WHERE p.event_id = $1
+           AND p.participant_type = 'guest'
+           AND p.guest_identity_key = $2
+           AND p.left_at IS NULL
+         ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+         LIMIT 1`,
+        [eventId, socket.guestPayload.guestIdentityKey]
+      );
+      if (guestRow) {
+        socket.guestPayload.participantId = guestRow.id;
+      }
+    }
     if (guestRow) {
       return {
         participantId: guestRow.id,
@@ -38,6 +57,84 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
       };
     }
     return null;
+  }
+
+  // Recovery mode: token may be missing/expired, recover guest by stable identity key.
+  if (socket?.isGuestByKey && typeof socket?.handshake?.auth?.guestIdentityKey === 'string') {
+    const recoveryEventId = typeof socket.handshake.auth.eventId === 'string' ? socket.handshake.auth.eventId : '';
+    const recoveryKey = socket.handshake.auth.guestIdentityKey;
+    
+    console.log('[Events] Attempting guest recovery via identity key', {
+      requestedEventId: eventId,
+      recoveryEventId,
+      recoveryKeyPrefix: recoveryKey.substring(0, 8) + '...',
+      eventIdMatch: recoveryEventId === eventId,
+      socketId: socket.id,
+    });
+    
+    if (!recoveryEventId || recoveryEventId !== eventId) {
+      console.warn('[Events] Guest recovery blocked: eventId mismatch', {
+        requested: eventId,
+        recovery: recoveryEventId,
+        socketId: socket.id,
+      });
+      return null;
+    }
+
+    const guestRow = await queryOne<{ id: string; display_name: string | null; avatar_url: string | null; guest_name: string; guest_avatar: string | null }>(
+      `SELECT p.id, p.guest_name, p.guest_avatar, ep.display_name, ep.avatar_url
+       FROM participants p
+       LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+       WHERE p.event_id = $1
+         AND p.participant_type = 'guest'
+         AND p.guest_identity_key = $2
+         AND p.left_at IS NULL
+       ORDER BY p.joined_at ASC NULLS LAST, p.created_at ASC NULLS LAST, p.id ASC
+       LIMIT 1`,
+      [eventId, recoveryKey]
+    );
+    
+    if (!guestRow) {
+      console.warn('[Events] Guest recovery FAILED: no participant found with identity key', {
+        eventId: eventId.substring(0, 8) + '...',
+        recoveryKey: recoveryKey.substring(0, 8) + '...',
+        socketId: socket.id,
+      });
+      return null;
+    }
+
+    console.log('[Events] Guest recovery SUCCESS', {
+      eventId: eventId.substring(0, 8) + '...',
+      participantId: guestRow.id.substring(0, 8) + '...',
+      guestName: guestRow.guest_name,
+      socketId: socket.id,
+    });
+
+    // Upgrade socket to normal guest mode for all future operations.
+    socket.guestPayload = {
+      participantId: guestRow.id,
+      eventId,
+      guestName: guestRow.guest_name || 'Guest',
+      guestIdentityKey: recoveryKey,
+      isGuest: true,
+    };
+    socket.isGuest = true;
+    socket.isGuestByKey = false;
+    socket.user = { userId: `guest:${guestRow.id}`, email: '' };
+
+    console.log('[Events] Socket upgraded from recovery mode', {
+      participantId: guestRow.id.substring(0, 8) + '...',
+      socketIsGuest: socket.isGuest,
+      socketIsGuestByKey: socket.isGuestByKey,
+      socketId: socket.id,
+    });
+
+    return {
+      participantId: guestRow.id,
+      memberId: null,
+      displayName: guestRow.display_name || guestRow.guest_name || 'Guest',
+      avatarUrl: guestRow.avatar_url || guestRow.guest_avatar || null
+    };
   }
 
   // First try: match via organization_members (registered users)

@@ -58,7 +58,27 @@ export async function removePresence(roomId: string, userId: string) {
 // ─── Shared auth middleware (supports both user JWTs and guest tokens) ───
 function socketAuthMiddleware(socket: any, next: (err?: Error) => void) {
   const token = socket.handshake.auth?.token || socket.handshake.headers?.authorization?.replace('Bearer ', '');
+  const eventId = typeof socket.handshake?.auth?.eventId === 'string' ? socket.handshake.auth.eventId : '';
+  const guestIdentityKey =
+    typeof socket.handshake?.auth?.guestIdentityKey === 'string' ? socket.handshake.auth.guestIdentityKey : '';
+
+  const hasRecoveryAuth = !!eventId && !!guestIdentityKey;
+  const applyGuestRecoveryMode = () => {
+    socket.isGuestByKey = true;
+    socket.isGuest = false;
+    socket.user = {
+      userId: 'guest:pending',
+      email: '',
+    };
+  };
+
   if (!token) {
+    // Allow guests to connect in recovery mode using stable guest identity key.
+    if (hasRecoveryAuth) {
+      applyGuestRecoveryMode();
+      next();
+      return;
+    }
     return next(new Error('Authentication required'));
   }
 
@@ -83,8 +103,14 @@ function socketAuthMiddleware(socket: any, next: (err?: Error) => void) {
     };
     socket.guestPayload = guestPayload;
     socket.isGuest = true;
+    socket.isGuestByKey = false;
     next();
   } catch {
+    if (hasRecoveryAuth) {
+      applyGuestRecoveryMode();
+      next();
+      return;
+    }
     next(new Error('Invalid or expired token'));
   }
 }
