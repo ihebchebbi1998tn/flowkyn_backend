@@ -1089,7 +1089,17 @@ export function setupGameHandlers(gamesNs: Namespace) {
             });
 
             const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
-            gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+            const roomId = `game:${data.sessionId}`;
+            const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
+            const roomSize = room && typeof room.size === 'number' ? room.size : 0;
+            console.log('[Games] Coffee Roulette game:data broadcast', {
+              sessionId: data.sessionId,
+              action: normalizedAction,
+              phase: next?.phase,
+              pairsCount: Array.isArray(next?.pairs) ? next.pairs.length : 0,
+              roomSize,
+            });
+            gamesNs.to(roomId).emit('game:data', {
               sessionId: data.sessionId,
               gameData: next,
               snapshotRevisionId: savedSnapshot?.id || null,
