@@ -60,10 +60,15 @@ export class OrganizationsService {
 
   async listMembers(orgId: string) {
     return query(
-      `SELECT om.*, u.name, u.email, u.avatar_url, r.name as role_name
+      `SELECT om.*, u.name, u.email, u.avatar_url, r.name as role_name,
+              omd.department_id as department_id,
+              COALESCE(d.name, 'General') as department,
+              d.name as department_name
        FROM organization_members om
        JOIN users u ON u.id = om.user_id
        JOIN roles r ON r.id = om.role_id
+       LEFT JOIN organization_member_departments omd ON omd.organization_member_id = om.id
+       LEFT JOIN departments d ON d.id = omd.department_id
        WHERE om.organization_id = $1 AND om.status = 'active'
        ORDER BY om.joined_at ASC`,
       [orgId]
@@ -72,10 +77,14 @@ export class OrganizationsService {
 
   async listInvitations(orgId: string) {
     return query(
-      `SELECT id, email, status, invited_by_member_id, created_at, expires_at
-       FROM organization_invitations
-       WHERE organization_id = $1
-       ORDER BY created_at DESC`,
+      `SELECT oi.id, oi.email, oi.status, oi.invited_by_member_id, oi.created_at, oi.expires_at,
+              oi.department_id as department_id,
+              COALESCE(d.name, 'General') as department,
+              d.name as department_name
+       FROM organization_invitations oi
+       LEFT JOIN departments d ON d.id = oi.department_id
+       WHERE oi.organization_id = $1
+       ORDER BY oi.created_at DESC`,
       [orgId]
     );
   }
