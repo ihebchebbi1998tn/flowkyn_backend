@@ -954,6 +954,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
         joinedSessions.add(data.sessionId);
         joinedParticipantBySessionId.set(data.sessionId, participant.participantId);
 
+        console.log('[Games] User joined game session', {
+          socketId: socket.id,
+          sessionId: data.sessionId,
+          roomId,
+          participantId: participant.participantId,
+          userId: user.userId,
+        });
+
         // Register socket mapping for targeted voice signaling.
         // This is needed because `coffee:voice_*` events must be forwarded only to the paired participant.
         const voiceKey = `${data.sessionId}:${participant.participantId}`;
@@ -1089,8 +1097,17 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
     // ─── Player action (persisted to DB, broadcast) ───
     socket.on('game:action', async (data: { sessionId: string; roundId?: string; actionType: string; payload: any }) => {
+      console.log('[GameAction] Received action from client', {
+        actionType: data.actionType,
+        sessionId: data.sessionId,
+        socketId: socket.id,
+        userId: user.userId,
+        timestamp: new Date().toISOString(),
+      });
+
       const validation = gameActionSchema.safeParse(data);
       if (!validation.success) {
+        console.warn('[GameAction] Validation failed:', validation.error.issues[0].message);
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
@@ -1099,6 +1116,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
         // BUG FIX: Resolve participant ID from authenticated user instead of trusting client
         const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
         if (!participant) {
+          console.warn('[GameAction] Participant verification failed', { sessionId: data.sessionId, userId: user.userId });
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
           return;
         }
@@ -1106,6 +1124,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const activeRound = await gamesService.getActiveRound(data.sessionId);
         const roundId = data.roundId || activeRound?.id;
         if (!roundId) {
+          console.warn('[GameAction] No active round found', { sessionId: data.sessionId });
           socket.emit('error', { message: 'No active round for this session', code: 'ROUND_NOT_ACTIVE' });
           return;
         }
@@ -1168,13 +1187,32 @@ export function setupGameHandlers(gamesNs: Namespace) {
         }
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
+          console.log('[CoffeeRoulette] Processing coffee action', {
+            actionType: data.actionType,
+            sessionId: data.sessionId,
+            participantId: participant.participantId,
+            timestamp: new Date().toISOString(),
+          });
+
           const normalizedAction =
             data.actionType === 'coffee:end_and_finish' ? 'coffee:end' : data.actionType;
 
           const prevQueue = coffeeActionQueue.get(data.sessionId) ?? Promise.resolve();
           const run = prevQueue.then(async () => {
+            console.log('[CoffeeRoulette] Starting action queue execution', {
+              actionType: data.actionType,
+              sessionId: data.sessionId,
+              queueLength: coffeeActionQueue.size,
+            });
+
             // Re-read latest snapshot inside the lock to avoid stale prev.
             const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+            
+            console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
+              sessionId: data.sessionId,
+              currentPhase: (latestSnapshot?.state as any)?.phase,
+              hasSnapshot: !!latestSnapshot,
+            });
 
             const next = await reduceCoffeeState({
               eventId: session.event_id,
@@ -1187,12 +1225,30 @@ export function setupGameHandlers(gamesNs: Namespace) {
             const roomId = `game:${data.sessionId}`;
             const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
             const roomSize = room && typeof room.size === 'number' ? room.size : 0;
+            
+            console.log('[CoffeeRoulette] Broadcasting game:data', {
+              sessionId: data.sessionId,
+              actionType: data.actionType,
+              roomId,
+              roomSize,
+              gamePhase: (next as any)?.phase,
+              pairCount: (next as any)?.pairs?.length,
+              pairs: (next as any)?.pairs?.map((p: any) => ({
+                id: p.id,
+                person1: p.person1.participantId,
+                person2: p.person2.participantId,
+                topic: p.topic,
+              })),
+            });
+
             gamesNs.to(roomId).emit('game:data', {
               sessionId: data.sessionId,
               gameData: next,
               snapshotRevisionId: savedSnapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
             });
+
+            console.log('[CoffeeRoulette] game:data broadcast sent to', roomSize, 'clients in room', roomId);
 
             // If requested, also close the DB session and broadcast game:ended.
             if (data.actionType === 'coffee:end_and_finish') {
