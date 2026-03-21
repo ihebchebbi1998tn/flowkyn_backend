@@ -180,16 +180,15 @@ export class SessionDetailsService {
         em.message,
         em.message_type,
         em.created_at,
-        EXTRACT(EPOCH FROM (em.created_at - gs.started_at)) / 60 as timestamp_minutes
+        EXTRACT(EPOCH FROM (em.created_at - $3::timestamp)) / 60 as timestamp_minutes
       FROM event_messages em
       JOIN participants p ON em.participant_id = p.id
       LEFT JOIN organization_members om ON p.organization_member_id = om.id
       LEFT JOIN event_profiles ep ON em.event_id = ep.event_id AND em.participant_id = ep.participant_id
-      LEFT JOIN game_sessions gs ON em.event_id = gs.event_id
-      WHERE em.event_id = $1 AND gs.id = $2
+      WHERE em.event_id = $1
       ORDER BY em.created_at ASC
       `,
-      [sessionRow.event_id, sessionId]
+      [sessionRow.event_id, sessionId, sessionRow.started_at]
     );
 
     // Fetch actions with participant info
@@ -203,17 +202,16 @@ export class SessionDetailsService {
         ga.action_type,
         ga.payload,
         ga.created_at,
-        EXTRACT(EPOCH FROM (ga.created_at - gs.started_at)) / 60 as timestamp_minutes
+        EXTRACT(EPOCH FROM (ga.created_at - $2::timestamp)) / 60 as timestamp_minutes
       FROM game_actions ga
       JOIN participants p ON ga.participant_id = p.id
       JOIN game_rounds gr ON ga.round_id = gr.id
       LEFT JOIN organization_members om ON p.organization_member_id = om.id
-      LEFT JOIN event_profiles ep ON ga.game_session_id = ep.event_id AND ga.participant_id = ep.participant_id
-      LEFT JOIN game_sessions gs ON ga.game_session_id = gs.id
+      LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND ga.participant_id = ep.participant_id
       WHERE ga.game_session_id = $1
       ORDER BY ga.created_at ASC
       `,
-      [sessionId]
+      [sessionId, sessionRow.started_at]
     );
 
     // Build timeline
