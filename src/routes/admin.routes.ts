@@ -29,6 +29,7 @@ router.delete('/users/:id', ctrl.deleteUser);
 
 // Organizations
 router.get('/organizations', ctrl.listOrganizations);
+router.patch('/organizations/:id/status', ctrl.updateOrganizationStatus);
 router.delete('/organizations/:id', ctrl.deleteOrganization);
 
 // Game sessions

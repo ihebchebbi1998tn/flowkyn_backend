@@ -88,6 +88,18 @@ export class AdminController {
     } catch (err) { next(err); }
   }
 
+  async updateOrganizationStatus(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { status } = req.body;
+      const org = await adminService.updateOrganizationStatus(req.params.id, status);
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_UPDATE_ORG_STATUS', {
+        targetOrgId: req.params.id,
+        newStatus: status,
+      });
+      res.json(org);
+    } catch (err) { next(err); }
+  }
+
   async listGameSessions(req: Request, res: Response, next: NextFunction) {
     try {
       const { page = '1', limit = '20' } = req.query;

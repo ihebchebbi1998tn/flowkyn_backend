@@ -195,7 +195,7 @@ export class AdminService {
     const limitParam = params.length + 2;
 
     const rows = await query(
-      `SELECT o.id, o.name, o.slug, o.logo_url, o.owner_user_id, o.created_at, o.updated_at,
+      `SELECT o.id, o.name, o.slug, o.logo_url, o.owner_user_id, o.status, o.created_at, o.updated_at,
               u.name as owner_name,
               COALESCE(mc.member_count, 0) as member_count,
               COALESCE(ec.event_count, 0) as event_count,
@@ -315,4 +315,28 @@ export class AdminService {
 
     return buildPaginatedResponse(rows, total, page, limit);
   }
+
+  async updateOrganizationStatus(id: string, status: 'test' | 'real' | 'inactive' | 'banned') {
+    // Validate status value
+    const validStatuses = ['test', 'real', 'inactive', 'banned'];
+    if (!validStatuses.includes(status)) {
+      throw new AppError(
+        `Invalid status value. Allowed values: ${validStatuses.join(', ')}`,
+        400,
+        'VALIDATION_FAILED'
+      );
+    }
+
+    const org = await queryOne(
+      `UPDATE organizations SET status = $2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, name, slug, logo_url, description, industry, company_size, 
+                 owner_user_id, status, created_at, updated_at`,
+      [id, status]
+    );
+
+    if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
+    return org;
+  }
 }
+
