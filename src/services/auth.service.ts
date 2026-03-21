@@ -109,12 +109,28 @@ export class AuthService {
    * 
    * @throws {AppError} 401 if credentials are invalid
    * @throws {AppError} 403 if account is suspended or unverified
+   * @throws {AppError} 403 if organization is banned
    */
   async login(email: string, password: string, ip: string, userAgent: string) {
     const user = await queryOne<UserRow>('SELECT * FROM users WHERE email = $1', [email]);
     if (!user) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');
     if (user.status === 'suspended') throw new AppError('Your account has been suspended — contact support', 403, 'AUTH_ACCOUNT_SUSPENDED');
     if (user.status !== 'active') throw new AppError('Please verify your email before logging in', 403, 'AUTH_ACCOUNT_NOT_VERIFIED');
+
+    // Check if user's organization is banned
+    const orgStatus = await queryOne<{ status: string; ban_reason?: string }>(
+      `SELECT o.status, o.ban_reason
+       FROM organization_members om
+       JOIN organizations o ON o.id = om.organization_id
+       WHERE om.user_id = $1 AND om.status = 'active'
+       LIMIT 1`,
+      [user.id]
+    );
+
+    if (orgStatus?.status === 'banned') {
+      const message = `Your organization has been banned${orgStatus.ban_reason ? ': ' + orgStatus.ban_reason : ''}`;
+      throw new AppError(message, 403, 'ORG_BANNED');
+    }
 
     const valid = await comparePassword(password, user.password_hash);
     if (!valid) throw new AppError('Invalid email or password', 401, 'AUTH_INVALID_CREDENTIALS');

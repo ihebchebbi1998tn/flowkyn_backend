@@ -25,6 +25,7 @@ export type ErrorCode =
   | 'NOT_A_MEMBER'
   | 'SOLE_OWNER'
   | 'SUPER_ADMIN_REQUIRED'
+  | 'ORG_BANNED'
   // Validation
   | 'VALIDATION_FAILED'
   | 'MISSING_FIELD'

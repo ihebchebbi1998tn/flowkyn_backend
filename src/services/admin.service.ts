@@ -377,5 +377,38 @@ export class AdminService {
     if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
     return org;
   }
+
+  /**
+   * Ban an organization - all members will be unable to login.
+   * Stores ban reason for audit trail and user notification.
+   */
+  async banOrganization(organizationId: string, reason: string) {
+    const org = await queryOne(
+      `UPDATE organizations 
+       SET status = 'banned', banned_at = NOW(), ban_reason = $2, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, name, status, banned_at, ban_reason`,
+      [organizationId, reason]
+    );
+
+    if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
+    return org;
+  }
+
+  /**
+   * Unban an organization - members can login again.
+   */
+  async unbanOrganization(organizationId: string) {
+    const org = await queryOne(
+      `UPDATE organizations 
+       SET status = 'active', banned_at = NULL, ban_reason = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id, name, status, banned_at, ban_reason`,
+      [organizationId]
+    );
+
+    if (!org) throw new AppError('Organization not found', 404, 'NOT_FOUND');
+    return org;
+  }
 }
 

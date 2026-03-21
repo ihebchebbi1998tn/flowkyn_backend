@@ -30,6 +30,8 @@ router.delete('/users/:id', ctrl.deleteUser);
 // Organizations
 router.get('/organizations', ctrl.listOrganizations);
 router.patch('/organizations/:id/status', ctrl.updateOrganizationStatus);
+router.post('/organizations/:orgId/ban', ctrl.banOrganization);
+router.post('/organizations/:orgId/unban', ctrl.unbanOrganization);
 router.delete('/organizations/:id', ctrl.deleteOrganization);
 
 // Game sessions

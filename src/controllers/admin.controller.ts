@@ -118,4 +118,30 @@ export class AdminController {
       res.json(result);
     } catch (err) { next(err); }
   }
+
+  async banOrganization(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { orgId } = req.params;
+      const { reason } = req.body;
+      const org = await adminService.banOrganization(orgId, reason);
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_BAN_ORGANIZATION', {
+        organizationId: orgId,
+        organizationName: org.name,
+        reason,
+      });
+      res.json({ message: 'Organization banned successfully', organization: org });
+    } catch (err) { next(err); }
+  }
+
+  async unbanOrganization(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { orgId } = req.params;
+      const org = await adminService.unbanOrganization(orgId);
+      await auditLogsService.create(null, req.user!.userId, 'ADMIN_UNBAN_ORGANIZATION', {
+        organizationId: orgId,
+        organizationName: org.name,
+      });
+      res.json({ message: 'Organization unbanned successfully', organization: org });
+    } catch (err) { next(err); }
+  }
 }
