@@ -78,11 +78,11 @@ router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debrie
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);
 
 // Game Session Details — view comprehensive session data
-router.get('/game-sessions/:sessionId/details', authenticate, validate(uuidParam, 'params'), sessionCtrl.getSessionDetails);
-router.get('/game-sessions/:sessionId/messages', authenticate, validate(uuidParam, 'params'), sessionCtrl.getSessionMessages);
-router.get('/game-sessions/:sessionId/export', authenticate, validate(uuidParam, 'params'), sessionCtrl.exportSessionData);
-router.post('/game-sessions/:sessionId/close', authenticate, validate(uuidParam, 'params'), sessionCtrl.closeSession);
-router.delete('/game-sessions/:sessionId', authenticate, validate(uuidParam, 'params'), sessionCtrl.deleteSession);
+router.get('/game-sessions/:sessionId/details', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.getSessionDetails);
+router.get('/game-sessions/:sessionId/messages', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.getSessionMessages);
+router.get('/game-sessions/:sessionId/export', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.exportSessionData);
+router.post('/game-sessions/:sessionId/close', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.closeSession);
+router.delete('/game-sessions/:sessionId', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.deleteSession);
 router.get('/events/:eventId/game-sessions/active', authenticate, validate(eventIdParam, 'params'), sessionCtrl.getActiveSessionsForEvent);
 
 export { router as gamesRoutes };
