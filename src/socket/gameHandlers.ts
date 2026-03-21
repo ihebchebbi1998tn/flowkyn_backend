@@ -326,6 +326,7 @@ async function reduceTwoTruthsState(args: {
 type CoffeeState = {
   kind: 'coffee-roulette';
   phase: 'waiting' | 'matching' | 'chatting' | 'complete';
+  gameStatus?: 'waiting' | 'in_progress' | 'finished'; // FIX #2: Explicit game status
   configId?: string; // ID of the coffee roulette configuration for this event
   pairs: Array<{
     id: string;
@@ -405,6 +406,7 @@ async function reduceCoffeeState(args: {
   const base: CoffeeState = prev || {
     kind: 'coffee-roulette',
     phase: 'waiting',
+    gameStatus: 'waiting', // FIX #2: Add game status
     pairs: [],
     startedChatAt: null,
     chatDurationMinutes: Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30)),
@@ -488,6 +490,7 @@ async function reduceCoffeeState(args: {
       ...base,
       configId: configRow?.id,
       phase: 'matching',
+      gameStatus: 'in_progress', // FIX #2: Game has started
       pairs,
       startedChatAt: null,
       chatDurationMinutes: Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || base.chatDurationMinutes || 30)),
@@ -511,7 +514,8 @@ async function reduceCoffeeState(args: {
     const chatDurationMinutes = Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30));
     return { 
       ...base, 
-      phase: 'chatting', 
+      phase: 'chatting',
+      gameStatus: 'in_progress', // FIX #2: Game is in progress 
       startedChatAt: new Date().toISOString(),
       chatDurationMinutes,
       chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString(),
@@ -583,17 +587,18 @@ async function reduceCoffeeState(args: {
   }
 
   if (actionType === 'coffee:end') {
-    return { ...base, phase: 'complete' };
+    return { ...base, phase: 'complete', gameStatus: 'finished' }; // FIX #2: Game finished
   }
 
   if (actionType === 'coffee:end_and_finish') {
-    return { ...base, phase: 'complete' };
+    return { ...base, phase: 'complete', gameStatus: 'finished' }; // FIX #2: Game finished
   }
 
   if (actionType === 'coffee:reset') {
     return {
       kind: 'coffee-roulette',
       phase: 'waiting',
+      gameStatus: 'waiting', // FIX #2: Reset to waiting
       pairs: [],
       startedChatAt: null,
       promptsUsed: 0,
@@ -1001,6 +1006,21 @@ export function setupGameHandlers(gamesNs: Namespace) {
           timestamp: new Date().toISOString(),
         });
 
+          // FIX #1: Enrich snapshot with current pair info for late joiners
+          const enrichedSnapshot = snapshot?.state;
+          if (enrichedSnapshot && (enrichedSnapshot as any).kind === 'coffee-roulette' && (enrichedSnapshot as any).pairs) {
+            // Ensure pairs are properly formatted and include all necessary info
+            const pairs = (enrichedSnapshot as any).pairs;
+            (enrichedSnapshot as any).pairs = pairs.map((p: any) => ({
+              id: p.id,
+              person1: p.person1,
+              person2: p.person2,
+              topic: p.topic,
+              topicKey: p.topicKey,
+              topicId: p.topicId,
+            }));
+          }
+
           ack?.({
             ok: true,
             data: {
@@ -1009,7 +1029,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               totalRounds: session.total_rounds || 4,
               activeRoundId: activeRound?.id || null,
               participantId: participant.participantId,
-              snapshot: snapshot?.state || null,
+              snapshot: enrichedSnapshot || null,
               snapshotRevisionId: snapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
               sessionDeadlineAt: (session as any)?.session_deadline_at || null,
