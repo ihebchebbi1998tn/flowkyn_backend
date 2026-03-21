@@ -9,16 +9,16 @@
  * - Maintain backward compatibility
  */
 
--- Step 1: Add category column to posts table
-ALTER TABLE posts ADD COLUMN category VARCHAR(50) DEFAULT 'general';
+-- Step 1: Add category column to activity_posts table
+ALTER TABLE activity_posts ADD COLUMN category VARCHAR(50) DEFAULT 'general';
 
 -- Add comment explaining the category
-COMMENT ON COLUMN posts.category IS 'Post category: innovation, revenue, collaboration, customer_success, personal_growth, general';
+COMMENT ON COLUMN activity_posts.category IS 'Post category: innovation, revenue, collaboration, customer_success, personal_growth, general';
 
 -- Step 2: Create posts_tags junction table
 CREATE TABLE posts_tags (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  post_id UUID NOT NULL REFERENCES posts(id) ON DELETE CASCADE,
+  post_id UUID NOT NULL REFERENCES activity_posts(id) ON DELETE CASCADE,
   tag TEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   
@@ -52,18 +52,18 @@ CREATE TABLE win_categories (
 CREATE INDEX idx_win_categories_org_id ON win_categories(organization_id);
 CREATE INDEX idx_win_categories_key ON win_categories(key);
 
--- Step 4: Add indexes to posts table for category queries
-CREATE INDEX idx_posts_category ON posts(category);
-CREATE INDEX idx_posts_category_org_id ON posts(organization_id, category);
+-- Step 4: Add indexes to activity_posts table for category queries
+CREATE INDEX idx_activity_posts_category ON activity_posts(category);
+CREATE INDEX idx_activity_posts_category_event_id ON activity_posts(event_id, category);
 
--- Step 5: Add column to track tags for posts
-ALTER TABLE posts ADD COLUMN tags TEXT[];
+-- Step 5: Add column to track tags for activity_posts
+ALTER TABLE activity_posts ADD COLUMN tags TEXT[];
 
 -- Add comment
-COMMENT ON COLUMN posts.tags IS 'Array of tags associated with this post (denormalized for performance)';
+COMMENT ON COLUMN activity_posts.tags IS 'Array of tags associated with this post (denormalized for performance)';
 
 -- Create index for tag searches
-CREATE INDEX idx_posts_tags_gin ON posts USING GIN(tags);
+CREATE INDEX idx_activity_posts_tags_gin ON activity_posts USING GIN(tags);
 
 -- Step 6: Create default categories for existing organizations (optional migration)
 -- This is handled by the application layer on first use
@@ -71,16 +71,16 @@ CREATE INDEX idx_posts_tags_gin ON posts USING GIN(tags);
 -- Step 7: Add created_by column to posts_tags if not exists (for audit trail)
 ALTER TABLE posts_tags ADD COLUMN created_by_member_id UUID REFERENCES users(id) ON DELETE SET NULL;
 
--- Step 8: Create function to update posts.tags when posts_tags changes
+-- Step 8: Create function to update activity_posts.tags when posts_tags changes
 CREATE OR REPLACE FUNCTION update_posts_tags_array()
 RETURNS TRIGGER AS $$
 BEGIN
   IF TG_OP = 'INSERT' THEN
-    UPDATE posts SET tags = (
+    UPDATE activity_posts SET tags = (
       SELECT ARRAY_AGG(tag) FROM posts_tags WHERE post_id = NEW.post_id
     ) WHERE id = NEW.post_id;
   ELSIF TG_OP = 'DELETE' THEN
-    UPDATE posts SET tags = (
+    UPDATE activity_posts SET tags = (
       SELECT ARRAY_AGG(tag) FROM posts_tags WHERE post_id = OLD.post_id
     ) WHERE id = OLD.post_id;
   END IF;
@@ -99,7 +99,7 @@ CREATE OR REPLACE VIEW v_posts_with_tags AS
 SELECT 
   p.*,
   COALESCE(ARRAY_AGG(pt.tag) FILTER (WHERE pt.tag IS NOT NULL), ARRAY[]::TEXT[]) as post_tags
-FROM posts p
+FROM activity_posts p
 LEFT JOIN posts_tags pt ON p.id = pt.post_id
 GROUP BY p.id;
 
