@@ -21,5 +21,19 @@ module.exports = {
       // Watch (disable in production)
       watch: false,
     },
+    // Performance optimization: Refresh admin stats cache every 5 minutes
+    {
+      name: 'refresh-admin-stats',
+      script: 'dist/jobs/refreshAdminStats.js',
+      instances: 1,
+      cron_time: '*/5 * * * *', // Every 5 minutes
+      autorestart: true,
+      max_memory_restart: '256M',
+      error_file: './logs/refresh-admin-stats-error.log',
+      out_file: './logs/refresh-admin-stats.log',
+      env: {
+        NODE_ENV: 'production',
+      },
+    },
   ],
 };
