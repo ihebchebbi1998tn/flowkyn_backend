@@ -151,6 +151,8 @@ type TwoTruthsState = {
   scores: Record<string, number>;
   submitEndsAt?: string;
   voteEndsAt?: string;
+  submitSeconds?: number;
+  voteSeconds?: number;
 };
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -182,7 +184,11 @@ async function reduceTwoTruthsState(args: {
     votes: {},
     revealedLie: null,
     scores: {},
+    submitSeconds: Number(session?.resolved_timing?.twoTruths?.submitSeconds || 30),
+    voteSeconds: Number(session?.resolved_timing?.twoTruths?.voteSeconds || 20),
   };
+  const submitSeconds = Math.max(5, Number(base.submitSeconds || session?.resolved_timing?.twoTruths?.submitSeconds || 30));
+  const voteSeconds = Math.max(5, Number(base.voteSeconds || session?.resolved_timing?.twoTruths?.voteSeconds || 20));
 
   if (actionType === 'two_truths:start') {
     return {
@@ -195,7 +201,9 @@ async function reduceTwoTruthsState(args: {
       votes: {},
       revealedLie: null,
       correctLieId: undefined,
-      submitEndsAt: new Date(Date.now() + 30000).toISOString(),
+      submitSeconds,
+      voteSeconds,
+      submitEndsAt: new Date(Date.now() + submitSeconds * 1000).toISOString(),
     };
   }
 
@@ -240,7 +248,9 @@ async function reduceTwoTruthsState(args: {
       votes: {},
       revealedLie: null,
       correctLieId, // Store this securely in the snapshot
-      voteEndsAt: new Date(Date.now() + 20000).toISOString(),
+      submitSeconds,
+      voteSeconds,
+      voteEndsAt: new Date(Date.now() + voteSeconds * 1000).toISOString(),
     };
   }
 
@@ -304,7 +314,9 @@ async function reduceTwoTruthsState(args: {
       votes: {},
       revealedLie: null,
       correctLieId: undefined,
-      submitEndsAt: new Date(Date.now() + 30000).toISOString(),
+      submitSeconds,
+      voteSeconds,
+      submitEndsAt: new Date(Date.now() + submitSeconds * 1000).toISOString(),
     };
   }
 
@@ -385,8 +397,9 @@ async function reduceCoffeeState(args: {
   actionType: string;
   payload: any;
   prev: CoffeeState | null;
+  session?: any;
 }): Promise<CoffeeState> {
-  const { eventId, actionType, payload, prev } = args;
+  const { eventId, actionType, payload, prev, session } = args;
 
   const base: CoffeeState = prev || {
     kind: 'coffee-roulette',
@@ -492,7 +505,7 @@ async function reduceCoffeeState(args: {
       });
       return { ...base, phase: 'waiting', startedChatAt: null };
     }
-    const chatDurationMinutes = 30; // Using 30 minutes chat limit
+    const chatDurationMinutes = Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30));
     return { 
       ...base, 
       phase: 'chatting', 
@@ -607,8 +620,9 @@ async function reduceStrategicState(args: {
   actionType: string;
   payload: any;
   prev: StrategicState | null;
+  session?: any;
 }): Promise<StrategicState> {
-  const { actionType, payload, prev } = args;
+  const { actionType, payload, prev, session } = args;
 
   const base: StrategicState = prev || {
     kind: 'strategic-escape',
@@ -648,7 +662,9 @@ async function reduceStrategicState(args: {
   if (actionType === 'strategic:start_discussion') {
     // Idempotent: don't reset discussion timer if already started
     if (base.phase === 'discussion' && base.discussionEndsAt) return base;
-    const minutes = typeof payload?.durationMinutes === 'number' ? payload.durationMinutes : 45;
+    const minutes = typeof payload?.durationMinutes === 'number'
+      ? payload.durationMinutes
+      : Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes || 45);
     return {
       ...base,
       phase: 'discussion',
@@ -989,6 +1005,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
               snapshot: snapshot?.state || null,
               snapshotRevisionId: snapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
+              sessionDeadlineAt: (session as any)?.session_deadline_at || null,
+              resolvedTiming: (session as any)?.resolved_timing || null,
               // "Admin" here means "can control game flow" for UI purposes.
               isAdmin: !!admin,
             },
@@ -1219,6 +1237,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               actionType: normalizedAction,
               payload: data.payload,
               prev: (latestSnapshot?.state as any) || null,
+              session,
             });
 
             const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
@@ -1282,6 +1301,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             actionType: data.actionType,
             payload: data.payload,
             prev: (latest?.state as any) || null,
+            session,
           });
           const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
           gamesNs.to(`game:${data.sessionId}`).emit('game:data', {

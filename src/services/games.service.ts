@@ -4,6 +4,14 @@ import { AppError } from '../middleware/errorHandler';
 import { GameSessionRow, GameRoundRow } from '../types';
 
 export class GamesService {
+  private clampToEventEnd(candidate: Date | null, eventEnd: string | Date | null | undefined): Date | null {
+    if (!candidate) return null;
+    if (!eventEnd) return candidate;
+    const end = new Date(eventEnd);
+    if (!Number.isFinite(end.getTime())) return candidate;
+    return candidate.getTime() > end.getTime() ? end : candidate;
+  }
+
   async listGameTypes() {
     return query('SELECT * FROM game_types ORDER BY name ASC');
   }
@@ -53,7 +61,10 @@ export class GamesService {
   }
 
   async startSession(eventId: string, gameTypeId: string, totalRounds?: number) {
-    const event = await queryOne('SELECT id, status FROM events WHERE id = $1', [eventId]);
+    const event = await queryOne<{ id: string; status: string; end_time: string | null }>(
+      'SELECT id, status, end_time FROM events WHERE id = $1',
+      [eventId],
+    );
     if (!event) throw new AppError('Event not found', 404, 'NOT_FOUND');
     
     // Auto-activate event if it's in draft status
@@ -72,8 +83,20 @@ export class GamesService {
       await client.query('SELECT id FROM events WHERE id = $1 FOR UPDATE', [eventId]);
 
       // Validate totalRounds and enforce event_settings.max_rounds (if present)
-      const { rows: [settings] } = await client.query<{ max_rounds: number | null }>(
-        `SELECT max_rounds
+      const { rows: [settings] } = await client.query<{
+        max_rounds: number | null;
+        default_session_duration_minutes: number | null;
+        two_truths_submit_seconds: number | null;
+        two_truths_vote_seconds: number | null;
+        coffee_chat_duration_minutes: number | null;
+        strategic_discussion_duration_minutes: number | null;
+      }>(
+        `SELECT max_rounds,
+                default_session_duration_minutes,
+                two_truths_submit_seconds,
+                two_truths_vote_seconds,
+                coffee_chat_duration_minutes,
+                strategic_discussion_duration_minutes
          FROM event_settings
          WHERE event_id = $1`,
         [eventId]
@@ -116,19 +139,66 @@ export class GamesService {
         }
         rounds = Math.min(rounds, maxRounds);
       }
+      const submitSeconds = Math.max(5, Number(settings?.two_truths_submit_seconds ?? 30));
+      const voteSeconds = Math.max(5, Number(settings?.two_truths_vote_seconds ?? 20));
+      const coffeeMinutes = Math.max(1, Number(settings?.coffee_chat_duration_minutes ?? 30));
+      const strategicMinutes = Math.max(1, Number(settings?.strategic_discussion_duration_minutes ?? 45));
+      const defaultSessionMinutes = Math.max(1, Number(settings?.default_session_duration_minutes ?? 30));
+
+      const sessionMinutes =
+        gameType.key === 'coffee-roulette'
+          ? coffeeMinutes
+          : gameType.key === 'strategic-escape'
+            ? strategicMinutes
+            : defaultSessionMinutes;
+
+      const now = new Date();
+      const rawSessionDeadline = new Date(now.getTime() + sessionMinutes * 60_000);
+      const sessionDeadline = this.clampToEventEnd(rawSessionDeadline, event.end_time);
+
+      const roundSeconds =
+        gameType.key === 'two-truths'
+          ? Math.max(10, submitSeconds + voteSeconds)
+          : 60;
+      const rawRoundDeadline = new Date(now.getTime() + roundSeconds * 1000);
+      const roundDeadline = this.clampToEventEnd(
+        this.clampToEventEnd(rawRoundDeadline, sessionDeadline),
+        event.end_time
+      );
+
+      const resolvedTiming = {
+        gameKey: gameType.key,
+        sessionDurationMinutes: sessionMinutes,
+        twoTruths: {
+          submitSeconds,
+          voteSeconds,
+        },
+        coffeeRoulette: {
+          chatDurationMinutes: coffeeMinutes,
+        },
+        strategicEscape: {
+          discussionDurationMinutes: strategicMinutes,
+        },
+        roundDurationSeconds: roundSeconds,
+        resolvedAt: now.toISOString(),
+      };
+
       // Create the session and an initial active round so clients can immediately
       // submit actions without needing an admin-only "start round" step.
       const { rows: [session] } = await client.query(
-        `INSERT INTO game_sessions (id, event_id, game_type_id, status, current_round, game_duration_minutes, total_rounds, started_at)
-         VALUES ($1, $2, $3, 'active', 1, 30, $4, NOW()) RETURNING *`,
-        [sessionId, eventId, gameTypeId, rounds]
+        `INSERT INTO game_sessions (
+          id, event_id, game_type_id, status, current_round, game_duration_minutes, total_rounds,
+          session_deadline_at, resolved_timing, expires_at, started_at
+        )
+         VALUES ($1, $2, $3, 'active', 1, $4, $5, $6, $7, $8, NOW()) RETURNING *`,
+        [sessionId, eventId, gameTypeId, sessionMinutes, rounds, sessionDeadline, resolvedTiming, sessionDeadline]
       );
 
       const roundId = uuid();
       await client.query(
-        `INSERT INTO game_rounds (id, game_session_id, round_number, round_duration_seconds, status, started_at)
-         VALUES ($1, $2, 1, 60, 'active', NOW())`,
-        [roundId, sessionId]
+        `INSERT INTO game_rounds (id, game_session_id, round_number, round_duration_seconds, round_deadline_at, status, started_at)
+         VALUES ($1, $2, 1, $3, $4, 'active', NOW())`,
+        [roundId, sessionId, roundSeconds, roundDeadline]
       );
 
       return { session, roundId, isNew: true };
@@ -151,6 +221,7 @@ export class GamesService {
           startedChatAt: null,
           promptsUsed: 0,
           decisionRequired: false,
+          chatDurationMinutes: (result.session as any)?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30,
         });
       } catch (err) {
         console.warn('[GamesService] Failed to create initial Coffee Roulette snapshot:', (err as any)?.message || err);
@@ -217,7 +288,11 @@ export class GamesService {
   async startRound(sessionId: string) {
     const round = await transaction(async (client) => {
       const { rows: [session] } = await client.query(
-        'SELECT * FROM game_sessions WHERE id = $1 FOR UPDATE',
+        `SELECT gs.*, e.end_time
+         FROM game_sessions gs
+         JOIN events e ON e.id = gs.event_id
+         WHERE gs.id = $1
+         FOR UPDATE`,
         [sessionId]
       );
       if (!session) throw new AppError('Game session not found', 404, 'NOT_FOUND');
@@ -229,14 +304,26 @@ export class GamesService {
         throw new AppError('Cannot start a new round — session has reached total_rounds', 400, 'ROUNDS_COMPLETE');
       }
 
+      const hardDeadline = this.clampToEventEnd(session.session_deadline_at ? new Date(session.session_deadline_at) : null, session.end_time);
+      if (hardDeadline && hardDeadline.getTime() <= Date.now()) {
+        throw new AppError('Cannot start a new round — session deadline has passed', 400, 'SESSION_NOT_ACTIVE');
+      }
+
       const roundNumber = session.current_round + 1;
       const roundId = uuid();
+      const resolved = (session.resolved_timing as any) || {};
+      const roundSeconds = Number(resolved?.roundDurationSeconds || 60);
+      const rawRoundDeadline = new Date(Date.now() + Math.max(5, roundSeconds) * 1000);
+      const roundDeadline = this.clampToEventEnd(
+        this.clampToEventEnd(rawRoundDeadline, session.session_deadline_at ? new Date(session.session_deadline_at) : null),
+        session.end_time
+      );
 
       await client.query('UPDATE game_sessions SET current_round = $1 WHERE id = $2', [roundNumber, sessionId]);
       const { rows: [newRound] } = await client.query(
-        `INSERT INTO game_rounds (id, game_session_id, round_number, round_duration_seconds, status, started_at)
-         VALUES ($1, $2, $3, 60, 'active', NOW()) RETURNING *`,
-        [roundId, sessionId, roundNumber]
+        `INSERT INTO game_rounds (id, game_session_id, round_number, round_duration_seconds, round_deadline_at, status, started_at)
+         VALUES ($1, $2, $3, $4, $5, 'active', NOW()) RETURNING *`,
+        [roundId, sessionId, roundNumber, Math.max(5, roundSeconds), roundDeadline]
       );
       return newRound;
     });
@@ -413,9 +500,15 @@ export class GamesService {
 
     const session = await this.startSession(eventId, gameType.id);
 
-    // Set discussion timeout (default 30 minutes)
-    const durationMinutes = config.discussionDurationMinutes || 30;
-    const discussionEndsAt = new Date(Date.now() + durationMinutes * 60 * 1000);
+    // Set discussion timeout from session timing defaults (fallback to explicit payload, then 45).
+    const resolvedTiming = (session as any)?.resolved_timing as any;
+    const sessionStrategicDefault = Number(resolvedTiming?.strategicEscape?.discussionDurationMinutes || 45);
+    const durationMinutes = config.discussionDurationMinutes || sessionStrategicDefault;
+    const discussionEndsAtRaw = new Date(Date.now() + durationMinutes * 60 * 1000);
+    const discussionEndsAt = this.clampToEventEnd(
+      this.clampToEventEnd(discussionEndsAtRaw, (session as any)?.session_deadline_at || null),
+      (await queryOne<{ end_time: string | null }>('SELECT end_time FROM events WHERE id = $1', [eventId]))?.end_time || null
+    ) || discussionEndsAtRaw;
 
     // Update session with discussion timeout
     await query(

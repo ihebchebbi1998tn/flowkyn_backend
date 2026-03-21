@@ -11,7 +11,7 @@
  * This enables hands-off game flow without manual admin intervention.
  */
 
-import { query, queryOne } from '../config/database';
+import { query } from '../config/database';
 import { emitGameUpdate } from '../socket/emitter';
 import { GamesService } from '../services/games.service';
 
@@ -88,6 +88,93 @@ export async function enforceDiscussionTimeouts() {
 }
 
 /**
+ * End any active sessions that reached their authoritative deadline.
+ */
+export async function enforceSessionDeadlines() {
+  const expired = await query<{ id: string }>(
+    `SELECT id
+     FROM game_sessions
+     WHERE status = 'active'
+       AND session_deadline_at IS NOT NULL
+       AND session_deadline_at <= NOW()
+     ORDER BY session_deadline_at ASC
+     LIMIT 100`,
+    []
+  );
+
+  let ended = 0;
+  for (const row of expired) {
+    try {
+      const result = await gamesService.finishSession(row.id);
+      emitGameUpdate(row.id, 'game:ended', {
+        sessionId: row.id,
+        reason: 'session_deadline_reached',
+        results: result.results,
+        timestamp: new Date().toISOString(),
+      });
+      ended++;
+    } catch (err) {
+      // Session may already be finished by another worker/request.
+      console.warn('[TimingJob] enforceSessionDeadlines failed', {
+        sessionId: row.id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { processed: expired.length, ended };
+}
+
+/**
+ * Auto-complete active Coffee Roulette chatting phase when chatEndsAt expires.
+ */
+export async function enforceCoffeeChatTimeouts() {
+  const candidates = await query<{ session_id: string; state: any }>(
+    `SELECT gs.id as session_id, latest.state
+     FROM game_sessions gs
+     JOIN game_types gt ON gt.id = gs.game_type_id
+     JOIN LATERAL (
+       SELECT gss.state
+       FROM game_state_snapshots gss
+       WHERE gss.game_session_id = gs.id
+       ORDER BY gss.created_at DESC
+       LIMIT 1
+     ) latest ON TRUE
+     WHERE gs.status = 'active'
+       AND gt.key = 'coffee-roulette'
+     LIMIT 100`,
+    []
+  );
+
+  let completed = 0;
+  for (const row of candidates) {
+    const state = row.state as any;
+    if (!state || state.kind !== 'coffee-roulette' || state.phase !== 'chatting' || !state.chatEndsAt) continue;
+    const endsAt = new Date(state.chatEndsAt).getTime();
+    if (!Number.isFinite(endsAt) || endsAt > Date.now()) continue;
+
+    try {
+      const next = { ...state, phase: 'complete' };
+      const snapshot = await gamesService.saveSnapshot(row.session_id, next);
+      emitGameUpdate(row.session_id, 'game:data', {
+        sessionId: row.session_id,
+        gameData: next,
+        snapshotRevisionId: snapshot?.id || null,
+        snapshotCreatedAt: snapshot?.created_at || null,
+      });
+      completed++;
+    } catch (err) {
+      console.warn('[TimingJob] enforceCoffeeChatTimeouts failed', {
+        sessionId: row.session_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return { processed: candidates.length, completed };
+}
+
+/**
  * CRITICAL: Auto-transition session from discussion to debrief phase.
  * Uses GamesService to calculate results and manage state.
  * 
@@ -141,8 +228,12 @@ export function scheduleDiscussionTimer(intervalMs = 30000) {
   const interval = setInterval(async () => {
     try {
       const result = await enforceDiscussionTimeouts();
+      const sessionResult = await enforceSessionDeadlines();
+      const coffeeResult = await enforceCoffeeChatTimeouts();
 
       void result;
+      void sessionResult;
+      void coffeeResult;
     } catch (err) {
       console.error('[DiscussionTimer] Interval job failed:', err);
     }

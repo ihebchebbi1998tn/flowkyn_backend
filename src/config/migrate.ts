@@ -872,6 +872,42 @@ const migrations: { version: number; name: string; sql: string }[] = [
         ON activity_feedbacks(rating);
     `,
   },
+  {
+    version: 20,
+    name: 'dynamic_authoritative_timing',
+    sql: `
+      -- Hybrid timing model:
+      -- 1) event_settings keeps organization/event defaults
+      -- 2) game_sessions/game_rounds keep resolved deadlines used at runtime
+
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS default_session_duration_minutes INT NOT NULL DEFAULT 30;
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS two_truths_submit_seconds INT NOT NULL DEFAULT 30;
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS two_truths_vote_seconds INT NOT NULL DEFAULT 20;
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS coffee_chat_duration_minutes INT NOT NULL DEFAULT 30;
+      ALTER TABLE event_settings
+        ADD COLUMN IF NOT EXISTS strategic_discussion_duration_minutes INT NOT NULL DEFAULT 45;
+
+      ALTER TABLE game_sessions
+        ADD COLUMN IF NOT EXISTS session_deadline_at TIMESTAMP;
+      ALTER TABLE game_sessions
+        ADD COLUMN IF NOT EXISTS resolved_timing JSONB;
+
+      ALTER TABLE game_rounds
+        ADD COLUMN IF NOT EXISTS round_deadline_at TIMESTAMP;
+
+      CREATE INDEX IF NOT EXISTS idx_game_sessions_deadline_active
+        ON game_sessions(session_deadline_at)
+        WHERE status = 'active';
+
+      CREATE INDEX IF NOT EXISTS idx_game_rounds_deadline_active
+        ON game_rounds(round_deadline_at)
+        WHERE status = 'active';
+    `,
+  },
 ];
 
 /**

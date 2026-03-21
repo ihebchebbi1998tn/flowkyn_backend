@@ -14,6 +14,11 @@ export const createEventSchema = z.object({
   auto_start_games: z.boolean().optional(),
   max_rounds: z.number().int().min(1).max(30).optional(),
   allow_participant_game_control: z.boolean().optional(),
+  default_session_duration_minutes: z.number().int().min(1).max(240).optional(),
+  two_truths_submit_seconds: z.number().int().min(5).max(600).optional(),
+  two_truths_vote_seconds: z.number().int().min(5).max(600).optional(),
+  coffee_chat_duration_minutes: z.number().int().min(1).max(240).optional(),
+  strategic_discussion_duration_minutes: z.number().int().min(1).max(240).optional(),
   // Optional: target recipients directly by email
   invites: z.array(z.string().trim().email().max(255)).optional(),
   // Optional: target recipients by department (org-scoped UUIDs)
@@ -39,6 +44,11 @@ export const updateEventSchema = z.object({
   auto_start_games: z.boolean().optional(),
   max_rounds: z.number().int().min(1).max(30).optional(),
   allow_participant_game_control: z.boolean().optional(),
+  default_session_duration_minutes: z.number().int().min(1).max(240).optional(),
+  two_truths_submit_seconds: z.number().int().min(5).max(600).optional(),
+  two_truths_vote_seconds: z.number().int().min(5).max(600).optional(),
+  coffee_chat_duration_minutes: z.number().int().min(1).max(240).optional(),
+  strategic_discussion_duration_minutes: z.number().int().min(1).max(240).optional(),
   status: z.enum(['draft', 'active', 'completed', 'cancelled']).optional(),
 }).refine(data => Object.keys(data).length > 0, {
   message: 'At least one field is required',

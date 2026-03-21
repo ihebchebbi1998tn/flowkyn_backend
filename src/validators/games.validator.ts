@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 export const startSessionSchema = z.object({
   game_type_id: z.string().uuid(),
+  total_rounds: z.number().int().min(1).max(100).optional(),
 });
 
 export const submitActionSchema = z.object({

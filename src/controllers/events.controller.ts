@@ -283,6 +283,11 @@ export class EventsController {
         auto_start_games,
         max_rounds,
         allow_participant_game_control,
+        default_session_duration_minutes,
+        two_truths_submit_seconds,
+        two_truths_vote_seconds,
+        coffee_chat_duration_minutes,
+        strategic_discussion_duration_minutes,
         ...eventUpdates
       } = req.body as any;
 
@@ -297,7 +302,12 @@ export class EventsController {
         allow_chat !== undefined ||
         auto_start_games !== undefined ||
         max_rounds !== undefined ||
-        allow_participant_game_control !== undefined
+        allow_participant_game_control !== undefined ||
+        default_session_duration_minutes !== undefined ||
+        two_truths_submit_seconds !== undefined ||
+        two_truths_vote_seconds !== undefined ||
+        coffee_chat_duration_minutes !== undefined ||
+        strategic_discussion_duration_minutes !== undefined
       ) {
         const fields: string[] = [];
         const values: any[] = [];
@@ -322,6 +332,26 @@ export class EventsController {
         if (allow_participant_game_control !== undefined) {
           fields.push(`allow_participant_game_control = $${idx++}`);
           values.push(!!allow_participant_game_control);
+        }
+        if (default_session_duration_minutes !== undefined) {
+          fields.push(`default_session_duration_minutes = $${idx++}`);
+          values.push(Number(default_session_duration_minutes));
+        }
+        if (two_truths_submit_seconds !== undefined) {
+          fields.push(`two_truths_submit_seconds = $${idx++}`);
+          values.push(Number(two_truths_submit_seconds));
+        }
+        if (two_truths_vote_seconds !== undefined) {
+          fields.push(`two_truths_vote_seconds = $${idx++}`);
+          values.push(Number(two_truths_vote_seconds));
+        }
+        if (coffee_chat_duration_minutes !== undefined) {
+          fields.push(`coffee_chat_duration_minutes = $${idx++}`);
+          values.push(Number(coffee_chat_duration_minutes));
+        }
+        if (strategic_discussion_duration_minutes !== undefined) {
+          fields.push(`strategic_discussion_duration_minutes = $${idx++}`);
+          values.push(Number(strategic_discussion_duration_minutes));
         }
 
         if (fields.length > 0) {

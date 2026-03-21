@@ -180,7 +180,14 @@ CREATE TABLE event_settings (
   allow_guests BOOLEAN DEFAULT true,
   allow_chat BOOLEAN DEFAULT true,
   auto_start_games BOOLEAN DEFAULT false,
-  max_rounds INT DEFAULT 5
+  max_rounds INT DEFAULT 5,
+  allow_participant_game_control BOOLEAN NOT NULL DEFAULT true,
+  updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+  default_session_duration_minutes INT NOT NULL DEFAULT 30,
+  two_truths_submit_seconds INT NOT NULL DEFAULT 30,
+  two_truths_vote_seconds INT NOT NULL DEFAULT 20,
+  coffee_chat_duration_minutes INT NOT NULL DEFAULT 30,
+  strategic_discussion_duration_minutes INT NOT NULL DEFAULT 45
 );
 
 -- ─── Event Invitations ───
@@ -275,12 +282,15 @@ CREATE TABLE game_sessions (
   -- Configurable game length (default 4 to match legacy Two Truths logic)
   total_rounds INT DEFAULT 4,
   game_duration_minutes INT DEFAULT 30,
+  session_deadline_at TIMESTAMP,
+  resolved_timing JSONB,
   expires_at TIMESTAMP,
   metadata JSONB,
   started_at TIMESTAMP,
   ended_at TIMESTAMP
 );
 CREATE INDEX idx_game_sessions_event_status ON game_sessions(event_id, status);
+CREATE INDEX idx_game_sessions_deadline_active ON game_sessions(session_deadline_at) WHERE status = 'active';
 
 -- ─── Strategic Roles (Strategic Escape) ───
 CREATE TABLE strategic_roles (
@@ -318,12 +328,14 @@ CREATE TABLE game_rounds (
   game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
   round_number INT NOT NULL,
   round_duration_seconds INT DEFAULT 60,
+  round_deadline_at TIMESTAMP,
   status VARCHAR(20) NOT NULL DEFAULT 'active',
   metadata JSONB,
   started_at TIMESTAMP,
   ended_at TIMESTAMP
 );
 CREATE INDEX idx_game_rounds_session_status ON game_rounds(game_session_id, status);
+CREATE INDEX idx_game_rounds_deadline_active ON game_rounds(round_deadline_at) WHERE status = 'active';
 
 -- ─── Game Actions ───
 CREATE TABLE game_actions (

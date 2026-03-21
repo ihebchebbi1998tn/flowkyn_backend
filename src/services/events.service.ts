@@ -42,6 +42,11 @@ export class EventsService {
     start_time?: string; end_time?: string; allow_guests?: boolean;
     allow_chat?: boolean; auto_start_games?: boolean; max_rounds?: number;
     allow_participant_game_control?: boolean;
+    default_session_duration_minutes?: number;
+    two_truths_submit_seconds?: number;
+    two_truths_vote_seconds?: number;
+    coffee_chat_duration_minutes?: number;
+    strategic_discussion_duration_minutes?: number;
   }) {
     const eventId = uuid();
     const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
@@ -49,6 +54,11 @@ export class EventsService {
     const autoStartGames = data.auto_start_games ?? false;
     const maxRounds = data.max_rounds ?? 30;
     const allowParticipantGameControl = data.allow_participant_game_control ?? true;
+    const defaultSessionDurationMinutes = data.default_session_duration_minutes ?? 30;
+    const twoTruthsSubmitSeconds = data.two_truths_submit_seconds ?? 30;
+    const twoTruthsVoteSeconds = data.two_truths_vote_seconds ?? 20;
+    const coffeeChatDurationMinutes = data.coffee_chat_duration_minutes ?? 30;
+    const strategicDiscussionDurationMinutes = data.strategic_discussion_duration_minutes ?? 45;
 
     const event = await transaction(async (client) => {
       const { rows: [ev] } = await client.query(
@@ -68,9 +78,17 @@ export class EventsService {
         ]
       );
       await client.query(
-        `INSERT INTO event_settings (event_id, allow_guests, allow_chat, auto_start_games, max_rounds, allow_participant_game_control)
-         VALUES ($1, $2, $3, $4, $5, $6)`,
-        [eventId, allowGuests, allowChat, autoStartGames, maxRounds, allowParticipantGameControl]
+        `INSERT INTO event_settings (
+          event_id, allow_guests, allow_chat, auto_start_games, max_rounds, allow_participant_game_control,
+          default_session_duration_minutes, two_truths_submit_seconds, two_truths_vote_seconds,
+          coffee_chat_duration_minutes, strategic_discussion_duration_minutes
+        )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          eventId, allowGuests, allowChat, autoStartGames, maxRounds, allowParticipantGameControl,
+          defaultSessionDurationMinutes, twoTruthsSubmitSeconds, twoTruthsVoteSeconds,
+          coffeeChatDurationMinutes, strategicDiscussionDurationMinutes,
+        ]
       );
       // Auto-join creator so they can use /me, messages, posts, etc. when landing on play
       const participantId = uuid();
@@ -91,7 +109,9 @@ export class EventsService {
    */
   async getById(eventId: string) {
     const event = await queryOne<EventRow>(
-      `SELECT e.*, es.allow_guests, es.allow_chat, es.auto_start_games, es.max_rounds, es.allow_participant_game_control
+      `SELECT e.*, es.allow_guests, es.allow_chat, es.auto_start_games, es.max_rounds, es.allow_participant_game_control,
+              es.default_session_duration_minutes, es.two_truths_submit_seconds, es.two_truths_vote_seconds,
+              es.coffee_chat_duration_minutes, es.strategic_discussion_duration_minutes
        FROM events e LEFT JOIN event_settings es ON es.event_id = e.id
        WHERE e.id = $1`,
       [eventId]

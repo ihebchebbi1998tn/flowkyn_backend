@@ -116,6 +116,11 @@ export interface EventRow {
   auto_start_games?: boolean;
   max_rounds?: number;
   allow_participant_game_control?: boolean;
+  default_session_duration_minutes?: number;
+  two_truths_submit_seconds?: number;
+  two_truths_vote_seconds?: number;
+  coffee_chat_duration_minutes?: number;
+  strategic_discussion_duration_minutes?: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -141,6 +146,8 @@ export interface GameSessionRow {
   current_round: number;
   total_rounds: number;
   game_duration_minutes: number;
+  session_deadline_at?: Date | null;
+  resolved_timing?: any;
   expires_at: Date;
   metadata: any;
   started_at: Date;
@@ -155,6 +162,7 @@ export interface GameRoundRow {
   game_session_id: string;
   round_number: number;
   round_duration_seconds: number;
+  round_deadline_at?: Date | null;
   status: string;
   metadata: any;
   started_at: Date;
