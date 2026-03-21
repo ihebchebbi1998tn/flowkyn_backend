@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS feature_flags (
   updated_at TIMESTAMP DEFAULT NOW(),
   updated_by UUID,
   deleted_at TIMESTAMP,
-  FOREIGN KEY (created_by) REFERENCES "user" (id) ON DELETE SET NULL
+  FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 -- Game content library for prompts, puzzles, etc
@@ -33,8 +33,7 @@ CREATE TABLE IF NOT EXISTS game_content (
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
   deleted_at TIMESTAMP,
-  FOREIGN KEY (created_by) REFERENCES "user" (id) ON DELETE SET NULL,
-  FOREIGN KEY (created_by) REFERENCES "user" (id) ON DELETE SET NULL
+  FOREIGN KEY (created_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 -- Content moderation queue
@@ -49,8 +48,8 @@ CREATE TABLE IF NOT EXISTS content_moderation_queue (
   flagged_at TIMESTAMP DEFAULT NOW(),
   moderated_at TIMESTAMP,
   FOREIGN KEY (content_id) REFERENCES game_content (id) ON DELETE CASCADE,
-  FOREIGN KEY (flagged_by) REFERENCES "user" (id) ON DELETE SET NULL,
-  FOREIGN KEY (moderated_by) REFERENCES "user" (id) ON DELETE SET NULL
+  FOREIGN KEY (flagged_by) REFERENCES users (id) ON DELETE SET NULL,
+  FOREIGN KEY (moderated_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 -- User engagement metrics for analytics
@@ -70,7 +69,7 @@ CREATE TABLE IF NOT EXISTS user_engagement_metrics (
   user_tags VARCHAR(255)[], -- array of tags
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  FOREIGN KEY (user_id) REFERENCES "user" (id) ON DELETE CASCADE
+  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
 );
 
 -- Organization engagement metrics
@@ -88,7 +87,7 @@ CREATE TABLE IF NOT EXISTS organization_engagement_metrics (
   last_activity_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT NOW(),
   updated_at TIMESTAMP DEFAULT NOW(),
-  FOREIGN KEY (organization_id) REFERENCES organization (id) ON DELETE CASCADE
+  FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE CASCADE
 );
 
 -- Analytics reports storage
@@ -106,7 +105,7 @@ CREATE TABLE IF NOT EXISTS analytics_reports (
   is_public BOOLEAN DEFAULT FALSE,
   created_at TIMESTAMP DEFAULT NOW(),
   expires_at TIMESTAMP,
-  FOREIGN KEY (generated_by) REFERENCES "user" (id) ON DELETE SET NULL
+  FOREIGN KEY (generated_by) REFERENCES users (id) ON DELETE SET NULL
 );
 
 -- Feature flag evaluation history
@@ -118,8 +117,8 @@ CREATE TABLE IF NOT EXISTS feature_flag_evaluations (
   assigned_variant VARCHAR(100),
   evaluated_at TIMESTAMP DEFAULT NOW(),
   FOREIGN KEY (flag_id) REFERENCES feature_flags (id) ON DELETE CASCADE,
-  FOREIGN KEY (user_id) REFERENCES "user" (id) ON DELETE SET NULL,
-  FOREIGN KEY (organization_id) REFERENCES organization (id) ON DELETE SET NULL
+  FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE SET NULL,
+  FOREIGN KEY (organization_id) REFERENCES organizations (id) ON DELETE SET NULL
 );
 
 -- Create indexes for performance
