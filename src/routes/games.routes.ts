@@ -12,6 +12,7 @@
 import { Router } from 'express';
 import { GamesController } from '../controllers/games.controller';
 import { StrategicGamesController } from '../controllers/strategicGames.controller';
+import { GameSessionsController } from '../controllers/gameSessions.controller';
 import { authenticate } from '../middleware/auth';
 import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
@@ -22,6 +23,7 @@ import { eventIdParam, sessionIdParam, uuidParam } from '../validators/common.va
 const router = Router();
 const ctrl = new GamesController();
 const strategicCtrl = new StrategicGamesController();
+const sessionCtrl = new GameSessionsController();
 
 // Game types (authenticated users only)
 router.get('/game-types', authenticate, ctrl.listGameTypes);
@@ -74,5 +76,13 @@ router.post('/strategic-sessions/:sessionId/start-debrief', authenticate, debrie
 
 // Game actions — supports BOTH authenticated users AND guests via authenticateOrGuest
 router.post('/game-actions', authenticateOrGuest, validate(submitActionSchema), ctrl.submitAction);
+
+// Game Session Details — view comprehensive session data
+router.get('/game-sessions/:sessionId/details', authenticate, validate(uuidParam, 'params'), sessionCtrl.getSessionDetails);
+router.get('/game-sessions/:sessionId/messages', authenticate, validate(uuidParam, 'params'), sessionCtrl.getSessionMessages);
+router.get('/game-sessions/:sessionId/export', authenticate, validate(uuidParam, 'params'), sessionCtrl.exportSessionData);
+router.post('/game-sessions/:sessionId/close', authenticate, validate(uuidParam, 'params'), sessionCtrl.closeSession);
+router.delete('/game-sessions/:sessionId', authenticate, validate(uuidParam, 'params'), sessionCtrl.deleteSession);
+router.get('/events/:eventId/game-sessions/active', authenticate, validate(eventIdParam, 'params'), sessionCtrl.getActiveSessionsForEvent);
 
 export { router as gamesRoutes };
