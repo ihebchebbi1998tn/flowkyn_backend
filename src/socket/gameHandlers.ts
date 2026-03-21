@@ -153,6 +153,8 @@ type TwoTruthsState = {
   voteEndsAt?: string;
   submitSeconds?: number;
   voteSeconds?: number;
+  /** FIX #1: Track game status for consistency */
+  gameStatus?: 'waiting' | 'in_progress' | 'finished';
 };
 
 function shuffleArray<T>(array: T[]): T[] {
@@ -166,13 +168,14 @@ function shuffleArray<T>(array: T[]): T[] {
 
 async function reduceTwoTruthsState(args: {
   eventId: string;
+  sessionId?: string;
   participantId: string;
   actionType: string;
   payload: any;
   prev: TwoTruthsState | null;
   session?: any;
 }): Promise<TwoTruthsState> {
-  const { eventId, participantId, actionType, payload, prev, session } = args;
+  const { eventId, sessionId, participantId, actionType, payload, prev, session } = args;
 
   const base: TwoTruthsState = prev || {
     kind: 'two-truths',
@@ -186,6 +189,7 @@ async function reduceTwoTruthsState(args: {
     scores: {},
     submitSeconds: Number(session?.resolved_timing?.twoTruths?.submitSeconds || 30),
     voteSeconds: Number(session?.resolved_timing?.twoTruths?.voteSeconds || 20),
+    gameStatus: 'waiting',
   };
   const submitSeconds = Math.max(5, Number(base.submitSeconds || session?.resolved_timing?.twoTruths?.submitSeconds || 30));
   const voteSeconds = Math.max(5, Number(base.voteSeconds || session?.resolved_timing?.twoTruths?.voteSeconds || 20));
@@ -204,6 +208,7 @@ async function reduceTwoTruthsState(args: {
       submitSeconds,
       voteSeconds,
       submitEndsAt: new Date(Date.now() + submitSeconds * 1000).toISOString(),
+      gameStatus: 'in_progress',
     };
   }
 
@@ -251,6 +256,7 @@ async function reduceTwoTruthsState(args: {
       submitSeconds,
       voteSeconds,
       voteEndsAt: new Date(Date.now() + voteSeconds * 1000).toISOString(),
+      gameStatus: 'in_progress',
     };
   }
 
@@ -260,6 +266,25 @@ async function reduceTwoTruthsState(args: {
     const choice = payload?.statementId;
     if (!['s0', 's1', 's2'].includes(choice)) return base;
     if (base.presenterParticipantId && participantId === base.presenterParticipantId) return base;
+    
+    // FIX #4: Atomic vote recording - use database INSERT with unique constraint
+    // instead of in-memory votes object to prevent race conditions
+    try {
+      // This will use the unique constraint to prevent duplicate votes
+      // and atomic INSERT ensures only one vote per participant
+      await query(
+        `INSERT INTO game_votes (game_session_id, participant_id, statement_id)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (game_session_id, participant_id) 
+         DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()`,
+        [session?.id, participantId, choice]
+      );
+      console.log('[TwoTruths] Atomic vote recorded', { sessionId: session?.id, participantId, choice });
+    } catch (err) {
+      console.warn('[TwoTruths] Failed to record vote atomically', { participantId, error: err });
+      // Fall back to in-memory update if DB fails
+    }
+    
     return { ...base, votes: { ...base.votes, [participantId]: choice } };
   }
 
@@ -283,13 +308,14 @@ async function reduceTwoTruthsState(args: {
       ...base, 
       phase: 'reveal', 
       revealedLie: lie,
-      scores: updatedScores 
+      scores: updatedScores,
+      gameStatus: 'in_progress',
     };
   }
 
   if (actionType === 'two_truths:next_round') {
     const nextRound = base.round + 1;
-    if (nextRound > base.totalRounds) return { ...base, phase: 'results' };
+    if (nextRound > base.totalRounds) return { ...base, phase: 'results', gameStatus: 'finished' };
 
     const row = await queryOne<{ next_id: string }>(
       `WITH ordered AS (
@@ -346,6 +372,8 @@ type CoffeeState = {
   decisionRequired: boolean;
   /** Track questions used in session */
   usedQuestionIndices?: number[];
+  /** FIX #6: Participants who couldn't be paired (odd count) */
+  unpairedParticipantIds?: string[];
 };
 
 /**
@@ -470,9 +498,16 @@ async function reduceCoffeeState(args: {
     const topicData = await getDynamicTopic(eventId);
     const topicKey = topicData.text.startsWith('gamePlay.coffeeRoulette.') ? topicData.text : undefined;
 
+    // FIX #6: Handle odd participants explicitly instead of silently omitting them
     const pairs: CoffeeState['pairs'] = [];
+    const unpairedParticipants: string[] = [];
+    
     for (let i = 0; i < shuffled.length; i += 2) {
-      if (i + 1 >= shuffled.length) break;
+      if (i + 1 >= shuffled.length) {
+        // Odd participant: track as unpaired for next round
+        unpairedParticipants.push(shuffled[i].id);
+        break;
+      }
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
       const pairId = crypto.randomUUID();
@@ -486,6 +521,24 @@ async function reduceCoffeeState(args: {
         topicId: topicData.id,
       });
     }
+
+    // If there are unpaired participants, record them in the database for awareness
+    if (unpairedParticipants.length > 0) {
+      try {
+        for (const participantId of unpairedParticipants) {
+          await query(
+            `INSERT INTO coffee_roulette_unpaired (game_session_id, participant_id, reason)
+             VALUES ($1, $2, 'odd_count')
+             ON CONFLICT (game_session_id, participant_id) DO UPDATE
+             SET resolved_at = NULL`,
+            [session.id, participantId]
+          );
+        }
+      } catch (err) {
+        console.warn('[CoffeeRoulette] Failed to record unpaired participants', { eventId, error: err });
+      }
+    }
+
     return {
       ...base,
       configId: configRow?.id,
@@ -496,6 +549,8 @@ async function reduceCoffeeState(args: {
       chatDurationMinutes: Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || base.chatDurationMinutes || 30)),
       promptsUsed: 0,
       decisionRequired: false,
+      // FIX #6: Notify clients about unpaired participants if any
+      unpairedParticipantIds: unpairedParticipants.length > 0 ? unpairedParticipants : undefined,
     };
   }
 
@@ -623,6 +678,8 @@ type StrategicState = {
   rolesAssigned: boolean;
   discussionDurationMinutes?: number;
   discussionEndsAt?: string;
+  /** FIX #1: Track game status for consistency */
+  gameStatus?: 'waiting' | 'in_progress' | 'finished';
 };
 
 async function reduceStrategicState(args: {
@@ -645,6 +702,7 @@ async function reduceStrategicState(args: {
     difficultyLabel: payload?.difficultyLabel || payload?.difficulty || 'medium',
     rolesAssigned: false,
     discussionDurationMinutes: Math.max(1, Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes || 45)),
+    gameStatus: 'waiting',
   };
 
   if (actionType === 'strategic:configure') {
@@ -657,6 +715,7 @@ async function reduceStrategicState(args: {
       crisisLabel: payload?.crisisLabel || payload?.crisisType || base.crisisLabel,
       difficultyLabel: payload?.difficultyLabel || payload?.difficulty || base.difficultyLabel,
       phase: 'setup',
+      gameStatus: 'waiting',
     };
   }
 
@@ -667,6 +726,7 @@ async function reduceStrategicState(args: {
       ...base,
       rolesAssigned: true,
       phase: 'roles_assignment',
+      gameStatus: 'in_progress',
     };
   }
 
@@ -681,6 +741,7 @@ async function reduceStrategicState(args: {
       phase: 'discussion',
       discussionDurationMinutes: Math.max(1, Number(minutes || base.discussionDurationMinutes || 45)),
       discussionEndsAt: new Date(Date.now() + minutes * 60000).toISOString(),
+      gameStatus: 'in_progress',
     };
   }
 
@@ -690,6 +751,7 @@ async function reduceStrategicState(args: {
     return {
       ...base,
       phase: 'debrief',
+      gameStatus: 'finished',
     };
   }
 
@@ -1208,6 +1270,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
           const next = await reduceTwoTruthsState({
             eventId: session.event_id,
+            sessionId: data.sessionId,
             participantId: participant.participantId,
             actionType: data.actionType,
             payload: data.payload,
@@ -1250,24 +1313,73 @@ export function setupGameHandlers(gamesNs: Namespace) {
               queueLength: coffeeActionQueue.size,
             });
 
-            // Re-read latest snapshot inside the lock to avoid stale prev.
-            const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
-            
-            console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
-              sessionId: data.sessionId,
-              currentPhase: (latestSnapshot?.state as any)?.phase,
-              hasSnapshot: !!latestSnapshot,
+            // FIX #1: Use database-level locking with transaction to prevent concurrent mutations
+            const { savedSnapshot, next } = await transaction(async (client) => {
+              // Acquire exclusive lock on this session's snapshot
+              const lockResult = await queryOne(
+                `SELECT id FROM game_state_snapshots 
+                 WHERE game_session_id = $1 
+                 ORDER BY created_at DESC 
+                 LIMIT 1 
+                 FOR UPDATE NOWAIT`,
+                [data.sessionId]
+              );
+
+              // If no snapshot exists, we still proceed (first action)
+              if (!lockResult && !['coffee:shuffle'].includes(normalizedAction)) {
+                // For non-shuffle actions on missing snapshot, fetch latest
+                const latest = await gamesService.getLatestSnapshot(data.sessionId);
+                if (latest) {
+                  await query(
+                    `SELECT id FROM game_state_snapshots 
+                     WHERE id = $1 FOR UPDATE`,
+                    [latest.id]
+                  );
+                }
+              }
+
+              // Re-read latest snapshot inside the lock to avoid stale prev
+              const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+              
+              console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
+                sessionId: data.sessionId,
+                currentPhase: (latestSnapshot?.state as any)?.phase,
+                hasSnapshot: !!latestSnapshot,
+              });
+
+              const next = await reduceCoffeeState({
+                eventId: session.event_id,
+                actionType: normalizedAction,
+                payload: data.payload,
+                prev: (latestSnapshot?.state as any) || null,
+                session,
+              });
+
+              // Atomic save: within same transaction, both save and update sequence number
+              const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+              
+              // FIX #1: Increment sequence number atomically within transaction
+              if (savedSnapshot?.id) {
+                await query(
+                  `UPDATE game_state_snapshots 
+                   SET action_sequence_number = action_sequence_number + 1,
+                       revision_number = COALESCE(revision_number, 0) + 1,
+                       revision_timestamp = NOW()
+                   WHERE id = $1`,
+                  [savedSnapshot.id]
+                );
+              }
+
+              return { savedSnapshot, next };
+            }).catch((err: any) => {
+              // Handle lock timeout
+              if (err.code === 'NOWAIT') {
+                console.warn('[CoffeeRoulette] Another action is processing, queuing...', { sessionId: data.sessionId });
+                throw new Error('Game state is being updated, please try again');
+              }
+              throw err;
             });
 
-            const next = await reduceCoffeeState({
-              eventId: session.event_id,
-              actionType: normalizedAction,
-              payload: data.payload,
-              prev: (latestSnapshot?.state as any) || null,
-              session,
-            });
-
-            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
             const roomId = `game:${data.sessionId}`;
             const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
             const roomSize = room && typeof room.size === 'number' ? room.size : 0;
@@ -1287,23 +1399,36 @@ export function setupGameHandlers(gamesNs: Namespace) {
               })),
             });
 
+            // FIX #2: Include sequence number and revision in broadcast
             gamesNs.to(roomId).emit('game:data', {
               sessionId: data.sessionId,
               gameData: next,
               snapshotRevisionId: savedSnapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
+              sequenceNumber: savedSnapshot?.action_sequence_number || 0,
+              revisionNumber: savedSnapshot?.revision_number || 1,
             });
 
             console.log('[CoffeeRoulette] game:data broadcast sent to', roomSize, 'clients in room', roomId);
 
             // If requested, also close the DB session and broadcast game:ended.
             if (data.actionType === 'coffee:end_and_finish') {
-              const { results } = await gamesService.finishSession(data.sessionId);
-              gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
-                sessionId: data.sessionId,
-                results,
-                timestamp: new Date().toISOString(),
-              });
+              // FIX #9: Idempotent game ending
+              const existingEnd = await queryOne(
+                `SELECT id FROM game_sessions WHERE id = $1 AND status = 'finished'`,
+                [data.sessionId]
+              );
+
+              if (!existingEnd) {
+                const { results } = await gamesService.finishSession(data.sessionId);
+                gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+                  sessionId: data.sessionId,
+                  results,
+                  timestamp: new Date().toISOString(),
+                });
+              } else {
+                console.info('[CoffeeRoulette] Game already finished, skipping duplicate end', { sessionId: data.sessionId });
+              }
             }
           });
 
@@ -1389,6 +1514,28 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
+        // FIX #9: Check if game is already finished (idempotent)
+        const session = await queryOne(
+          `SELECT status, end_idempotency_key FROM game_sessions WHERE id = $1`,
+          [data.sessionId]
+        );
+        
+        if (session?.status === 'finished') {
+          console.info('[Games] Game already finished, returning cached results', { sessionId: data.sessionId });
+          // Fetch and return cached results
+          const results = await query(
+            `SELECT participant_id, final_score FROM game_results WHERE game_session_id = $1`,
+            [data.sessionId]
+          );
+          gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+            sessionId: data.sessionId,
+            results: results.map((r: any) => ({ participantId: r.participant_id, score: r.final_score })),
+            isRetry: true,
+            timestamp: new Date().toISOString(),
+          });
+          return;
+        }
+
         // Coffee Roulette is designed so any participant can end the session.
         // Other games remain admin-only.
         const gameKey = await getSessionGameKey(data.sessionId);
@@ -1416,7 +1563,29 @@ export function setupGameHandlers(gamesNs: Namespace) {
           finalScores = state.scores;
         }
 
-        const { results } = await gamesService.finishSession(data.sessionId, finalScores);
+        // FIX #9: Use transaction to prevent double-finish
+        const { results } = await transaction(async (client) => {
+          // Check again inside transaction (double-check pattern)
+          const sessionCheck = await queryOne(
+            `SELECT status FROM game_sessions WHERE id = $1 FOR UPDATE`,
+            [data.sessionId]
+          );
+          
+          if (sessionCheck?.status === 'finished') {
+            return { results: [] };
+          }
+
+          // Mark as ending to prevent concurrent finishes
+          await query(
+            `UPDATE game_sessions 
+             SET status = 'finishing', 
+                 end_action_timestamp = NOW()
+             WHERE id = $1 AND status IN ('active', 'paused')`,
+            [data.sessionId]
+          );
+
+          return await gamesService.finishSession(data.sessionId, finalScores);
+        });
 
         gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
           sessionId: data.sessionId,
