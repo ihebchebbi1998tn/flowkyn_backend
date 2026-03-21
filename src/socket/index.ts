@@ -6,6 +6,7 @@ import { Server as HttpServer } from 'http';
 import { Server } from 'socket.io';
 import { verifyAccessToken, verifyGuestToken } from '../utils/jwt';
 import { setupEventHandlers } from './eventHandlers';
+import { setupEventVoiceHandlers } from './eventVoiceHandlers';
 import { setupGameHandlers } from './gameHandlers';
 import { setupNotificationHandlers } from './notificationHandlers';
 import { AuthenticatedSocket } from './types';
@@ -231,6 +232,7 @@ export function initializeSocket(server: HttpServer) {
   const eventsNs = io.of('/events');
   eventsNs.use(socketAuthMiddleware);
   setupEventHandlers(eventsNs);
+  setupEventVoiceHandlers(eventsNs);
 
   // ─── Games namespace (/games) ───
   const gamesNs = io.of('/games');
