@@ -36,4 +36,37 @@ export class AnalyticsController {
       res.json(sessions);
     } catch (err) { next(err); }
   }
+
+  async getEngagementMetrics(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const metrics = await analyticsService.getEngagementMetrics(req.user!.userId, organizationId);
+      res.json(metrics);
+    } catch (err) { next(err); }
+  }
+
+  async getRealTimeMetrics(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const metrics = await analyticsService.getRealTimeMetrics(req.user!.userId, organizationId);
+      res.json(metrics);
+    } catch (err) { next(err); }
+  }
+
+  async getEventAnalytics(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { eventId } = req.params;
+      const analytics = await analyticsService.getEventAnalytics(req.user!.userId, eventId);
+      res.json(analytics);
+    } catch (err) { next(err); }
+  }
+
+  async getParticipantRankings(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { organizationId } = req.params;
+      const limit = parseInt(req.query.limit as string) || 20;
+      const rankings = await analyticsService.getParticipantRankings(req.user!.userId, organizationId, limit);
+      res.json(rankings);
+    } catch (err) { next(err); }
+  }
 }

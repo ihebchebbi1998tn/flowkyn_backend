@@ -222,4 +222,255 @@ export class AnalyticsService {
       [userId]
     );
   }
+
+  /**
+   * Get detailed engagement metrics for an organization.
+   */
+  async getEngagementMetrics(userId: string, organizationId: string) {
+    // Verify user has access to org
+    const access = await queryOne(
+      `SELECT om.id FROM organization_members om
+       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'active'`,
+      [userId, organizationId]
+    );
+    if (!access) throw new Error('Access denied');
+
+    const [engagementMetrics] = await Promise.all([
+      query<any>(
+        `SELECT
+           COUNT(DISTINCT p.user_id) as total_participants,
+           COUNT(DISTINCT e.id) as total_events,
+           COUNT(DISTINCT gs.id) as total_sessions,
+           ROUND(AVG(EXTRACT(EPOCH FROM (gs.ended_at - gs.started_at)) / 60.0)::NUMERIC, 1) as avg_session_duration_minutes,
+           ROUND(
+             COUNT(CASE WHEN gs.status = 'finished' THEN 1 END)::NUMERIC / 
+             NULLIF(COUNT(gs.id), 0) * 100, 1
+           ) as session_completion_rate,
+           COUNT(DISTINCT CASE WHEN p.left_at IS NULL THEN p.id END) as active_participants_now,
+           MAX(gs.started_at) as last_session_at
+         FROM events e
+         LEFT JOIN participants p ON p.event_id = e.id
+         LEFT JOIN game_sessions gs ON gs.event_id = e.id
+         WHERE e.organization_id = $1`,
+        [organizationId]
+      ),
+    ]);
+
+    return engagementMetrics[0] || {
+      total_participants: 0,
+      total_events: 0,
+      total_sessions: 0,
+      avg_session_duration_minutes: 0,
+      session_completion_rate: 0,
+      active_participants_now: 0,
+      last_session_at: null,
+    };
+  }
+
+  /**
+   * Get real-time metrics dashboard.
+   */
+  async getRealTimeMetrics(userId: string, organizationId: string) {
+    // Verify access
+    const access = await queryOne(
+      `SELECT om.id FROM organization_members om
+       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'active'`,
+      [userId, organizationId]
+    );
+    if (!access) throw new Error('Access denied');
+
+    const [
+      activeSessions,
+      onlineParticipants,
+      recentSessions,
+      gameBreakdown,
+    ] = await Promise.all([
+      // Active sessions
+      query<any>(
+        `SELECT 
+           gs.id, gs.status, gs.current_round, gs.started_at,
+           gt.name as game_name, gt.key as game_key,
+           e.title as event_title,
+           COUNT(p.id) as participant_count
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         JOIN events e ON e.id = gs.event_id
+         LEFT JOIN participants p ON p.event_id = e.id AND p.left_at IS NULL
+         WHERE e.organization_id = $1 AND gs.status IN ('active', 'paused')
+         GROUP BY gs.id, gs.status, gs.current_round, gs.started_at, gt.name, gt.key, e.title
+         ORDER BY gs.started_at DESC`,
+        [organizationId]
+      ),
+      // Online participants
+      query<any>(
+        `SELECT COUNT(DISTINCT p.id) as count FROM participants p
+         JOIN events e ON e.id = p.event_id
+         WHERE e.organization_id = $1 AND p.left_at IS NULL`,
+        [organizationId]
+      ),
+      // Recent completed sessions
+      query<any>(
+        `SELECT 
+           gs.id, gs.status, gs.ended_at, gt.name as game_name,
+           e.title as event_title,
+           COUNT(DISTINCT p.id) as participant_count
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         JOIN events e ON e.id = gs.event_id
+         LEFT JOIN participants p ON p.event_id = e.id
+         WHERE e.organization_id = $1 AND gs.status = 'finished'
+         AND gs.ended_at > NOW() - INTERVAL '24 hours'
+         GROUP BY gs.id, gs.status, gs.ended_at, gt.name, e.title
+         ORDER BY gs.ended_at DESC
+         LIMIT 10`,
+        [organizationId]
+      ),
+      // Game type breakdown
+      query<any>(
+        `SELECT 
+           gt.name, gt.key, 
+           COUNT(DISTINCT gs.id) as session_count,
+           COUNT(DISTINCT p.id) as total_participants,
+           ROUND(AVG(EXTRACT(EPOCH FROM (gs.ended_at - gs.started_at)) / 60.0)::NUMERIC, 1) as avg_duration_minutes
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         JOIN events e ON e.id = gs.event_id
+         LEFT JOIN participants p ON p.event_id = e.id
+         WHERE e.organization_id = $1 AND gs.created_at > NOW() - INTERVAL '30 days'
+         GROUP BY gt.name, gt.key
+         ORDER BY session_count DESC`,
+        [organizationId]
+      ),
+    ]);
+
+    return {
+      activeSessions,
+      onlineParticipantsCount: onlineParticipants[0]?.count || 0,
+      recentSessions,
+      gameBreakdown,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Get event performance analytics.
+   */
+  async getEventAnalytics(userId: string, eventId: string) {
+    // Verify access
+    const event = await queryOne(
+      `SELECT e.id, e.organization_id FROM events e
+       WHERE e.id = $1`,
+      [eventId]
+    );
+    if (!event) throw new Error('Event not found');
+
+    const access = await queryOne(
+      `SELECT om.id FROM organization_members om
+       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'active'`,
+      [userId, event.organization_id]
+    );
+    if (!access) throw new Error('Access denied');
+
+    const [
+      eventDetails,
+      sessionMetrics,
+      participantBreakdown,
+      timelineData,
+    ] = await Promise.all([
+      queryOne<any>(
+        `SELECT 
+           e.id, e.title, e.status, e.event_mode, e.created_at,
+           COUNT(DISTINCT p.id) as total_participants,
+           COUNT(DISTINCT p.id) FILTER (WHERE p.left_at IS NULL) as active_participants,
+           COUNT(DISTINCT gs.id) as total_sessions
+         FROM events e
+         LEFT JOIN participants p ON p.event_id = e.id
+         LEFT JOIN game_sessions gs ON gs.event_id = e.id
+         WHERE e.id = $1
+         GROUP BY e.id, e.title, e.status, e.event_mode, e.created_at`,
+        [eventId]
+      ),
+      // Session metrics
+      query<any>(
+        `SELECT 
+           gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at,
+           gt.name as game_name,
+           COUNT(DISTINCT p.id) as participant_count
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         LEFT JOIN participants p ON p.event_id = gs.event_id
+         WHERE gs.event_id = $1
+         GROUP BY gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at, gt.name
+         ORDER BY gs.started_at DESC`,
+        [eventId]
+      ),
+      // Participant engagement
+      query<any>(
+        `SELECT 
+           p.id, p.display_name, p.created_at, p.left_at,
+           COUNT(DISTINCT ga.id) as interaction_count,
+           MAX(ga.created_at) as last_activity_at
+         FROM participants p
+         LEFT JOIN game_actions ga ON ga.participant_id = p.id
+         WHERE p.event_id = $1
+         GROUP BY p.id, p.display_name, p.created_at, p.left_at
+         ORDER BY interaction_count DESC`,
+        [eventId]
+      ),
+      // Timeline of key events
+      query<any>(
+        `SELECT 
+           gs.id, gs.started_at, gs.ended_at, gs.status,
+           gt.name as game_name,
+           COUNT(DISTINCT p.id) as participant_count
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         LEFT JOIN participants p ON p.event_id = gs.event_id AND p.created_at <= gs.ended_at
+         WHERE gs.event_id = $1
+         GROUP BY gs.id, gs.started_at, gs.ended_at, gs.status, gt.name
+         ORDER BY gs.started_at ASC`,
+        [eventId]
+      ),
+    ]);
+
+    return {
+      event: eventDetails,
+      sessions: sessionMetrics,
+      participants: participantBreakdown,
+      timeline: timelineData,
+    };
+  }
+
+  /**
+   * Get leaderboards and rankings.
+   */
+  async getParticipantRankings(userId: string, organizationId: string, limit = 20) {
+    // Verify access
+    const access = await queryOne(
+      `SELECT om.id FROM organization_members om
+       WHERE om.user_id = $1 AND om.organization_id = $2 AND om.status = 'active'`,
+      [userId, organizationId]
+    );
+    if (!access) throw new Error('Access denied');
+
+    return query<any>(
+      `SELECT 
+         p.id, p.display_name, p.avatar_seed,
+         COUNT(DISTINCT gs.id) as sessions_participated,
+         COUNT(DISTINCT e.id) as events_attended,
+         COUNT(DISTINCT ga.id) as total_interactions,
+         ROUND(AVG(
+           CASE WHEN gs.status = 'finished' THEN 1 ELSE 0 END
+         )::NUMERIC * 100, 1) as completion_rate
+       FROM participants p
+       LEFT JOIN events e ON e.id = p.event_id
+       LEFT JOIN game_sessions gs ON gs.event_id = e.id
+       LEFT JOIN game_actions ga ON ga.participant_id = p.id
+       WHERE e.organization_id = $1
+       GROUP BY p.id, p.display_name, p.avatar_seed
+       ORDER BY total_interactions DESC, sessions_participated DESC
+       LIMIT $2`,
+      [organizationId, limit]
+    );
+  }
 }

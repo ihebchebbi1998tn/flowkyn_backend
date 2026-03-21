@@ -17,4 +17,16 @@ router.get('/overview', authenticate, ctrl.getOverview);
 // Active game sessions for the authenticated user
 router.get('/active-sessions', authenticate, ctrl.getActiveSessions);
 
+// Engagement metrics for an organization
+router.get('/engagement/:organizationId', authenticate, ctrl.getEngagementMetrics);
+
+// Real-time metrics for an organization
+router.get('/realtime/:organizationId', authenticate, ctrl.getRealTimeMetrics);
+
+// Detailed event analytics
+router.get('/event/:eventId', authenticate, ctrl.getEventAnalytics);
+
+// Participant rankings and leaderboard
+router.get('/rankings/:organizationId', authenticate, ctrl.getParticipantRankings);
+
 export { router as analyticsRoutes };
