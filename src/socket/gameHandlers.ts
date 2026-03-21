@@ -338,6 +338,7 @@ type CoffeeState = {
   }>;
   startedChatAt: string | null;
   chatEndsAt?: string;
+  chatDurationMinutes?: number;
   /** Number of conversation prompts used in the current chat session */
   promptsUsed: number;
   /** When true, clients should ask whether to continue or end */
@@ -406,6 +407,7 @@ async function reduceCoffeeState(args: {
     phase: 'waiting',
     pairs: [],
     startedChatAt: null,
+    chatDurationMinutes: Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30)),
     promptsUsed: 0,
     decisionRequired: false,
   };
@@ -488,6 +490,7 @@ async function reduceCoffeeState(args: {
       phase: 'matching',
       pairs,
       startedChatAt: null,
+      chatDurationMinutes: Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || base.chatDurationMinutes || 30)),
       promptsUsed: 0,
       decisionRequired: false,
     };
@@ -510,6 +513,7 @@ async function reduceCoffeeState(args: {
       ...base, 
       phase: 'chatting', 
       startedChatAt: new Date().toISOString(),
+      chatDurationMinutes,
       chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString(),
       // Start with 1 prompt already assigned on shuffle
       promptsUsed: Math.max(1, base.promptsUsed || 0),
@@ -612,6 +616,7 @@ type StrategicState = {
   crisisLabel: string;
   difficultyLabel: string;
   rolesAssigned: boolean;
+  discussionDurationMinutes?: number;
   discussionEndsAt?: string;
 };
 
@@ -634,6 +639,7 @@ async function reduceStrategicState(args: {
     crisisLabel: payload?.crisisLabel || payload?.crisisType || 'Scenario',
     difficultyLabel: payload?.difficultyLabel || payload?.difficulty || 'medium',
     rolesAssigned: false,
+    discussionDurationMinutes: Math.max(1, Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes || 45)),
   };
 
   if (actionType === 'strategic:configure') {
@@ -668,6 +674,7 @@ async function reduceStrategicState(args: {
     return {
       ...base,
       phase: 'discussion',
+      discussionDurationMinutes: Math.max(1, Number(minutes || base.discussionDurationMinutes || 45)),
       discussionEndsAt: new Date(Date.now() + minutes * 60000).toISOString(),
     };
   }
@@ -1430,6 +1437,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
             currentRound: session.current_round,
             startedAt: session.started_at,
             endedAt: session.ended_at,
+            sessionDeadlineAt: (session as any).session_deadline_at || null,
+            resolvedTiming: (session as any).resolved_timing || null,
             activeRoundId: activeRound?.id || null,
             snapshot: snapshot?.state || null,
             snapshotRevisionId: snapshot?.id || null,
