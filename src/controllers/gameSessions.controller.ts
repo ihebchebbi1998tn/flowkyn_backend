@@ -25,9 +25,16 @@ export class GameSessionsController {
         throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
       }
 
+      console.log(`[GameSessionsController.getSessionDetails] Fetching details for session: ${sessionId}`);
       const details = await sessionDetailsService.getSessionDetails(sessionId);
+      console.log(`[GameSessionsController.getSessionDetails] Successfully fetched details with ${details.participants?.length || 0} participants`);
       res.json(details);
     } catch (err) {
+      console.error('[GameSessionsController.getSessionDetails] Error:', {
+        sessionId: req.params.sessionId,
+        errorMessage: err instanceof Error ? err.message : String(err),
+        errorCode: err instanceof AppError ? err.code : undefined,
+      });
       next(err);
     }
   }

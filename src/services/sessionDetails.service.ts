@@ -95,214 +95,224 @@ export class SessionDetailsService {
    * Includes participants, messages, actions, and timeline
    */
   async getSessionDetails(sessionId: string): Promise<SessionDetails> {
-    // Fetch main session details
-    const sessionRows = await query<any>(
-      `
-      SELECT
-        gs.id,
-        gs.event_id,
-        e.title as event_title,
-        gs.game_type_id,
-        gt.name as game_name,
-        gt.key as game_key,
-        gs.status,
-        gs.current_round,
-        gs.total_rounds,
-        gs.game_duration_minutes,
-        gs.started_at,
-        gs.ended_at,
-        gs.session_deadline_at,
-        gs.created_at,
-        gs.updated_at,
-        COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN p.id END) as total_participants,
-        COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NULL THEN p.id END) as active_participants,
-        COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NOT NULL THEN p.id END) as completed_participants,
-        COUNT(DISTINCT em.id) as total_messages,
-        COUNT(DISTINCT ga.id) as total_actions,
-        COUNT(DISTINCT CASE WHEN gr.status = 'finished' THEN gr.id END) as total_rounds_completed
-      FROM game_sessions gs
-      LEFT JOIN events e ON gs.event_id = e.id
-      LEFT JOIN game_types gt ON gs.game_type_id = gt.id
-      LEFT JOIN participants p ON gs.event_id = p.event_id
-      LEFT JOIN event_messages em ON gs.event_id = em.event_id
-      LEFT JOIN game_actions ga ON gs.id = ga.game_session_id
-      LEFT JOIN game_rounds gr ON gs.id = gr.game_session_id
-      WHERE gs.id = $1
-      GROUP BY gs.id, gs.event_id, e.title, gs.game_type_id, gt.name, gt.key, gs.status, 
-               gs.current_round, gs.total_rounds, gs.game_duration_minutes, gs.started_at, 
-               gs.ended_at, gs.session_deadline_at, gs.created_at, gs.updated_at
-      `,
-      [sessionId]
-    );
+    try {
+      // Fetch main session details
+      const sessionRows = await query<any>(
+        `
+        SELECT
+          gs.id,
+          gs.event_id,
+          e.title as event_title,
+          gs.game_type_id,
+          gt.name as game_name,
+          gt.key as game_key,
+          gs.status,
+          gs.current_round,
+          gs.total_rounds,
+          gs.game_duration_minutes,
+          gs.started_at,
+          gs.ended_at,
+          gs.session_deadline_at,
+          gs.created_at,
+          gs.updated_at,
+          COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN p.id END) as total_participants,
+          COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NULL THEN p.id END) as active_participants,
+          COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NOT NULL THEN p.id END) as completed_participants,
+          COUNT(DISTINCT em.id) as total_messages,
+          COUNT(DISTINCT ga.id) as total_actions,
+          COUNT(DISTINCT CASE WHEN gr.status = 'finished' THEN gr.id END) as total_rounds_completed
+        FROM game_sessions gs
+        LEFT JOIN events e ON gs.event_id = e.id
+        LEFT JOIN game_types gt ON gs.game_type_id = gt.id
+        LEFT JOIN participants p ON gs.event_id = p.event_id
+        LEFT JOIN event_messages em ON gs.event_id = em.event_id
+        LEFT JOIN game_actions ga ON gs.id = ga.game_session_id
+        LEFT JOIN game_rounds gr ON gs.id = gr.game_session_id
+        WHERE gs.id = $1
+        GROUP BY gs.id, gs.event_id, e.title, gs.game_type_id, gt.name, gt.key, gs.status, 
+                 gs.current_round, gs.total_rounds, gs.game_duration_minutes, gs.started_at, 
+                 gs.ended_at, gs.session_deadline_at, gs.created_at, gs.updated_at
+        `,
+        [sessionId]
+      );
 
-    if (sessionRows.length === 0) {
-      throw new AppError('Session not found', 404, 'NOT_FOUND');
-    }
+      if (sessionRows.length === 0) {
+        throw new AppError('Session not found', 404, 'NOT_FOUND');
+      }
 
-    const sessionRow = sessionRows[0];
+      const sessionRow = sessionRows[0];
 
-    // Fetch participants with interaction counts
-    const participantsRows = await query<SessionParticipant>(
-      `
-      SELECT
-        om.id,
-        p.id as participant_id,
-        COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as display_name,
-        COALESCE(ep.avatar_url, om.avatar_url, p.guest_avatar) as avatar_url,
-        p.participant_type,
-        p.joined_at,
-        p.left_at,
-        CASE WHEN p.left_at IS NULL THEN true ELSE false END as is_active,
-        COUNT(DISTINCT ga.id) as action_count,
-        COUNT(DISTINCT em.id) as message_count,
-        COUNT(DISTINCT CASE WHEN ga.id IS NOT NULL OR em.id IS NOT NULL THEN 1 END) as interaction_count
-      FROM participants p
-      LEFT JOIN organization_members om ON p.organization_member_id = om.id
-      LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND p.id = ep.participant_id
-      LEFT JOIN game_actions ga ON p.id = ga.participant_id AND ga.game_session_id = $1
-      LEFT JOIN event_messages em ON p.id = em.participant_id AND em.event_id = $2
-      WHERE p.event_id = $2
-      GROUP BY om.id, p.id, ep.display_name, ep.avatar_url, om.name, om.avatar_url, 
-               p.guest_name, p.guest_avatar, p.participant_type, p.joined_at, p.left_at
-      ORDER BY p.joined_at ASC
-      `,
-      [sessionId, sessionRow.event_id]
-    );
+      // Fetch participants with interaction counts
+      const participantsRows = await query<SessionParticipant>(
+        `
+        SELECT
+          om.id,
+          p.id as participant_id,
+          COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as display_name,
+          COALESCE(ep.avatar_url, om.avatar_url, p.guest_avatar) as avatar_url,
+          p.participant_type,
+          p.joined_at,
+          p.left_at,
+          CASE WHEN p.left_at IS NULL THEN true ELSE false END as is_active,
+          COUNT(DISTINCT ga.id) as action_count,
+          COUNT(DISTINCT em.id) as message_count,
+          COUNT(DISTINCT CASE WHEN ga.id IS NOT NULL OR em.id IS NOT NULL THEN 1 END) as interaction_count
+        FROM participants p
+        LEFT JOIN organization_members om ON p.organization_member_id = om.id
+        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND p.id = ep.participant_id
+        LEFT JOIN game_actions ga ON p.id = ga.participant_id AND ga.game_session_id = $1
+        LEFT JOIN event_messages em ON p.id = em.participant_id AND em.event_id = $2
+        WHERE p.event_id = $2
+        GROUP BY om.id, p.id, ep.display_name, ep.avatar_url, om.name, om.avatar_url, 
+                 p.guest_name, p.guest_avatar, p.participant_type, p.joined_at, p.left_at
+        ORDER BY p.joined_at ASC
+        `,
+        [sessionId, sessionRow.event_id]
+      );
 
-    // Fetch messages with participant info
-    const messagesRows = await query<SessionMessage>(
-      `
-      SELECT
-        em.id,
-        em.participant_id,
-        COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as participant_name,
-        COALESCE(ep.avatar_url, om.avatar_url, p.guest_avatar) as avatar_url,
-        em.message,
-        em.message_type,
-        em.created_at,
-        EXTRACT(EPOCH FROM (em.created_at - $3::timestamp)) / 60 as timestamp_minutes
-      FROM event_messages em
-      JOIN participants p ON em.participant_id = p.id
-      LEFT JOIN organization_members om ON p.organization_member_id = om.id
-      LEFT JOIN event_profiles ep ON em.event_id = ep.event_id AND em.participant_id = ep.participant_id
-      WHERE em.event_id = $1
-      ORDER BY em.created_at ASC
-      `,
-      [sessionRow.event_id, sessionId, sessionRow.started_at]
-    );
+      // Fetch messages with participant info
+      const messagesRows = await query<SessionMessage>(
+        `
+        SELECT
+          em.id,
+          em.participant_id,
+          COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as participant_name,
+          COALESCE(ep.avatar_url, om.avatar_url, p.guest_avatar) as avatar_url,
+          em.message,
+          em.message_type,
+          em.created_at,
+          EXTRACT(EPOCH FROM (em.created_at - $3::timestamp)) / 60 as timestamp_minutes
+        FROM event_messages em
+        JOIN participants p ON em.participant_id = p.id
+        LEFT JOIN organization_members om ON p.organization_member_id = om.id
+        LEFT JOIN event_profiles ep ON em.event_id = ep.event_id AND em.participant_id = ep.participant_id
+        WHERE em.event_id = $1
+        ORDER BY em.created_at ASC
+        `,
+        [sessionRow.event_id, sessionId, sessionRow.started_at]
+      );
 
-    // Fetch actions with participant info
-    const actionsRows = await query<SessionAction>(
-      `
-      SELECT
-        ga.id,
-        ga.participant_id,
-        COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as participant_name,
-        gr.round_number,
-        ga.action_type,
-        ga.payload,
-        ga.created_at,
-        EXTRACT(EPOCH FROM (ga.created_at - $2::timestamp)) / 60 as timestamp_minutes
-      FROM game_actions ga
-      JOIN participants p ON ga.participant_id = p.id
-      JOIN game_rounds gr ON ga.round_id = gr.id
-      LEFT JOIN organization_members om ON p.organization_member_id = om.id
-      LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND ga.participant_id = ep.participant_id
-      WHERE ga.game_session_id = $1
-      ORDER BY ga.created_at ASC
-      `,
-      [sessionId, sessionRow.started_at]
-    );
+      // Fetch actions with participant info
+      const actionsRows = await query<SessionAction>(
+        `
+        SELECT
+          ga.id,
+          ga.participant_id,
+          COALESCE(ep.display_name, COALESCE(om.name, p.guest_name)) as participant_name,
+          gr.round_number,
+          ga.action_type,
+          ga.payload,
+          ga.created_at,
+          EXTRACT(EPOCH FROM (ga.created_at - $2::timestamp)) / 60 as timestamp_minutes
+        FROM game_actions ga
+        JOIN participants p ON ga.participant_id = p.id
+        JOIN game_rounds gr ON ga.round_id = gr.id
+        LEFT JOIN organization_members om ON p.organization_member_id = om.id
+        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND ga.participant_id = ep.participant_id
+        WHERE ga.game_session_id = $1
+        ORDER BY ga.created_at ASC
+        `,
+        [sessionId, sessionRow.started_at]
+      );
 
-    // Build timeline
-    const timelineEvents: SessionTimeline[] = [];
+      // Build timeline
+      const timelineEvents: SessionTimeline[] = [];
 
-    // Add participant joined/left events
-    for (const p of participantsRows) {
-      if (p.joined_at) {
+      // Add participant joined/left events
+      for (const p of participantsRows) {
+        if (p.joined_at) {
+          timelineEvents.push({
+            timestamp: p.joined_at,
+            event_type: 'participant_joined',
+            participant_name: p.display_name,
+          });
+        }
+        if (p.left_at) {
+          timelineEvents.push({
+            timestamp: p.left_at,
+            event_type: 'participant_left',
+            participant_name: p.display_name,
+          });
+        }
+      }
+
+      // Add round events
+      const roundsRows = await query<any>(
+        `
+        SELECT id, round_number, started_at, ended_at
+        FROM game_rounds
+        WHERE game_session_id = $1
+        ORDER BY round_number ASC
+        `,
+        [sessionId]
+      );
+
+      for (const round of roundsRows) {
+        if (round.started_at) {
+          timelineEvents.push({
+            timestamp: round.started_at,
+            event_type: 'round_started',
+            round_number: round.round_number,
+          });
+        }
+        if (round.ended_at) {
+          timelineEvents.push({
+            timestamp: round.ended_at,
+            event_type: 'round_ended',
+            round_number: round.round_number,
+          });
+        }
+      }
+
+      // Add action events
+      for (const action of actionsRows) {
         timelineEvents.push({
-          timestamp: p.joined_at,
-          event_type: 'participant_joined',
-          participant_name: p.display_name,
+          timestamp: action.created_at,
+          event_type: 'action',
+          participant_name: action.participant_name,
+          action_type: action.action_type,
         });
       }
-      if (p.left_at) {
-        timelineEvents.push({
-          timestamp: p.left_at,
-          event_type: 'participant_left',
-          participant_name: p.display_name,
-        });
-      }
-    }
 
-    // Add round events
-    const roundsRows = await query<any>(
-      `
-      SELECT id, round_number, started_at, ended_at
-      FROM game_rounds
-      WHERE game_session_id = $1
-      ORDER BY round_number ASC
-      `,
-      [sessionId]
-    );
+      // Sort timeline by timestamp
+      timelineEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
 
-    for (const round of roundsRows) {
-      if (round.started_at) {
-        timelineEvents.push({
-          timestamp: round.started_at,
-          event_type: 'round_started',
-          round_number: round.round_number,
-        });
-      }
-      if (round.ended_at) {
-        timelineEvents.push({
-          timestamp: round.ended_at,
-          event_type: 'round_ended',
-          round_number: round.round_number,
-        });
-      }
-    }
-
-    // Add action events
-    for (const action of actionsRows) {
-      timelineEvents.push({
-        timestamp: action.created_at,
-        event_type: 'action',
-        participant_name: action.participant_name,
-        action_type: action.action_type,
+      return {
+        id: sessionRow.id,
+        event_id: sessionRow.event_id,
+        event_title: sessionRow.event_title,
+        game_type_id: sessionRow.game_type_id,
+        game_name: sessionRow.game_name,
+        game_key: sessionRow.game_key,
+        status: sessionRow.status,
+        current_round: sessionRow.current_round,
+        total_rounds: sessionRow.total_rounds,
+        game_duration_minutes: sessionRow.game_duration_minutes,
+        started_at: sessionRow.started_at,
+        ended_at: sessionRow.ended_at,
+        session_deadline_at: sessionRow.session_deadline_at,
+        total_participants: parseInt(sessionRow.total_participants),
+        active_participants: parseInt(sessionRow.active_participants),
+        completed_participants: parseInt(sessionRow.completed_participants),
+        total_messages: parseInt(sessionRow.total_messages),
+        total_actions: parseInt(sessionRow.total_actions),
+        total_rounds_completed: parseInt(sessionRow.total_rounds_completed),
+        created_at: sessionRow.created_at,
+        updated_at: sessionRow.updated_at,
+        participants: participantsRows,
+        messages: messagesRows,
+        actions: actionsRows,
+        timeline: timelineEvents,
+      };
+    } catch (error) {
+      // Log detailed error for debugging
+      console.error('[SessionDetailsService.getSessionDetails] Error:', {
+        sessionId,
+        errorMessage: error instanceof Error ? error.message : String(error),
+        errorStack: error instanceof Error ? error.stack : undefined,
       });
+      throw error;
     }
-
-    // Sort timeline by timestamp
-    timelineEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-
-    return {
-      id: sessionRow.id,
-      event_id: sessionRow.event_id,
-      event_title: sessionRow.event_title,
-      game_type_id: sessionRow.game_type_id,
-      game_name: sessionRow.game_name,
-      game_key: sessionRow.game_key,
-      status: sessionRow.status,
-      current_round: sessionRow.current_round,
-      total_rounds: sessionRow.total_rounds,
-      game_duration_minutes: sessionRow.game_duration_minutes,
-      started_at: sessionRow.started_at,
-      ended_at: sessionRow.ended_at,
-      session_deadline_at: sessionRow.session_deadline_at,
-      total_participants: parseInt(sessionRow.total_participants),
-      active_participants: parseInt(sessionRow.active_participants),
-      completed_participants: parseInt(sessionRow.completed_participants),
-      total_messages: parseInt(sessionRow.total_messages),
-      total_actions: parseInt(sessionRow.total_actions),
-      total_rounds_completed: parseInt(sessionRow.total_rounds_completed),
-      created_at: sessionRow.created_at,
-      updated_at: sessionRow.updated_at,
-      participants: participantsRows,
-      messages: messagesRows,
-      actions: actionsRows,
-      timeline: timelineEvents,
-    };
   }
 
   /**
