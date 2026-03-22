@@ -1730,8 +1730,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
               details: {
                 game: 'two-truths',
                 statementId: voteChoice,
-                round: (next as any).round,
-                phase: (next as any).phase,
+                round: (savedSnapshot?.state as any)?.round,
+                phase: (savedSnapshot?.state as any)?.phase,
                 timestamp: new Date().toISOString(),
               },
               ipAddress: socket.handshake.address,
