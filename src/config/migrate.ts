@@ -908,6 +908,21 @@ const migrations: { version: number; name: string; sql: string }[] = [
         WHERE status = 'active';
     `,
   },
+  {
+    version: 21,
+    name: 'add_organization_ban_status',
+    sql: `
+      -- Add organization ban/status tracking for login validation
+      -- Prevents users from logging in if their organization is banned
+      
+      ALTER TABLE organizations
+        ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active',
+        ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+
+      -- Create index for efficient status queries during login
+      CREATE INDEX IF NOT EXISTS idx_organizations_status ON organizations(status);
+    `,
+  },
 ];
 
 /**
