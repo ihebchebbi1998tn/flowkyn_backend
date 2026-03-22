@@ -362,8 +362,12 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:next_round') {
-    const nextRound = base.round + 1;
-    if (nextRound > base.totalRounds) return { ...base, phase: 'results', gameStatus: 'finished' };
+    const nextRound = (base.round ?? 1) + 1;
+    // FIX #3: Defensive null check on totalRounds
+    const totalRounds = base.totalRounds ?? 4; // Fallback to 4 if undefined
+    if (nextRound > totalRounds) {
+      return { ...base, phase: 'results', gameStatus: 'finished' };
+    }
 
     const row = await queryOne<{ next_id: string }>(
       `WITH ordered AS (
@@ -607,6 +611,7 @@ async function reduceCoffeeState(args: {
     // when multiple clients emit automatically on 'matching').
     if (base.startedChatAt) return base;
     // Safety: chat cannot start without at least one pair.
+    // FIX #3: Defensive null check on pairs array
     if (!Array.isArray(base.pairs) || base.pairs.length === 0) {
       console.warn('[CoffeeRoulette] Ignoring coffee:start_chat without pairs', {
         eventId,
@@ -614,7 +619,11 @@ async function reduceCoffeeState(args: {
       });
       return { ...base, phase: 'waiting', startedChatAt: null };
     }
-    const chatDurationMinutes = Math.max(1, Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes || 30));
+    // FIX #3: Defensive null checks on session timing values
+    const chatDurationMinutes = Math.max(
+      1,
+      Number(session?.resolved_timing?.coffeeRoulette?.chatDurationMinutes ?? 30)
+    );
     return { 
       ...base, 
       phase: 'chatting',
@@ -623,7 +632,7 @@ async function reduceCoffeeState(args: {
       chatDurationMinutes,
       chatEndsAt: new Date(Date.now() + chatDurationMinutes * 60000).toISOString(),
       // Start with 1 prompt already assigned on shuffle
-      promptsUsed: Math.max(1, base.promptsUsed || 0),
+      promptsUsed: Math.max(1, base.promptsUsed ?? 0),
       decisionRequired: false,
     };
   }
@@ -749,7 +758,11 @@ async function reduceStrategicState(args: {
     crisisLabel: payload?.crisisLabel || payload?.crisisType || 'Scenario',
     difficultyLabel: payload?.difficultyLabel || payload?.difficulty || 'medium',
     rolesAssigned: false,
-    discussionDurationMinutes: Math.max(1, Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes || 45)),
+    // FIX #3: Defensive null checks on Strategic Escape timing
+    discussionDurationMinutes: Math.max(
+      1,
+      Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes ?? 45)
+    ),
     gameStatus: 'waiting',
   };
 
@@ -781,14 +794,15 @@ async function reduceStrategicState(args: {
   if (actionType === 'strategic:start_discussion') {
     // Idempotent: don't reset discussion timer if already started
     if (base.phase === 'discussion' && base.discussionEndsAt) return base;
+    // FIX #3: Defensive null checks on discussion timing
     const minutes = typeof payload?.durationMinutes === 'number'
       ? payload.durationMinutes
-      : Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes || 45);
+      : Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes ?? 45);
     return {
       ...base,
       phase: 'discussion',
-      discussionDurationMinutes: Math.max(1, Number(minutes || base.discussionDurationMinutes || 45)),
-      discussionEndsAt: new Date(Date.now() + minutes * 60000).toISOString(),
+      discussionDurationMinutes: Math.max(1, Number(minutes ?? base.discussionDurationMinutes ?? 45)),
+      discussionEndsAt: new Date(Date.now() + (minutes ?? base.discussionDurationMinutes ?? 45) * 60000).toISOString(),
       gameStatus: 'in_progress',
     };
   }
@@ -1431,7 +1445,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             const roomId = `game:${data.sessionId}`;
             const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
             const roomSize = room && typeof room.size === 'number' ? room.size : 0;
-            
+
             console.log('[CoffeeRoulette] Broadcasting game:data', {
               sessionId: data.sessionId,
               actionType: data.actionType,
@@ -1480,7 +1494,23 @@ export function setupGameHandlers(gamesNs: Namespace) {
             }
           });
 
-          coffeeActionQueue.set(data.sessionId, run.then(() => undefined).catch(() => undefined));
+          coffeeActionQueue.set(
+            data.sessionId,
+            run
+              .then(() => undefined)
+              .catch((err) => {
+                // ⚠️ CRITICAL: Log async coffee roulette action errors instead of swallowing them
+                console.error('[CoffeeRoulette] Async action failed:', {
+                  sessionId: data.sessionId,
+                  actionType: data.actionType,
+                  userId: user.userId,
+                  error: err instanceof Error ? err.message : String(err),
+                  stack: err instanceof Error ? err.stack : undefined,
+                });
+                // Re-throw to maintain promise chain integrity
+                throw err;
+              })
+          );
           await run;
         }
 
@@ -2169,7 +2199,22 @@ export function setupGameHandlers(gamesNs: Namespace) {
             }
           });
 
-          coffeeActionQueue.set(sessionId, run.then(() => undefined).catch(() => undefined));
+          coffeeActionQueue.set(
+            sessionId,
+            run
+              .then(() => undefined)
+              .catch((err) => {
+                // ⚠️ CRITICAL: Log async cleanup action errors instead of swallowing them
+                console.error('[GameCleanup] Async action failed:', {
+                  sessionId,
+                  participantId,
+                  error: err instanceof Error ? err.message : String(err),
+                  stack: err instanceof Error ? err.stack : undefined,
+                });
+                // Re-throw to maintain promise chain integrity
+                throw err;
+              })
+          );
           void run;
         }
       }
