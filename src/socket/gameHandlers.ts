@@ -155,6 +155,102 @@ const coffeeVoiceHangupSchema = z.object({
   pairId: z.string().uuid('Invalid pair ID'),
 });
 
+// ============================================
+// PAYLOAD VALIDATION SCHEMAS - FIX #3
+// ============================================
+
+// Two Truths payload validation
+const twoTruthsSubmitSchema = z.object({
+  statements: z
+    .array(
+      z
+        .string()
+        .trim()
+        .min(3, 'Each statement must be at least 3 characters')
+        .max(300, 'Each statement must be at most 300 characters')
+    )
+    .length(3, 'You must provide exactly 3 statements'),
+  lieIndex: z
+    .number()
+    .int()
+    .min(0)
+    .max(2)
+    .optional()
+    .default(2),
+});
+
+const twoTruthsVoteSchema = z.object({
+  statementId: z.enum(['s0', 's1', 's2'], {
+    errorMap: () => ({ message: 'Invalid statement ID. Must be s0, s1, or s2' }),
+  }),
+});
+
+const twoTruthsRevealSchema = z.object({
+  lieId: z
+    .enum(['s0', 's1', 's2'], {
+      errorMap: () => ({ message: 'Invalid lie ID. Must be s0, s1, or s2' }),
+    })
+    .optional(),
+});
+
+// Coffee Roulette payload validation
+const coffeeNextPromptSchema = z.object({
+  expectedPromptsUsed: z
+    .number()
+    .int()
+    .min(0, 'Expected prompts used cannot be negative'),
+});
+
+const coffeeContinueSchema = z.object({
+  expectedPromptsUsed: z
+    .number()
+    .int()
+    .min(0, 'Expected prompts used cannot be negative'),
+});
+
+// Strategic Escape payload validation
+const strategicConfigureSchema = z.object({
+  industryKey: z
+    .string()
+    .max(100, 'Industry key too long')
+    .optional(),
+  crisisKey: z
+    .string()
+    .max(100, 'Crisis key too long')
+    .optional(),
+  difficultyKey: z
+    .enum(['easy', 'medium', 'hard'], {
+      errorMap: () => ({ message: 'Difficulty must be easy, medium, or hard' }),
+    })
+    .optional(),
+  industryLabel: z
+    .string()
+    .max(200, 'Industry label too long')
+    .optional(),
+  crisisLabel: z
+    .string()
+    .max(200, 'Crisis label too long')
+    .optional(),
+  difficultyLabel: z
+    .string()
+    .max(100, 'Difficulty label too long')
+    .optional(),
+});
+
+const strategicAssignRolesSchema = z.object({
+  roles: z
+    .record(
+      z.string().uuid('Invalid participant ID'),
+      z
+        .string()
+        .max(50, 'Role key too long')
+    )
+    .refine(
+      (roles) => Object.keys(roles).length > 0,
+      { message: 'At least one role must be assigned' }
+    ),
+});
+
 function isTwoTruthsAction(actionType: string) {
   return actionType.startsWith('two_truths:');
 }
@@ -315,24 +411,45 @@ async function reduceTwoTruthsState(args: {
     if (!['s0', 's1', 's2'].includes(choice)) return base;
     if (base.presenterParticipantId && participantId === base.presenterParticipantId) return base;
     
-    // FIX #4: Atomic vote recording - use database INSERT with unique constraint
-    // instead of in-memory votes object to prevent race conditions
+    // FIX #1: Atomic vote recording - use database INSERT with unique constraint
+    // to prevent race conditions. Never fall back to in-memory state.
     try {
       // This will use the unique constraint to prevent duplicate votes
       // and atomic INSERT ensures only one vote per participant
-      await query(
+      const voteResult = await query(
         `INSERT INTO game_votes (game_session_id, participant_id, statement_id)
          VALUES ($1, $2, $3)
          ON CONFLICT (game_session_id, participant_id) 
-         DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()`,
+         DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()
+         RETURNING statement_id`,
         [session?.id, participantId, choice]
       );
-      console.log('[TwoTruths] Atomic vote recorded', { sessionId: session?.id, participantId, choice });
-    } catch (err) {
-      console.warn('[TwoTruths] Failed to record vote atomically', { participantId, error: err });
-      // Fall back to in-memory update if DB fails
+      
+      if (!voteResult?.[0]) {
+        throw new Error('Vote insertion returned no result - database write failed');
+      }
+      
+      console.log('[TwoTruths] Atomic vote recorded successfully', { 
+        sessionId: session?.id, 
+        participantId, 
+        choice,
+        dbConfirmed: true 
+      });
+    } catch (err: any) {
+      console.error('[TwoTruths] CRITICAL: Failed to record vote atomically', { 
+        sessionId: session?.id,
+        participantId, 
+        choice,
+        error: err?.message,
+        stack: err?.stack 
+      });
+      
+      // FIX #1: Don't fall back to in-memory state - reject the action entirely
+      // This prevents vote loss due to race conditions
+      throw new Error('Failed to record your vote. Please try voting again.');
     }
     
+    // Update in-memory state with database-confirmed vote
     return { ...base, votes: { ...base.votes, [participantId]: choice } };
   }
 
@@ -1020,6 +1137,62 @@ async function canControlGameFlow(sessionId: string, userId: string, socket: Aut
   return !!participant;
 }
 
+/**
+ * FIX #2: Enrich Coffee Roulette snapshot for late joiners.
+ * Ensures the joining participant knows:
+ * - If they're already paired (and with whom)
+ * - What the conversation topic is
+ * - What phase they're joining in
+ * - If they're unpaired and why
+ */
+async function enrichCoffeeSnapshotForLateJoiner(
+  snapshot: any,
+  sessionId: string,
+  participantId: string,
+  eventId: string
+): Promise<any> {
+  if (!snapshot || snapshot.kind !== 'coffee-roulette') {
+    return snapshot;
+  }
+
+  // Find this participant in the current pair list
+  const pair = (snapshot.pairs || []).find(
+    (p: any) => p.person1.participantId === participantId || p.person2.participantId === participantId
+  );
+
+  // If they should be paired but aren't, check if they're marked as unpaired
+  let unpairedStatus: string | null = null;
+  if (!pair && (snapshot.phase === 'chatting' || snapshot.phase === 'matching')) {
+    try {
+      const unpaired = await queryOne<{ reason: string; resolved_at: string | null }>(
+        `SELECT reason, resolved_at FROM coffee_roulette_unpaired
+         WHERE game_session_id = $1 AND participant_id = $2`,
+        [sessionId, participantId]
+      );
+      
+      if (unpaired && !unpaired.resolved_at) {
+        unpairedStatus = unpaired.reason; // 'odd_count', 'disconnect', etc.
+      }
+    } catch (err) {
+      console.warn('[CoffeeRoulette] Failed to check unpaired status for late joiner', {
+        sessionId,
+        participantId,
+        error: err
+      });
+    }
+  }
+
+  return {
+    ...snapshot,
+    // Add metadata for this specific participant
+    _currentUserParticipantId: participantId,
+    _currentUserPair: pair || null,
+    _currentUserUnpairedReason: unpairedStatus,
+    _currentUserPhase: snapshot.phase,
+    _snapshotIsEnrichedForLateJoiner: true,
+  };
+}
+
 export function setupGameHandlers(gamesNs: Namespace) {
   // Used for targeted forwarding of WebRTC signaling messages (no media relay through backend).
   // key: `${sessionId}:${participantId}` -> socket.id
@@ -1130,19 +1303,24 @@ export function setupGameHandlers(gamesNs: Namespace) {
           timestamp: new Date().toISOString(),
         });
 
-          // FIX #1: Enrich snapshot with current pair info for late joiners
-          const enrichedSnapshot = snapshot?.state;
-          if (enrichedSnapshot && (enrichedSnapshot as any).kind === 'coffee-roulette' && (enrichedSnapshot as any).pairs) {
-            // Ensure pairs are properly formatted and include all necessary info
-            const pairs = (enrichedSnapshot as any).pairs;
-            (enrichedSnapshot as any).pairs = pairs.map((p: any) => ({
-              id: p.id,
-              person1: p.person1,
-              person2: p.person2,
-              topic: p.topic,
-              topicKey: p.topicKey,
-              topicId: p.topicId,
-            }));
+          // FIX #2: Comprehensive late joiner enrichment for Coffee Roulette
+          let enrichedSnapshot = snapshot?.state;
+          if (enrichedSnapshot && (enrichedSnapshot as any).kind === 'coffee-roulette') {
+            try {
+              enrichedSnapshot = await enrichCoffeeSnapshotForLateJoiner(
+                enrichedSnapshot,
+                data.sessionId,
+                participant.participantId,
+                session.event_id
+              );
+            } catch (err) {
+              console.warn('[CoffeeRoulette] Failed to enrich snapshot for late joiner', {
+                sessionId: data.sessionId,
+                participantId: participant.participantId,
+                error: err
+              });
+              // Continue without enrichment rather than failing the join
+            }
           }
 
           ack?.({
@@ -1330,6 +1508,44 @@ export function setupGameHandlers(gamesNs: Namespace) {
             }
           }
 
+          // FIX #3: Add payload validation for Two Truths actions
+          if (data.actionType === 'two_truths:submit') {
+            const payloadValidation = twoTruthsSubmitSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid submission: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION',
+                issues: payloadValidation.error.issues.map(i => ({ path: i.path.join('.'), message: i.message }))
+              });
+              return;
+            }
+            data.payload = payloadValidation.data; // Use validated data
+          }
+
+          if (data.actionType === 'two_truths:vote') {
+            const payloadValidation = twoTruthsVoteSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid vote: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION',
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
+          }
+
+          if (data.actionType === 'two_truths:reveal') {
+            const payloadValidation = twoTruthsRevealSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid reveal',
+                code: 'VALIDATION'
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
+          }
+
           const next = await reduceTwoTruthsState({
             eventId: session.event_id,
             sessionId: data.sessionId,
@@ -1363,6 +1579,31 @@ export function setupGameHandlers(gamesNs: Namespace) {
             participantId: participant.participantId,
             timestamp: new Date().toISOString(),
           });
+
+          // FIX #3: Add payload validation for Coffee Roulette actions
+          if (data.actionType === 'coffee:next_prompt') {
+            const payloadValidation = coffeeNextPromptSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid prompt request: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION'
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
+          }
+
+          if (data.actionType === 'coffee:continue') {
+            const payloadValidation = coffeeContinueSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid continue request: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION'
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
+          }
 
           const normalizedAction =
             data.actionType === 'coffee:end_and_finish' ? 'coffee:end' : data.actionType;
@@ -1524,6 +1765,31 @@ export function setupGameHandlers(gamesNs: Namespace) {
           if (!ok) {
             socket.emit('error', { message: 'Only event administrators can perform strategic actions', code: 'FORBIDDEN' });
             return;
+          }
+
+          // FIX #3: Add payload validation for Strategic Escape actions
+          if (data.actionType === 'strategic:configure') {
+            const payloadValidation = strategicConfigureSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid configuration: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION'
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
+          }
+
+          if (data.actionType === 'strategic:assign_roles') {
+            const payloadValidation = strategicAssignRolesSchema.safeParse(data.payload);
+            if (!payloadValidation.success) {
+              socket.emit('error', { 
+                message: 'Invalid role assignment: ' + payloadValidation.error.issues[0].message,
+                code: 'VALIDATION'
+              });
+              return;
+            }
+            data.payload = payloadValidation.data;
           }
 
           const next = await reduceStrategicState({
@@ -1714,6 +1980,233 @@ export function setupGameHandlers(gamesNs: Namespace) {
         });
       } catch (err: any) {
         socket.emit('error', { message: err.message, code: 'STATE_ERROR' });
+      }
+    });
+
+    // ─── Coffee Roulette Voice Call Request (Modal) ───
+    // When a user clicks "Open Voice Call", they initiate a modal-based request
+    // The initiator gets a confirmation modal, and the partner gets a request modal
+    socket.on('coffee:voice_call_request', async (data: unknown, ack) => {
+      const validation = z.object({
+        sessionId: z.string().uuid('Invalid session ID'),
+        pairId: z.string().uuid('Invalid pair ID'),
+      }).safeParse(data);
+
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const initiator = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!initiator) {
+          console.warn('[CoffeeVoice] voice_call_request: initiator not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        // Verify initiator is in this pair
+        const initiatorSide: 'person1' | 'person2' | null =
+          pair.person1?.participantId === initiator.participantId ? 'person1'
+          : pair.person2?.participantId === initiator.participantId ? 'person2'
+          : null;
+
+        if (!initiatorSide) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+
+        const partnerParticipantId =
+          initiatorSide === 'person1' ? pair.person2?.participantId : pair.person1?.participantId;
+        
+        if (!partnerParticipantId) {
+          ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' });
+          return;
+        }
+
+        const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+        const partnerSocketId = voiceSocketByKey.get(partnerKey);
+
+        console.log('[CoffeeVoice] Voice call request initiated', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          initiatorParticipantId: initiator.participantId,
+          partnerParticipantId,
+          partnerConnected: !!partnerSocketId,
+        });
+
+        // Emit confirmation modal to initiator
+        socket.emit('coffee:voice_call_modal', {
+          type: 'initiator',
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          partnerParticipantId,
+          partnerName: initiatorSide === 'person1' ? pair.person2?.name : pair.person1?.name,
+          partnerAvatar: initiatorSide === 'person1' ? pair.person2?.avatar : pair.person1?.avatar,
+          message: 'Ready to start a voice call?',
+        });
+
+        // Emit request modal to partner
+        if (partnerSocketId) {
+          gamesNs.to(partnerSocketId).emit('coffee:voice_call_modal', {
+            type: 'receiver',
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            initiatorParticipantId: initiator.participantId,
+            initiatorName: initiatorSide === 'person1' ? pair.person1?.name : pair.person2?.name,
+            initiatorAvatar: initiatorSide === 'person1' ? pair.person1?.avatar : pair.person2?.avatar,
+            message: 'wants to start a voice call with you',
+          });
+
+          console.log('[CoffeeVoice] Voice call modals sent to both participants', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+          });
+        } else {
+          console.log('[CoffeeVoice] Partner not connected, request modal sent to initiator only', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            partnerParticipantId,
+          });
+        }
+
+        ack?.({ ok: true, partnerConnected: !!partnerSocketId });
+      } catch (err) {
+        console.error('[CoffeeVoice] voice_call_request error:', err);
+        ack?.({ ok: false, error: 'VOICE_CALL_REQUEST_ERROR' });
+      }
+    });
+
+    // ─── Coffee Roulette Voice Call Response (Accept/Decline) ───
+    // When a partner responds to the voice call modal
+    socket.on('coffee:voice_call_response', async (data: unknown, ack) => {
+      const validation = z.object({
+        sessionId: z.string().uuid('Invalid session ID'),
+        pairId: z.string().uuid('Invalid pair ID'),
+        accepted: z.boolean(),
+      }).safeParse(data);
+
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const responder = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!responder) {
+          console.warn('[CoffeeVoice] voice_call_response: responder not a participant', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            userId: user.userId,
+          });
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
+          ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' });
+          return;
+        }
+
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        // Verify responder is in this pair
+        const isInPair = 
+          pair.person1?.participantId === responder.participantId ||
+          pair.person2?.participantId === responder.participantId;
+
+        if (!isInPair) {
+          ack?.({ ok: false, error: 'NOT_IN_PAIR' });
+          return;
+        }
+
+        const initiatorParticipantId =
+          pair.person1?.participantId === responder.participantId 
+            ? pair.person2?.participantId 
+            : pair.person1?.participantId;
+
+        if (!initiatorParticipantId) {
+          ack?.({ ok: false, error: 'INITIATOR_NOT_FOUND' });
+          return;
+        }
+
+        const initiatorKey = `${validation.data.sessionId}:${initiatorParticipantId}`;
+        const initiatorSocketId = voiceSocketByKey.get(initiatorKey);
+
+        console.log('[CoffeeVoice] Voice call response received', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          responderParticipantId: responder.participantId,
+          initiatorParticipantId,
+          accepted: validation.data.accepted,
+          initiatorConnected: !!initiatorSocketId,
+        });
+
+        if (validation.data.accepted) {
+          // Partner accepted - close modals on both sides and proceed with voice setup
+          socket.emit('coffee:voice_call_accepted', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+          });
+
+          if (initiatorSocketId) {
+            gamesNs.to(initiatorSocketId).emit('coffee:voice_call_accepted', {
+              sessionId: validation.data.sessionId,
+              pairId: validation.data.pairId,
+            });
+
+            console.log('[CoffeeVoice] Voice call accepted - both modals will close', {
+              sessionId: validation.data.sessionId,
+              pairId: validation.data.pairId,
+            });
+          }
+        } else {
+          // Partner declined - notify initiator
+          socket.emit('coffee:voice_call_declined', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+          });
+
+          if (initiatorSocketId) {
+            gamesNs.to(initiatorSocketId).emit('coffee:voice_call_declined', {
+              sessionId: validation.data.sessionId,
+              pairId: validation.data.pairId,
+            });
+
+            console.log('[CoffeeVoice] Voice call declined', {
+              sessionId: validation.data.sessionId,
+              pairId: validation.data.pairId,
+            });
+          }
+        }
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[CoffeeVoice] voice_call_response error:', err);
+        ack?.({ ok: false, error: 'VOICE_CALL_RESPONSE_ERROR' });
       }
     });
 
