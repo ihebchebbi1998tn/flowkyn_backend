@@ -147,14 +147,15 @@ export class SessionDetailsService {
       console.log('[SessionDetailsService] Main session details fetched successfully');
 
       // Fetch participants with interaction counts
+      // Note: event_profiles table may not exist yet, so we use COALESCE with fallbacks
       console.log('[SessionDetailsService] Fetching participants...');
       const participantsRows = await query<SessionParticipant>(
         `
         SELECT
           om.id,
           p.id as participant_id,
-          COALESCE(ep.display_name, COALESCE(u.name, p.guest_name)) as display_name,
-          COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) as avatar_url,
+          COALESCE(u.name, p.guest_name) as display_name,
+          COALESCE(u.avatar_url, p.guest_avatar) as avatar_url,
           p.participant_type,
           p.joined_at,
           p.left_at,
@@ -165,11 +166,10 @@ export class SessionDetailsService {
         FROM participants p
         LEFT JOIN organization_members om ON p.organization_member_id = om.id
         LEFT JOIN users u ON om.user_id = u.id
-        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND p.id = ep.participant_id
         LEFT JOIN game_actions ga ON p.id = ga.participant_id AND ga.game_session_id = $1
         LEFT JOIN event_messages em ON p.id = em.participant_id AND em.event_id = $2
         WHERE p.event_id = $2
-        GROUP BY om.id, p.id, ep.display_name, ep.avatar_url, u.name, u.avatar_url, 
+        GROUP BY om.id, p.id, u.name, u.avatar_url, 
                  p.guest_name, p.guest_avatar, p.participant_type, p.joined_at, p.left_at
         ORDER BY p.joined_at ASC
         `,
@@ -184,8 +184,8 @@ export class SessionDetailsService {
         SELECT
           em.id,
           em.participant_id,
-          COALESCE(ep.display_name, COALESCE(u.name, p.guest_name)) as participant_name,
-          COALESCE(ep.avatar_url, u.avatar_url, p.guest_avatar) as avatar_url,
+          COALESCE(u.name, p.guest_name) as participant_name,
+          COALESCE(u.avatar_url, p.guest_avatar) as avatar_url,
           em.message,
           em.message_type,
           em.created_at,
@@ -194,7 +194,6 @@ export class SessionDetailsService {
         JOIN participants p ON em.participant_id = p.id
         LEFT JOIN organization_members om ON p.organization_member_id = om.id
         LEFT JOIN users u ON om.user_id = u.id
-        LEFT JOIN event_profiles ep ON em.event_id = ep.event_id AND em.participant_id = ep.participant_id
         WHERE em.event_id = $1
         ORDER BY em.created_at ASC
         `,
@@ -209,7 +208,7 @@ export class SessionDetailsService {
         SELECT
           ga.id,
           ga.participant_id,
-          COALESCE(ep.display_name, COALESCE(u.name, p.guest_name)) as participant_name,
+          COALESCE(u.name, p.guest_name) as participant_name,
           gr.round_number,
           ga.action_type,
           ga.payload,
@@ -220,7 +219,6 @@ export class SessionDetailsService {
         JOIN game_rounds gr ON ga.round_id = gr.id
         LEFT JOIN organization_members om ON p.organization_member_id = om.id
         LEFT JOIN users u ON om.user_id = u.id
-        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND p.id = ep.participant_id
         WHERE ga.game_session_id = $1
         ORDER BY ga.created_at ASC
         `,
