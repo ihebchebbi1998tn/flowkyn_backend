@@ -12,6 +12,49 @@ import crypto from 'crypto';
 const gamesService = new GamesService();
 const coffeeService = new CoffeeRouletteConfigService();
 
+// ============================================
+// AUDIT LOGGING HELPER - Issue #4
+// ============================================
+
+/**
+ * Log action to audit_logs table for investigation and dispute resolution
+ * Non-blocking: logs asynchronously, errors are caught and logged
+ */
+async function logAuditEvent(data: {
+  eventId: string;
+  gameSessionId?: string;
+  participantId?: string;
+  userId?: string;
+  action: string; // e.g., 'vote_cast', 'vote_failed', 'role_assigned'
+  details?: any;
+  ipAddress?: string;
+  status?: 'success' | 'error' | 'retry';
+}): Promise<void> {
+  try {
+    await query(
+      `INSERT INTO audit_logs (event_id, game_session_id, participant_id, user_id, action, details, ip_address, status)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        data.eventId,
+        data.gameSessionId || null,
+        data.participantId || null,
+        data.userId || null,
+        data.action,
+        data.details ? JSON.stringify(data.details) : null,
+        data.ipAddress || null,
+        data.status || 'success',
+      ]
+    );
+  } catch (err: any) {
+    // Non-blocking: log error but don't throw
+    console.error('[Audit] Failed to log event:', {
+      action: data.action,
+      error: err?.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+}
+
 function toSnapshotCreatedAt(value: Date | string | null | undefined): string | null {
   if (!value) return null;
   if (typeof value === 'string') return value;
@@ -1570,6 +1613,27 @@ export function setupGameHandlers(gamesNs: Namespace) {
             snapshotRevisionId: savedSnapshot?.id || null,
             snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
           });
+
+          // FIX #4: Log vote actions to audit trail for dispute resolution
+          if (data.actionType === 'two_truths:vote' && savedSnapshot) {
+            const voteChoice = data.payload?.statementId;
+            logAuditEvent({
+              eventId: session.event_id,
+              gameSessionId: data.sessionId,
+              participantId: participant.participantId,
+              userId: user.userId,
+              action: 'vote_cast',
+              details: {
+                game: 'two-truths',
+                statementId: voteChoice,
+                round: (next as any).round,
+                phase: (next as any).phase,
+                timestamp: new Date().toISOString(),
+              },
+              ipAddress: socket.handshake.address,
+              status: 'success',
+            });
+          }
         }
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
@@ -2064,23 +2128,32 @@ export function setupGameHandlers(gamesNs: Namespace) {
         });
 
         // Emit request modal to partner
-        if (partnerSocketId) {
-          gamesNs.to(partnerSocketId).emit('coffee:voice_call_modal', {
-            type: 'receiver',
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            initiatorParticipantId: initiator.participantId,
-            initiatorName: initiatorSide === 'person1' ? pair.person1?.name : pair.person2?.name,
-            initiatorAvatar: initiatorSide === 'person1' ? pair.person1?.avatar : pair.person2?.avatar,
-            message: 'wants to start a voice call with you',
-          });
+        const receiverModal = {
+          type: 'receiver' as const,
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          initiatorParticipantId: initiator.participantId,
+          initiatorName: initiatorSide === 'person1' ? pair.person1?.name : pair.person2?.name,
+          initiatorAvatar: initiatorSide === 'person1' ? pair.person1?.avatar : pair.person2?.avatar,
+          message: 'wants to start a voice call with you',
+        };
 
+        if (partnerSocketId) {
+          // Direct delivery — partner's socket is registered
+          gamesNs.to(partnerSocketId).emit('coffee:voice_call_modal', receiverModal);
           console.log('[CoffeeVoice] Voice call modals sent to both participants', {
             sessionId: validation.data.sessionId,
             pairId: validation.data.pairId,
           });
         } else {
-          console.log('[CoffeeVoice] Partner not connected, request modal sent to initiator only', {
+          // Fallback: partner not in voiceSocketByKey (reconnect timing / late join).
+          // Broadcast to the whole game room with toParticipantId so the client
+          // can filter — only the intended partner will open their modal.
+          gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_modal', {
+            ...receiverModal,
+            toParticipantId: partnerParticipantId,
+          });
+          console.log('[CoffeeVoice] Partner not directly connected, broadcast fallback used', {
             sessionId: validation.data.sessionId,
             pairId: validation.data.pairId,
             partnerParticipantId,
@@ -2207,6 +2280,62 @@ export function setupGameHandlers(gamesNs: Namespace) {
       } catch (err) {
         console.error('[CoffeeVoice] voice_call_response error:', err);
         ack?.({ ok: false, error: 'VOICE_CALL_RESPONSE_ERROR' });
+      }
+    });
+
+    // ─── Coffee Roulette Voice Call Cancel ───
+    // Sent by the initiator when they close/cancel their pending call request.
+    // Notifies the receiver so their modal closes immediately instead of timing out.
+    socket.on('coffee:voice_call_cancel', async (data: unknown, ack) => {
+      const validation = z.object({
+        sessionId: z.string().uuid('Invalid session ID'),
+        pairId: z.string().uuid('Invalid pair ID'),
+      }).safeParse(data);
+
+      if (!validation.success) {
+        ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+        return;
+      }
+
+      try {
+        const canceller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
+        if (!canceller) {
+          ack?.({ ok: false, error: 'FORBIDDEN' });
+          return;
+        }
+
+        const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
+        const state = latest?.state as any;
+        const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
+        if (!pair) {
+          ack?.({ ok: false, error: 'PAIR_NOT_FOUND' });
+          return;
+        }
+
+        const cancellerSide = pair.person1?.participantId === canceller.participantId ? 'person1' : 'person2';
+        const partnerParticipantId =
+          cancellerSide === 'person1' ? pair.person2?.participantId : pair.person1?.participantId;
+
+        if (partnerParticipantId) {
+          const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
+          const partnerSocketId = voiceSocketByKey.get(partnerKey);
+          const cancelPayload = { sessionId: validation.data.sessionId, pairId: validation.data.pairId };
+
+          if (partnerSocketId) {
+            gamesNs.to(partnerSocketId).emit('coffee:voice_call_cancelled', cancelPayload);
+          } else {
+            // Fallback broadcast — client filters by participantId
+            gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_cancelled', {
+              ...cancelPayload,
+              toParticipantId: partnerParticipantId,
+            });
+          }
+        }
+
+        ack?.({ ok: true });
+      } catch (err) {
+        console.error('[CoffeeVoice] voice_call_cancel error:', err);
+        ack?.({ ok: false, error: 'VOICE_CALL_CANCEL_ERROR' });
       }
     });
 
