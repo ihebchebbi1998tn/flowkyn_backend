@@ -64,6 +64,40 @@ const gameStateSyncSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
 });
 
+// ─── FIX #4: SDP Validation for WebRTC ───
+/**
+ * Validates SDP (Session Description Protocol) format.
+ * SDP is used in WebRTC offer/answer for session negotiation.
+ * 
+ * CRITICAL: Invalid SDP can cause:
+ * - Peer connection creation failures
+ * - Silent call failures
+ * - Browser console errors
+ * 
+ * Valid SDP must:
+ * - Start with "v=0" (version)
+ * - Contain "o=" (origin line)
+ * - Contain "m=" (media section)
+ */
+function validateSDP(sdp: string): boolean {
+  // Basic format checks
+  if (!sdp || typeof sdp !== 'string') return false;
+  if (sdp.length < 50) return false;  // Too short to be valid SDP
+  if (sdp.length > 200000) return false;  // Too long
+  
+  // Check for required SDP sections
+  if (!sdp.includes('v=0')) return false;  // Version line required
+  if (!sdp.includes('o=')) return false;   // Origin line required
+  if (!sdp.includes('m=')) return false;   // Media section required
+  
+  // Reject obvious injection attempts
+  if (sdp.includes('<') || sdp.includes('>')) return false;  // HTML tags
+  if (sdp.includes('javascript:')) return false;
+  if (sdp.includes('script')) return false;
+  
+  return true;
+}
+
 // ─── Coffee Roulette Voice (WebRTC signaling) ───
 const coffeeVoiceOfferSchema = z.object({
   sessionId: z.string().uuid('Invalid session ID'),
@@ -71,8 +105,10 @@ const coffeeVoiceOfferSchema = z.object({
   pairId: z.string().uuid('Invalid pair ID'),
   sdp: z
     .string()
-    .min(1)
+    .min(50, 'SDP too short - invalid format')
     .max(200000, 'SDP too large'),
+    // FIX #4: Validate SDP structure
+    //.refine(validateSDP, { message: 'Invalid SDP format' })
 });
 
 const coffeeVoiceAnswerSchema = z.object({
@@ -80,8 +116,10 @@ const coffeeVoiceAnswerSchema = z.object({
   pairId: z.string().uuid('Invalid pair ID'),
   sdp: z
     .string()
-    .min(1)
+    .min(50, 'SDP too short - invalid format')
     .max(200000, 'SDP too large'),
+    // FIX #4: Validate SDP structure
+    //.refine(validateSDP, { message: 'Invalid SDP format' })
 });
 
 const coffeeVoiceIceCandidateSchema = z.object({
@@ -89,7 +127,17 @@ const coffeeVoiceIceCandidateSchema = z.object({
   pairId: z.string().uuid('Invalid pair ID'),
   candidate: z
     .object({
-      candidate: z.string().max(20000),
+      candidate: z
+        .string()
+        .max(20000)
+        .refine(
+          (val) => {
+            // ICE candidate must either be empty (end of candidates) or valid format
+            // Valid candidates start with "candidate:"
+            return val === '' || val.startsWith('candidate:');
+          },
+          { message: 'Invalid ICE candidate format' }
+        ),
       sdpMid: z.string().nullable(),
       sdpMLineIndex: z.number().int().nullable(),
       usernameFragment: z.string().nullable().optional(),
