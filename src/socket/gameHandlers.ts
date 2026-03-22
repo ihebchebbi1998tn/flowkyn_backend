@@ -314,7 +314,12 @@ function isStrategicAction(actionType: string) {
   );
 }
 
+// Session game keys never change — cache indefinitely per process.
+const sessionGameKeyCache = new Map<string, string>();
+
 async function getSessionGameKey(sessionId: string): Promise<string | null> {
+  const cached = sessionGameKeyCache.get(sessionId);
+  if (cached) return cached;
   const row = await queryOne<{ key: string }>(
     `SELECT gt.key
      FROM game_sessions gs
@@ -322,7 +327,9 @@ async function getSessionGameKey(sessionId: string): Promise<string | null> {
      WHERE gs.id = $1`,
     [sessionId]
   );
-  return row?.key || null;
+  const key = row?.key || null;
+  if (key) sessionGameKeyCache.set(sessionId, key);
+  return key;
 }
 
 type TwoTruthsState = {
@@ -1577,8 +1584,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // BUG FIX: Resolve participant ID from authenticated user instead of trusting client
-        const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
+        // Use cached participant ID from game:join to avoid a DB round-trip on every action.
+        // Fall back to full verification only when not yet joined (e.g. re-connected socket).
+        let participant: { participantId: string } | null = null;
+        const cachedParticipantId = joinedParticipantBySessionId.get(data.sessionId);
+        if (cachedParticipantId) {
+          participant = { participantId: cachedParticipantId };
+        } else {
+          participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
+          if (participant) joinedParticipantBySessionId.set(data.sessionId, participant.participantId);
+        }
         if (!participant) {
           console.warn('[GameAction] Participant verification failed', { sessionId: data.sessionId, userId: user.userId });
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
@@ -2067,11 +2082,15 @@ export function setupGameHandlers(gamesNs: Namespace) {
             return;
           }
         } else {
-          // Still verify they belong to the session's event
-          const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
-          if (!participant) {
-            socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
-            return;
+          // Still verify they belong to the session's event — use cache when available.
+          const cachedEndParticipantId = joinedParticipantBySessionId.get(data.sessionId);
+          if (!cachedEndParticipantId) {
+            const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
+            if (!participant) {
+              socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
+              return;
+            }
+            joinedParticipantBySessionId.set(data.sessionId, participant.participantId);
           }
         }
 
@@ -2131,11 +2150,15 @@ export function setupGameHandlers(gamesNs: Namespace) {
       }
 
       try {
-        // Verify user is a participant before sharing state
-        const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
-        if (!participant) {
-          socket.emit('error', { message: 'Not a participant', code: 'FORBIDDEN' });
-          return;
+        // Use cached participant ID from game:join — avoid a DB query on every 30s poll.
+        const cachedSyncParticipantId = joinedParticipantBySessionId.get(data.sessionId);
+        if (!cachedSyncParticipantId) {
+          const participant = await verifyGameParticipant(data.sessionId, user.userId, socket);
+          if (!participant) {
+            socket.emit('error', { message: 'Not a participant', code: 'FORBIDDEN' });
+            return;
+          }
+          joinedParticipantBySessionId.set(data.sessionId, participant.participantId);
         }
 
         const [session, activeRound, snapshot] = await Promise.all([
