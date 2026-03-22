@@ -96,7 +96,10 @@ export class SessionDetailsService {
    */
   async getSessionDetails(sessionId: string): Promise<SessionDetails> {
     try {
+      console.log(`[SessionDetailsService.getSessionDetails] Starting for session: ${sessionId}`);
+      
       // Fetch main session details
+      console.log('[SessionDetailsService] Fetching main session details...');
       const sessionRows = await query<any>(
         `
         SELECT
@@ -141,8 +144,10 @@ export class SessionDetailsService {
       }
 
       const sessionRow = sessionRows[0];
+      console.log('[SessionDetailsService] Main session details fetched successfully');
 
       // Fetch participants with interaction counts
+      console.log('[SessionDetailsService] Fetching participants...');
       const participantsRows = await query<SessionParticipant>(
         `
         SELECT
@@ -170,8 +175,10 @@ export class SessionDetailsService {
         `,
         [sessionId, sessionRow.event_id]
       );
+      console.log(`[SessionDetailsService] Participants fetched: ${participantsRows.length}`);
 
       // Fetch messages with participant info
+      console.log('[SessionDetailsService] Fetching messages...');
       const messagesRows = await query<SessionMessage>(
         `
         SELECT
@@ -193,8 +200,10 @@ export class SessionDetailsService {
         `,
         [sessionRow.event_id, sessionId, sessionRow.started_at]
       );
+      console.log(`[SessionDetailsService] Messages fetched: ${messagesRows.length}`);
 
       // Fetch actions with participant info
+      console.log('[SessionDetailsService] Fetching actions...');
       const actionsRows = await query<SessionAction>(
         `
         SELECT
@@ -217,6 +226,7 @@ export class SessionDetailsService {
         `,
         [sessionId, sessionRow.started_at]
       );
+      console.log(`[SessionDetailsService] Actions fetched: ${actionsRows.length}`);
 
       // Build timeline
       const timelineEvents: SessionTimeline[] = [];
