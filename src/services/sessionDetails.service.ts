@@ -211,7 +211,7 @@ export class SessionDetailsService {
         JOIN game_rounds gr ON ga.round_id = gr.id
         LEFT JOIN organization_members om ON p.organization_member_id = om.id
         LEFT JOIN users u ON om.user_id = u.id
-        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND ga.participant_id = ep.participant_id
+        LEFT JOIN event_profiles ep ON p.event_id = ep.event_id AND p.id = ep.participant_id
         WHERE ga.game_session_id = $1
         ORDER BY ga.created_at ASC
         `,
