@@ -923,6 +923,28 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_organizations_status ON organizations(status);
     `,
   },
+  {
+    version: 22,
+    name: 'add_event_profiles_table',
+    sql: `
+      -- Event profiles: per-participant custom names and avatars within an event
+      -- Allows participants to have different display names in different events
+      
+      CREATE TABLE IF NOT EXISTS event_profiles (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        event_id UUID NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        display_name VARCHAR(100) NOT NULL,
+        avatar_url TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (event_id, participant_id)
+      );
+      
+      CREATE INDEX IF NOT EXISTS idx_event_profiles_event ON event_profiles(event_id);
+      CREATE INDEX IF NOT EXISTS idx_event_profiles_participant ON event_profiles(participant_id);
+    `,
+  },
 ];
 
 /**
