@@ -945,6 +945,64 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_event_profiles_participant ON event_profiles(participant_id);
     `,
   },
+  {
+    version: 23,
+    name: 'add_bug_reporting_tables',
+    sql: `
+      -- ─── Bug Reports / Ticketing System ───
+      CREATE TABLE IF NOT EXISTS bug_reports (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        title VARCHAR(300) NOT NULL,
+        description TEXT NOT NULL,
+        type VARCHAR(50) NOT NULL DEFAULT 'bug_report',
+        priority VARCHAR(20) NOT NULL DEFAULT 'medium',
+        status VARCHAR(50) NOT NULL DEFAULT 'open',
+        assigned_to_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        resolution_notes TEXT,
+        resolved_at TIMESTAMP,
+        closed_at TIMESTAMP,
+        ip_address VARCHAR(45),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_user ON bug_reports(user_id);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_status ON bug_reports(status);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_priority ON bug_reports(priority);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_assigned ON bug_reports(assigned_to_user_id);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_type ON bug_reports(type);
+      CREATE INDEX IF NOT EXISTS idx_bug_reports_created ON bug_reports(created_at);
+
+      -- ─── Bug Report Attachments ───
+      CREATE TABLE IF NOT EXISTS bug_report_attachments (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        bug_report_id UUID NOT NULL REFERENCES bug_reports(id) ON DELETE CASCADE,
+        uploaded_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        file_name VARCHAR(255) NOT NULL,
+        file_size INT NOT NULL,
+        file_type VARCHAR(100) NOT NULL,
+        file_url TEXT NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_bug_attachments_report ON bug_report_attachments(bug_report_id);
+      CREATE INDEX IF NOT EXISTS idx_bug_attachments_uploader ON bug_report_attachments(uploaded_by_user_id);
+
+      -- ─── Bug Report History / Audit Trail ───
+      CREATE TABLE IF NOT EXISTS bug_report_history (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        bug_report_id UUID NOT NULL REFERENCES bug_reports(id) ON DELETE CASCADE,
+        changed_by_user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        field_name VARCHAR(100) NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        change_type VARCHAR(20) NOT NULL DEFAULT 'update',
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_bug_history_report ON bug_report_history(bug_report_id);
+      CREATE INDEX IF NOT EXISTS idx_bug_history_user ON bug_report_history(changed_by_user_id);
+      CREATE INDEX IF NOT EXISTS idx_bug_history_created ON bug_report_history(created_at);
+    `,
+  },
 ];
 
 /**
