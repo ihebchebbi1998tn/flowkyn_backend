@@ -116,8 +116,8 @@ export class SessionDetailsService {
           gs.started_at,
           gs.ended_at,
           gs.session_deadline_at,
-          gs.created_at,
-          gs.updated_at,
+          e.created_at,
+          e.updated_at,
           COUNT(DISTINCT CASE WHEN p.id IS NOT NULL THEN p.id END) as total_participants,
           COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NULL THEN p.id END) as active_participants,
           COUNT(DISTINCT CASE WHEN p.id IS NOT NULL AND p.left_at IS NOT NULL THEN p.id END) as completed_participants,
@@ -134,7 +134,7 @@ export class SessionDetailsService {
         WHERE gs.id = $1
         GROUP BY gs.id, gs.event_id, e.title, gs.game_type_id, gt.name, gt.key, gs.status, 
                  gs.current_round, gs.total_rounds, gs.game_duration_minutes, gs.started_at, 
-                 gs.ended_at, gs.session_deadline_at, gs.created_at, gs.updated_at
+                 gs.ended_at, gs.session_deadline_at, e.created_at, e.updated_at
         `,
         [sessionId]
       );
