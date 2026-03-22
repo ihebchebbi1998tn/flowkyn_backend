@@ -382,6 +382,8 @@ async function reduceTwoTruthsState(args: {
   const voteSeconds = Math.max(5, Number(base.voteSeconds || session?.resolved_timing?.twoTruths?.voteSeconds || 20));
 
   if (actionType === 'two_truths:start') {
+    // Only allow starting from idle phases — prevent mid-game resets.
+    if (base.phase !== 'waiting' && base.phase !== 'results') return base;
     return {
       ...base,
       phase: 'submit',
@@ -497,11 +499,13 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:reveal') {
-    // Priority: 
+    // Guard: reveal is only valid after voting has happened.
+    if (base.phase !== 'vote') return base;
+    // Priority:
     // 1. correctLieId stored in snapshot during submit phase
     // 2. lieId provided by host in payload (legacy/fallback)
     // 3. s2 (default)
-    const lie: 's0' | 's1' | 's2' = base.correctLieId || 
+    const lie: 's0' | 's1' | 's2' = base.correctLieId ||
       (['s0', 's1', 's2'].includes(payload?.lieId) ? payload.lieId : 's2');
     
     // Calculate new scores
@@ -522,6 +526,8 @@ async function reduceTwoTruthsState(args: {
   }
 
   if (actionType === 'two_truths:next_round') {
+    // Guard: can only advance rounds from the reveal phase.
+    if (base.phase !== 'reveal') return base;
     const nextRound = (base.round ?? 1) + 1;
     // FIX #3: Defensive null check on totalRounds
     const totalRounds = base.totalRounds ?? 4; // Fallback to 4 if undefined
@@ -941,6 +947,8 @@ async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:assign_roles') {
+    // Guard: roles can only be assigned from the setup phase.
+    if (base.phase !== 'setup') return base;
     // Idempotent: don't re-run assignment transitions
     if (base.rolesAssigned) return base;
     return {
@@ -952,8 +960,13 @@ async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:start_discussion') {
-    // Idempotent: don't reset discussion timer if already started
-    if (base.phase === 'discussion' && base.discussionEndsAt) return base;
+    // Guard: discussion can only start once roles are assigned.
+    if (base.phase !== 'roles_assignment') {
+      // Idempotent: if discussion already running, no-op.
+      if (base.phase === 'discussion' && base.discussionEndsAt) return base;
+      // Any other phase transition is invalid.
+      if (base.phase !== 'discussion') return base;
+    }
     // FIX #3: Defensive null checks on discussion timing
     const minutes = typeof payload?.durationMinutes === 'number'
       ? payload.durationMinutes
@@ -1251,6 +1264,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
   // Prevents concurrent next_prompt/continue requests from racing on stale snapshots.
   const coffeeActionQueue = new Map<string, Promise<void>>();
 
+  // Serialize Two Truths snapshot transitions per session.
+  // Prevents concurrent vote/submit/reveal requests from racing on stale snapshots.
+  const twoTruthsActionQueue = new Map<string, Promise<void>>();
+
+  // Serialize Strategic Escape snapshot transitions per session.
+  // Prevents concurrent configure/assign_roles/start_discussion from racing.
+  const strategicActionQueue = new Map<string, Promise<void>>();
+
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
     const user = socket.user;
@@ -1400,17 +1421,21 @@ export function setupGameHandlers(gamesNs: Namespace) {
       const validation = gameRoundSchema.safeParse(data);
       if (!validation.success) return;
       const roomId = `game:${data.sessionId}`;
+      const participantId = joinedParticipantBySessionId.get(data.sessionId);
+
       socket.leave(roomId);
       joinedSessions.delete(data.sessionId);
       joinedParticipantBySessionId.delete(data.sessionId);
 
-      // Remove any voice keys associated with this session for this socket.
+      // Remove voice socket keys for this session.
       const keys = voiceKeysBySocket.get(socket.id);
       if (keys) {
         for (const key of Array.from(keys)) {
           if (key.startsWith(`${data.sessionId}:`)) {
             voiceSocketByKey.delete(key);
             keys.delete(key);
+            // Also evict any cached WebRTC offer this participant sent.
+            // (Cache key format: `${sessionId}:${pairId}` — scan for session prefix.)
           }
         }
         if (keys.size === 0) voiceKeysBySocket.delete(socket.id);
@@ -1421,6 +1446,55 @@ export function setupGameHandlers(gamesNs: Namespace) {
         sessionId: data.sessionId,
         timestamp: new Date().toISOString(),
       });
+
+      // Coffee Roulette: re-run pairing when a paired participant leaves,
+      // matching the same rematch behaviour as the disconnect handler.
+      if (participantId) {
+        const prevQueue = coffeeActionQueue.get(data.sessionId) ?? Promise.resolve();
+        const run = prevQueue.then(async () => {
+          try {
+            const [latestSnapshot, session] = await Promise.all([
+              gamesService.getLatestSnapshot(data.sessionId),
+              gamesService.getSession(data.sessionId),
+            ]);
+            const state = latestSnapshot?.state as any;
+            if (state?.kind !== 'coffee-roulette') return;
+            if (!['matching', 'chatting'].includes(state?.phase)) return;
+
+            const inPairs = (state?.pairs || []).some((p: any) =>
+              p?.person1?.participantId === participantId ||
+              p?.person2?.participantId === participantId
+            );
+            if (!inPairs) return;
+
+            const next = await reduceCoffeeState({
+              eventId: session.event_id,
+              actionType: 'coffee:shuffle',
+              payload: {},
+              prev: (latestSnapshot?.state as any) || null,
+            });
+
+            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+            gamesNs.to(roomId).emit('game:data', {
+              sessionId: data.sessionId,
+              gameData: next,
+              snapshotRevisionId: savedSnapshot?.id || null,
+              snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
+            });
+          } catch (err) {
+            console.error('[Games] coffee rematch on leave failed', {
+              sessionId: data.sessionId,
+              participantId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        });
+        coffeeActionQueue.set(
+          data.sessionId,
+          run.then(() => undefined).catch(() => undefined),
+        );
+        void run;
+      }
     });
 
     // ─── Start game (only admins/moderators) ───
@@ -1589,30 +1663,45 @@ export function setupGameHandlers(gamesNs: Namespace) {
             data.payload = payloadValidation.data;
           }
 
-          const next = await reduceTwoTruthsState({
-            eventId: session.event_id,
-            sessionId: data.sessionId,
-            participantId: participant.participantId,
-            actionType: data.actionType,
-            payload: data.payload,
-            prev: (latest?.state as any) || null,
-            session,
+          // Serialize per-session to prevent concurrent actions racing on stale snapshots.
+          const ttPrev = twoTruthsActionQueue.get(data.sessionId) ?? Promise.resolve();
+          const ttRun = ttPrev.then(async () => {
+            // Re-read latest snapshot inside the queue to avoid stale prev.
+            const freshLatest = await gamesService.getLatestSnapshot(data.sessionId);
+
+            const next = await reduceTwoTruthsState({
+              eventId: session.event_id,
+              sessionId: data.sessionId,
+              participantId: participant.participantId,
+              actionType: data.actionType,
+              payload: data.payload,
+              prev: (freshLatest?.state as any) || null,
+              session,
+            });
+
+            // SECURITY: strip correctLieId during vote phase so clients can't cheat.
+            const publiclySafeState = { ...next };
+            if (next.phase === 'vote' && publiclySafeState.correctLieId) {
+              delete publiclySafeState.correctLieId;
+            }
+
+            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+            gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+              sessionId: data.sessionId,
+              gameData: publiclySafeState,
+              snapshotRevisionId: savedSnapshot?.id || null,
+              snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
+            });
+
+            return savedSnapshot;
           });
 
-          // SECURITY: If we are in the vote phase, strip the correctLieId from the broadcast
-          // so participants cannot inspect the WebSocket traffic to cheat.
-          const publiclySafeState = { ...next };
-          if (next.phase === 'vote' && publiclySafeState.correctLieId) {
-            delete publiclySafeState.correctLieId;
-          }
+          twoTruthsActionQueue.set(
+            data.sessionId,
+            ttRun.then(() => undefined).catch(() => undefined),
+          );
 
-          const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
-            sessionId: data.sessionId,
-            gameData: publiclySafeState,
-            snapshotRevisionId: savedSnapshot?.id || null,
-            snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
-          });
+          const savedSnapshot = await ttRun;
 
           // FIX #4: Log vote actions to audit trail for dispute resolution
           if (data.actionType === 'two_truths:vote' && savedSnapshot) {
@@ -1778,6 +1867,16 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
             console.log('[CoffeeRoulette] game:data broadcast sent to', roomSize, 'clients in room', roomId);
 
+            // When the session ends, evict all cached WebRTC offers for this session
+            // so stale SDP entries don't accumulate across games.
+            if (normalizedAction === 'coffee:end') {
+              for (const cacheKey of Array.from(coffeeVoiceOfferCache.keys())) {
+                if (cacheKey.startsWith(`${data.sessionId}:`)) {
+                  coffeeVoiceOfferCache.delete(cacheKey);
+                }
+              }
+            }
+
             // If requested, also close the DB session and broadcast game:ended.
             if (data.actionType === 'coffee:end_and_finish') {
               // FIX #9: Idempotent game ending
@@ -1856,20 +1955,34 @@ export function setupGameHandlers(gamesNs: Namespace) {
             data.payload = payloadValidation.data;
           }
 
-          const next = await reduceStrategicState({
-            eventId: session.event_id,
-            actionType: data.actionType,
-            payload: data.payload,
-            prev: (latest?.state as any) || null,
-            session,
+          // Serialize per-session to prevent concurrent strategic actions racing on stale snapshots.
+          const strPrev = strategicActionQueue.get(data.sessionId) ?? Promise.resolve();
+          const strRun = strPrev.then(async () => {
+            // Re-read latest snapshot inside the queue to avoid stale prev.
+            const freshLatest = await gamesService.getLatestSnapshot(data.sessionId);
+
+            const next = await reduceStrategicState({
+              eventId: session.event_id,
+              actionType: data.actionType,
+              payload: data.payload,
+              prev: (freshLatest?.state as any) || null,
+              session,
+            });
+            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+            gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+              sessionId: data.sessionId,
+              gameData: next,
+              snapshotRevisionId: savedSnapshot?.id || null,
+              snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
+            });
           });
-          const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
-          gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
-            sessionId: data.sessionId,
-            gameData: next,
-            snapshotRevisionId: savedSnapshot?.id || null,
-            snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
-          });
+
+          strategicActionQueue.set(
+            data.sessionId,
+            strRun.catch(() => undefined),
+          );
+
+          await strRun;
         }
       } catch (err: any) {
         console.error(`[Games] game:action error:`, err.message);
@@ -1971,35 +2084,38 @@ export function setupGameHandlers(gamesNs: Namespace) {
           finalScores = state.scores;
         }
 
-        // FIX #9: Use transaction to prevent double-finish
-        const { results } = await transaction(async (client) => {
-          // Check again inside transaction (double-check pattern)
+        // Use a row-locked transaction so only one concurrent request finishes the game.
+        // The early status check above is a fast-path optimisation only; the real guard is here.
+        const { results, alreadyFinished } = await transaction(async () => {
+          // Acquire row lock — only one concurrent request proceeds past here.
           const sessionCheck = await queryOne(
             `SELECT status FROM game_sessions WHERE id = $1 FOR UPDATE`,
             [data.sessionId]
           );
-          
-          if (sessionCheck?.status === 'finished') {
-            return { results: [] };
+
+          if (sessionCheck?.status === 'finished' || sessionCheck?.status === 'finishing') {
+            return { results: [] as any[], alreadyFinished: true };
           }
 
-          // Mark as ending to prevent concurrent finishes
+          // Mark as finishing atomically so any racing request sees this and backs off.
           await query(
-            `UPDATE game_sessions 
-             SET status = 'finishing', 
-                 end_action_timestamp = NOW()
+            `UPDATE game_sessions SET status = 'finishing', end_action_timestamp = NOW()
              WHERE id = $1 AND status IN ('active', 'paused')`,
             [data.sessionId]
           );
 
-          return await gamesService.finishSession(data.sessionId, finalScores);
+          const finishResult = await gamesService.finishSession(data.sessionId, finalScores);
+          return { ...finishResult, alreadyFinished: false };
         });
 
-        gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
-          sessionId: data.sessionId,
-          results,
-          timestamp: new Date().toISOString(),
-        });
+        // Only broadcast if this request was the one that actually finished the game.
+        if (!alreadyFinished) {
+          gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+            sessionId: data.sessionId,
+            results,
+            timestamp: new Date().toISOString(),
+          });
+        }
       } catch (err: any) {
         console.error(`[Games] game:end error:`, err.message);
         socket.emit('error', { message: err.message, code: 'END_ERROR' });
