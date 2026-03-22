@@ -189,7 +189,7 @@ export class SessionDetailsService {
           em.message,
           em.message_type,
           em.created_at,
-          EXTRACT(EPOCH FROM (em.created_at - $3::timestamp)) / 60 as timestamp_minutes
+          EXTRACT(EPOCH FROM (em.created_at - $2::timestamp)) / 60 as timestamp_minutes
         FROM event_messages em
         JOIN participants p ON em.participant_id = p.id
         LEFT JOIN organization_members om ON p.organization_member_id = om.id
@@ -197,7 +197,7 @@ export class SessionDetailsService {
         WHERE em.event_id = $1
         ORDER BY em.created_at ASC
         `,
-        [sessionRow.event_id, sessionId, sessionRow.started_at]
+        [sessionRow.event_id, sessionRow.started_at]
       );
       console.log(`[SessionDetailsService] Messages fetched: ${messagesRows.length}`);
 
