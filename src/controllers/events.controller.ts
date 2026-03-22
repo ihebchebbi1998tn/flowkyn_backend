@@ -623,6 +623,20 @@ export class EventsController {
       const event = await eventsService.getById(req.params.eventId);
       const member = await requireOrgMember(event.organization_id, req.user!.userId);
       requireAdminRole(member, 'invite participants');
+      
+      // Get the game type key if there's an active game session for this event
+      let gameTypeKey: string | undefined;
+      if (!req.body.game_id) {
+        const gameSession = await queryOne<{ key: string }>(
+          `SELECT gt.key FROM game_sessions gs
+           JOIN game_types gt ON gs.game_type_id = gt.id
+           WHERE gs.event_id = $1 AND gs.status != 'finished'
+           ORDER BY gs.created_at DESC LIMIT 1`,
+          [req.params.eventId]
+        );
+        gameTypeKey = gameSession?.key;
+      }
+      
       const result = await invitationsService.inviteParticipant(
         req.params.eventId,
         member.id,
@@ -630,7 +644,7 @@ export class EventsController {
         event.title,
         event.max_participants,
         req.body.lang,
-        req.body.game_id,
+        req.body.game_id || gameTypeKey,
         event.start_time ? String(event.start_time) : undefined,
         event.end_time ? String(event.end_time) : undefined
       );
