@@ -177,6 +177,10 @@ export function getLogs(limit = 1000, filter?: { method?: string; status?: strin
   return result.slice(-limit).reverse(); // Most recent first
 }
 
+export function getAllLogs(): RequestLog[] {
+  return [...logs];
+}
+
 export function getMetrics(): SystemMetrics {
   const topEndpoints = [...endpointStats.entries()]
     .map(([path, s]) => ({ path, count: s.count, avgMs: Math.round(s.totalMs / s.count) }))

@@ -16,6 +16,7 @@ import { bugReportsRoutes } from './bugReports.routes';
 import { activityFeedbacksRoutes } from './activityFeedbacks.routes';
 import { earlyAccessRoutes } from './earlyAccess.routes';
 import coffeeRouletteConfigRoutes from './coffeeRouletteConfig.routes';
+import { logsRouter } from './logs';
 
 const router = Router();
 
@@ -37,5 +38,6 @@ router.use('/activity-feedbacks', activityFeedbacksRoutes);
 router.use('/smtp-test', smtpTestRoutes);
 router.use('/early-access', earlyAccessRoutes);
 router.use('/coffee-roulette', coffeeRouletteConfigRoutes);
+router.use('/logs', logsRouter);
 
 export { router as routes };
