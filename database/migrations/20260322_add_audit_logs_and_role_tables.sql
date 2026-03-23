@@ -1,6 +1,10 @@
 -- Migration: Add audit_logs and strategic_escape_roles tables
 -- Date: March 22, 2026
 -- Purpose: Support audit trail for votes and secure role assignment
+-- Database: PostgreSQL (Neon)
+
+-- Ensure we're using the public schema
+SET search_path TO public;
 
 -- =========================================================================
 -- Table 1: audit_logs - Track all game actions for investigation
@@ -27,15 +31,15 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   
   -- Timestamps
   created_at timestamp DEFAULT NOW(),
-  updated_at timestamp DEFAULT NOW(),
-  
-  -- Indexes for common queries
-  INDEX idx_audit_game_session (game_session_id),
-  INDEX idx_audit_participant (participant_id),
-  INDEX idx_audit_action (action),
-  INDEX idx_audit_created (created_at),
-  INDEX idx_audit_status (status)
+  updated_at timestamp DEFAULT NOW()
 );
+
+-- PostgreSQL indexes (not MySQL INDEX syntax)
+CREATE INDEX IF NOT EXISTS idx_audit_game_session ON audit_logs(game_session_id);
+CREATE INDEX IF NOT EXISTS idx_audit_participant ON audit_logs(participant_id);
+CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_logs(action);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_status ON audit_logs(status);
 
 -- =========================================================================
 -- Table 2: strategic_escape_roles - Secure role assignments
@@ -54,20 +58,24 @@ CREATE TABLE IF NOT EXISTS strategic_escape_roles (
   revealed_at timestamp,
   
   -- Ensure one participant has only one role per session
-  UNIQUE(game_session_id, participant_id),
-  
-  -- Foreign key constraint with participant table
-  CONSTRAINT fk_strategic_roles_participant
-    FOREIGN KEY (game_session_id, participant_id)
-    REFERENCES game_participants(game_session_id, participant_id)
-    ON DELETE CASCADE,
-  
-  -- Indexes
-  INDEX idx_strategic_game_session (game_session_id),
-  INDEX idx_strategic_participant (participant_id),
-  INDEX idx_strategic_role (role_name),
-  INDEX idx_strategic_assigned (assigned_at)
+  UNIQUE(game_session_id, participant_id)
 );
+
+-- PostgreSQL indexes for strategic_escape_roles
+CREATE INDEX IF NOT EXISTS idx_strategic_game_session ON strategic_escape_roles(game_session_id);
+CREATE INDEX IF NOT EXISTS idx_strategic_participant ON strategic_escape_roles(participant_id);
+CREATE INDEX IF NOT EXISTS idx_strategic_role ON strategic_escape_roles(role_name);
+CREATE INDEX IF NOT EXISTS idx_strategic_assigned ON strategic_escape_roles(assigned_at DESC);
+
+-- =========================================================================
+-- Composite indexes for common query patterns
+-- =========================================================================
+
+CREATE INDEX IF NOT EXISTS idx_audit_game_action_time 
+  ON audit_logs(game_session_id, action, created_at DESC);
+
+CREATE INDEX IF NOT EXISTS idx_audit_game_status 
+  ON audit_logs(game_session_id, status, created_at DESC);
 
 -- =========================================================================
 -- Create function: update_audit_logs_timestamp
@@ -90,17 +98,6 @@ CREATE TRIGGER audit_logs_update_timestamp
   BEFORE UPDATE ON audit_logs
   FOR EACH ROW
   EXECUTE FUNCTION update_audit_logs_timestamp();
-
--- =========================================================================
--- Indexes for performance
--- =========================================================================
-
--- Additional composite indexes for common query patterns
-CREATE INDEX IF NOT EXISTS idx_audit_game_action_time 
-  ON audit_logs(game_session_id, action, created_at DESC);
-
-CREATE INDEX IF NOT EXISTS idx_audit_game_status 
-  ON audit_logs(game_session_id, status, created_at DESC);
 
 -- =========================================================================
 -- Comments for documentation
