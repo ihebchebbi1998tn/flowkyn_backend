@@ -2364,16 +2364,13 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const initiatorKey = `${validation.data.sessionId}:${initiatorParticipantId}`;
-        const initiatorSocketId = voiceSocketByKey.get(initiatorKey);
-
         console.log('[CoffeeVoice] Voice call response received', {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
           responderParticipantId: responder.participantId,
           initiatorParticipantId,
           accepted: validation.data.accepted,
-          initiatorConnected: !!initiatorSocketId,
+          roomId: `game:${validation.data.sessionId}`,
         });
 
         if (validation.data.accepted) {
@@ -2385,17 +2382,18 @@ export function setupGameHandlers(gamesNs: Namespace) {
             pairId: validation.data.pairId,
           });
 
-          if (initiatorSocketId) {
-            gamesNs.to(initiatorSocketId).emit('coffee:voice_call_accepted', {
-              sessionId: validation.data.sessionId,
-              pairId: validation.data.pairId,
-            });
+          // Notify initiator via room broadcast + toParticipantId filtering
+          gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_accepted', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          });
 
-            console.log('[CoffeeVoice] Voice call accepted - both modals will close', {
-              sessionId: validation.data.sessionId,
-              pairId: validation.data.pairId,
-            });
-          }
+          console.log('[CoffeeVoice] Voice call accepted - initiator notified via room broadcast', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          });
         } else {
           const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${responder.participantId}`;
           pendingVoiceCallRequests.delete(pendingKey);
@@ -2405,17 +2403,18 @@ export function setupGameHandlers(gamesNs: Namespace) {
             pairId: validation.data.pairId,
           });
 
-          if (initiatorSocketId) {
-            gamesNs.to(initiatorSocketId).emit('coffee:voice_call_declined', {
-              sessionId: validation.data.sessionId,
-              pairId: validation.data.pairId,
-            });
+          // Notify initiator via room broadcast + toParticipantId filtering
+          gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_declined', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          });
 
-            console.log('[CoffeeVoice] Voice call declined', {
-              sessionId: validation.data.sessionId,
-              pairId: validation.data.pairId,
-            });
-          }
+          console.log('[CoffeeVoice] Voice call declined', {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          });
         }
 
         ack?.({ ok: true });
