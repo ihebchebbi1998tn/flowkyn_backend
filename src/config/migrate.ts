@@ -1012,6 +1012,9 @@ const migrations: { version: number; name: string; sql: string }[] = [
 export async function runMigrations(): Promise<void> {
   const client = await pool.connect();
   try {
+    // Ensure we're using the public schema (required for Neon PostgreSQL)
+    await client.query('SET search_path TO public');
+
     // Create tracking table
     await client.query(`
       CREATE TABLE IF NOT EXISTS _migrations (
