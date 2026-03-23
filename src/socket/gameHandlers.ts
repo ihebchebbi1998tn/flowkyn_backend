@@ -1267,6 +1267,25 @@ export function setupGameHandlers(gamesNs: Namespace) {
   // key: `${sessionId}:${pairId}` -> { sdp, fromParticipantId, createdAt }
   const coffeeVoiceOfferCache = new Map<string, { sdp: string; fromParticipantId: string; createdAt: number }>();
   const COFFEE_VOICE_OFFER_TTL_MS = 35 * 60 * 1000; // ~chat duration; prevent cache buildup
+  // Pending modal-based call requests for reconnect delivery.
+  // key: `${sessionId}:${pairId}:${toParticipantId}` -> modal payload + createdAt
+  const pendingVoiceCallRequests = new Map<
+    string,
+    {
+      modal: {
+        type: 'receiver';
+        sessionId: string;
+        pairId: string;
+        initiatorParticipantId: string;
+        initiatorName?: string;
+        initiatorAvatar?: string;
+        message: string;
+        toParticipantId: string;
+      };
+      createdAt: number;
+    }
+  >();
+  const COFFEE_VOICE_CALL_REQUEST_TTL_MS = 45 * 1000;
 
   // Serialize Coffee Roulette snapshot transitions per session.
   // Prevents concurrent next_prompt/continue requests from racing on stale snapshots.
@@ -1287,6 +1306,11 @@ export function setupGameHandlers(gamesNs: Namespace) {
     for (const [key, entry] of coffeeVoiceOfferCache) {
       if (now - entry.createdAt > COFFEE_VOICE_OFFER_TTL_MS) {
         coffeeVoiceOfferCache.delete(key);
+      }
+    }
+    for (const [key, entry] of pendingVoiceCallRequests) {
+      if (now - entry.createdAt > COFFEE_VOICE_CALL_REQUEST_TTL_MS) {
+        pendingVoiceCallRequests.delete(key);
       }
     }
   }, 10 * 60 * 1000);
@@ -1377,6 +1401,24 @@ export function setupGameHandlers(gamesNs: Namespace) {
         const existing = voiceKeysBySocket.get(socket.id) ?? new Set<string>();
         existing.add(voiceKey);
         voiceKeysBySocket.set(socket.id, existing);
+
+        // Re-deliver pending call requests targeted to this participant.
+        // This covers reconnect timing where the original emit was missed.
+        for (const [pendingKey, pending] of pendingVoiceCallRequests) {
+          if (
+            pending.modal.sessionId === data.sessionId &&
+            pending.modal.toParticipantId === participant.participantId &&
+            Date.now() - pending.createdAt <= COFFEE_VOICE_CALL_REQUEST_TTL_MS
+          ) {
+            gamesNs.to(`game:${data.sessionId}`).emit('coffee:voice_call_modal', pending.modal);
+            console.log('[CoffeeVoice] Re-delivered pending voice call modal on join', {
+              sessionId: data.sessionId,
+              pairId: pending.modal.pairId,
+              toParticipantId: participant.participantId,
+              pendingKey,
+            });
+          }
+        }
 
         // Notify others
         socket.to(roomId).emit('game:player_joined', {
@@ -2229,7 +2271,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
           message: 'Ready to start a voice call?',
         });
 
-        // Emit request modal to partner
+        // Emit request modal to partner — always broadcast to game room with toParticipantId
+        // so delivery works even after reconnects (voiceSocketByKey can be stale). Client filters.
         const receiverModal = {
           type: 'receiver' as const,
           sessionId: validation.data.sessionId,
@@ -2238,29 +2281,22 @@ export function setupGameHandlers(gamesNs: Namespace) {
           initiatorName: initiatorSide === 'person1' ? pair.person1?.name : pair.person2?.name,
           initiatorAvatar: initiatorSide === 'person1' ? pair.person1?.avatar : pair.person2?.avatar,
           message: 'wants to start a voice call with you',
+          toParticipantId: partnerParticipantId, // Client filters: only partner shows modal
         };
+        const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${partnerParticipantId}`;
+        pendingVoiceCallRequests.set(pendingKey, {
+          modal: receiverModal,
+          createdAt: Date.now(),
+        });
 
-        if (partnerSocketId) {
-          // Direct delivery — partner's socket is registered
-          gamesNs.to(partnerSocketId).emit('coffee:voice_call_modal', receiverModal);
-          console.log('[CoffeeVoice] Voice call modals sent to both participants', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-          });
-        } else {
-          // Fallback: partner not in voiceSocketByKey (reconnect timing / late join).
-          // Broadcast to the whole game room with toParticipantId so the client
-          // can filter — only the intended partner will open their modal.
-          gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_modal', {
-            ...receiverModal,
-            toParticipantId: partnerParticipantId,
-          });
-          console.log('[CoffeeVoice] Partner not directly connected, broadcast fallback used', {
-            sessionId: validation.data.sessionId,
-            pairId: validation.data.pairId,
-            partnerParticipantId,
-          });
-        }
+        const roomId = `game:${validation.data.sessionId}`;
+        gamesNs.to(roomId).emit('coffee:voice_call_modal', receiverModal);
+        console.log('[CoffeeVoice] Voice call modals sent', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          partnerParticipantId,
+          roomId,
+        });
 
         ack?.({ ok: true, partnerConnected: !!partnerSocketId });
       } catch (err) {
@@ -2341,6 +2377,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         });
 
         if (validation.data.accepted) {
+          const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${responder.participantId}`;
+          pendingVoiceCallRequests.delete(pendingKey);
           // Partner accepted - close modals on both sides and proceed with voice setup
           socket.emit('coffee:voice_call_accepted', {
             sessionId: validation.data.sessionId,
@@ -2359,6 +2397,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
             });
           }
         } else {
+          const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${responder.participantId}`;
+          pendingVoiceCallRequests.delete(pendingKey);
           // Partner declined - notify initiator
           socket.emit('coffee:voice_call_declined', {
             sessionId: validation.data.sessionId,
@@ -2419,19 +2459,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
           cancellerSide === 'person1' ? pair.person2?.participantId : pair.person1?.participantId;
 
         if (partnerParticipantId) {
-          const partnerKey = `${validation.data.sessionId}:${partnerParticipantId}`;
-          const partnerSocketId = voiceSocketByKey.get(partnerKey);
-          const cancelPayload = { sessionId: validation.data.sessionId, pairId: validation.data.pairId };
-
-          if (partnerSocketId) {
-            gamesNs.to(partnerSocketId).emit('coffee:voice_call_cancelled', cancelPayload);
-          } else {
-            // Fallback broadcast — client filters by participantId
-            gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_cancelled', {
-              ...cancelPayload,
-              toParticipantId: partnerParticipantId,
-            });
-          }
+          const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${partnerParticipantId}`;
+          pendingVoiceCallRequests.delete(pendingKey);
+          const cancelPayload = {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: partnerParticipantId, // Client filters: only partner closes modal
+          };
+          gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_cancelled', cancelPayload);
         }
 
         ack?.({ ok: true });
