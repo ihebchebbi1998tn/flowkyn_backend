@@ -1612,8 +1612,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        const activeRound = await gamesService.getActiveRound(data.sessionId);
-        const roundId = data.roundId || activeRound?.id;
+        const roundId = data.roundId || (await gamesService.getActiveRound(data.sessionId))?.id;
         if (!roundId) {
           console.warn('[GameAction] No active round found', { sessionId: data.sessionId });
           socket.emit('error', { message: 'No active round for this session', code: 'ROUND_NOT_ACTIVE' });
@@ -1795,72 +1794,25 @@ export function setupGameHandlers(gamesNs: Namespace) {
               queueLength: coffeeActionQueue.size,
             });
 
-            // FIX #1: Use database-level locking with transaction to prevent concurrent mutations
-            const { savedSnapshot, next } = await transaction(async (_client) => {
-              // Acquire exclusive lock on this session's snapshot
-              const lockResult = await queryOne(
-                `SELECT id FROM game_state_snapshots 
-                 WHERE game_session_id = $1 
-                 ORDER BY created_at DESC 
-                 LIMIT 1 
-                 FOR UPDATE NOWAIT`,
-                [data.sessionId]
-              );
+            // coffeeActionQueue serializes all actions per session within this process.
+            // Re-read the latest snapshot inside the queue slot to avoid stale prev.
+            const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
 
-              // If no snapshot exists, we still proceed (first action)
-              if (!lockResult && !['coffee:shuffle'].includes(normalizedAction)) {
-                // For non-shuffle actions on missing snapshot, fetch latest
-                const latest = await gamesService.getLatestSnapshot(data.sessionId);
-                if (latest) {
-                  await query(
-                    `SELECT id FROM game_state_snapshots 
-                     WHERE id = $1 FOR UPDATE`,
-                    [latest.id]
-                  );
-                }
-              }
-
-              // Re-read latest snapshot inside the lock to avoid stale prev
-              const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
-              
-              console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
-                sessionId: data.sessionId,
-                currentPhase: (latestSnapshot?.state as any)?.phase,
-                hasSnapshot: !!latestSnapshot,
-              });
-
-              const next = await reduceCoffeeState({
-                eventId: session.event_id,
-                actionType: normalizedAction,
-                payload: data.payload,
-                prev: (latestSnapshot?.state as any) || null,
-                session,
-              });
-
-              // Atomic save: within same transaction, both save and update sequence number
-              const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
-              
-              // FIX #1: Increment sequence number atomically within transaction
-              if (savedSnapshot?.id) {
-                await query(
-                  `UPDATE game_state_snapshots 
-                   SET action_sequence_number = action_sequence_number + 1,
-                       revision_number = COALESCE(revision_number, 0) + 1,
-                       revision_timestamp = NOW()
-                   WHERE id = $1`,
-                  [savedSnapshot.id]
-                );
-              }
-
-              return { savedSnapshot, next };
-            }).catch((err: any) => {
-              // Handle lock timeout
-              if (err.code === 'NOWAIT') {
-                console.warn('[CoffeeRoulette] Another action is processing, queuing...', { sessionId: data.sessionId });
-                throw new Error('Game state is being updated, please try again');
-              }
-              throw err;
+            console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
+              sessionId: data.sessionId,
+              currentPhase: (latestSnapshot?.state as any)?.phase,
+              hasSnapshot: !!latestSnapshot,
             });
+
+            const next = await reduceCoffeeState({
+              eventId: session.event_id,
+              actionType: normalizedAction,
+              payload: data.payload,
+              prev: (latestSnapshot?.state as any) || null,
+              session,
+            });
+
+            const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
 
             const roomId = `game:${data.sessionId}`;
             const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
