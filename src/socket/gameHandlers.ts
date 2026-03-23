@@ -149,9 +149,8 @@ const coffeeVoiceOfferSchema = z.object({
   sdp: z
     .string()
     .min(50, 'SDP too short - invalid format')
-    .max(200000, 'SDP too large'),
-    // FIX #4: Validate SDP structure
-    //.refine(validateSDP, { message: 'Invalid SDP format' })
+    .max(200000, 'SDP too large')
+    .refine(validateSDP, { message: 'Invalid SDP format' }),
 });
 
 const coffeeVoiceAnswerSchema = z.object({
@@ -160,9 +159,8 @@ const coffeeVoiceAnswerSchema = z.object({
   sdp: z
     .string()
     .min(50, 'SDP too short - invalid format')
-    .max(200000, 'SDP too large'),
-    // FIX #4: Validate SDP structure
-    //.refine(validateSDP, { message: 'Invalid SDP format' })
+    .max(200000, 'SDP too large')
+    .refine(validateSDP, { message: 'Invalid SDP format' }),
 });
 
 const coffeeVoiceIceCandidateSchema = z.object({
@@ -369,7 +367,7 @@ async function reduceTwoTruthsState(args: {
   prev: TwoTruthsState | null;
   session?: any;
 }): Promise<TwoTruthsState> {
-  const { eventId, sessionId, participantId, actionType, payload, prev, session } = args;
+  const { eventId, participantId, actionType, payload, prev, session } = args;
 
   const base: TwoTruthsState = prev || {
     kind: 'two-truths',
@@ -940,6 +938,9 @@ async function reduceStrategicState(args: {
   };
 
   if (actionType === 'strategic:configure') {
+    // Guard: configuration is only valid during the setup phase.
+    // Allowing it later would reset the game phase/status mid-play.
+    if (base.phase !== 'setup') return base;
     return {
       ...base,
       industryKey: payload?.industryKey ?? base.industryKey,
@@ -1212,7 +1213,7 @@ async function enrichCoffeeSnapshotForLateJoiner(
   snapshot: any,
   sessionId: string,
   participantId: string,
-  eventId: string
+  _eventId: string
 ): Promise<any> {
   if (!snapshot || snapshot.kind !== 'coffee-roulette') {
     return snapshot;
@@ -1278,6 +1279,17 @@ export function setupGameHandlers(gamesNs: Namespace) {
   // Serialize Strategic Escape snapshot transitions per session.
   // Prevents concurrent configure/assign_roles/start_discussion from racing.
   const strategicActionQueue = new Map<string, Promise<void>>();
+
+  // Proactively evict expired WebRTC offer cache entries every 10 minutes.
+  // On-read TTL checks only cover retrieved entries; this prevents unbounded growth.
+  setInterval(() => {
+    const now = Date.now();
+    for (const [key, entry] of coffeeVoiceOfferCache) {
+      if (now - entry.createdAt > COFFEE_VOICE_OFFER_TTL_MS) {
+        coffeeVoiceOfferCache.delete(key);
+      }
+    }
+  }, 10 * 60 * 1000);
 
   gamesNs.on('connection', (rawSocket) => {
     const socket = rawSocket as unknown as AuthenticatedSocket;
@@ -1623,9 +1635,8 @@ export function setupGameHandlers(gamesNs: Namespace) {
         });
 
         // Shared game snapshots for supported games — parallelise DB reads
-        const [gameKey, latest, session] = await Promise.all([
+        const [gameKey, session] = await Promise.all([
           getSessionGameKey(data.sessionId),
-          gamesService.getLatestSnapshot(data.sessionId),
           gamesService.getSession(data.sessionId),
         ]);
 
@@ -1785,7 +1796,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             });
 
             // FIX #1: Use database-level locking with transaction to prevent concurrent mutations
-            const { savedSnapshot, next } = await transaction(async (client) => {
+            const { savedSnapshot, next } = await transaction(async (_client) => {
               // Acquire exclusive lock on this session's snapshot
               const lockResult = await queryOne(
                 `SELECT id FROM game_state_snapshots 
@@ -2894,7 +2905,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
     });
 
     // ─── Disconnect cleanup ───
-    socket.on('disconnect', async (reason) => {
+    socket.on('disconnect', async (_reason) => {
 
       // Cleanup targeted voice signaling mappings.
       const keys = voiceKeysBySocket.get(socket.id);
