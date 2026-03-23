@@ -285,12 +285,14 @@ export class EventInvitationsService {
       [uuid(), eventId, email, invitedByMemberId, hashedToken]
     );
 
+    // Always include ?game= so recipients land on the intended game (default '1' if none specified)
+    const gameParam = gameId && String(gameId).trim() ? String(gameId).trim() : '1';
     await sendEmail({
       to: email,
       type: 'event_invitation',
       data: { 
         eventTitle, 
-        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameId ? `&game=${gameId}` : ''}`,
+        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}&game=${gameParam}`,
         startTime: startTime ? String(startTime) : undefined,
         endTime: endTime ? String(endTime) : undefined
       },

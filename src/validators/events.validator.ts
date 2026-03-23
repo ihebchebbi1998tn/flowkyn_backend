@@ -23,6 +23,8 @@ export const createEventSchema = z.object({
   invites: z.array(z.string().trim().email().max(255)).optional(),
   // Optional: target recipients by department (org-scoped UUIDs)
   invite_department_ids: z.array(z.string().uuid()).optional(),
+  // Optional: game config ID (e.g. '1','2') or game key (e.g. 'coffee-roulette') for invitation links ?game=
+  game_id: z.string().trim().min(1).max(50).optional(),
 }).refine((data) => {
   if (!data.start_time || !data.end_time) return true;
   return new Date(data.end_time).getTime() > new Date(data.start_time).getTime();
@@ -63,7 +65,8 @@ export const updateEventSchema = z.object({
 export const inviteParticipantSchema = z.object({
   email: z.string().trim().email().max(255),
   lang: z.string().max(10).optional(),
-  game_id: z.string().uuid().optional(),
+  // Game config ID ('1','2',...) or game key ('coffee-roulette') for invitation link ?game=
+  game_id: z.string().trim().min(1).max(50).optional(),
 });
 
 export const sendMessageSchema = z.object({
