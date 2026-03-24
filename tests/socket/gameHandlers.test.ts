@@ -69,11 +69,11 @@ describe('Socket Game Handlers — Security', () => {
       // Mock: user is a participant
       mockedQueryOne.mockResolvedValueOnce({ id: 'participant-1' });
       // Mock: getSession
-      mockedQueryOne.mockResolvedValueOnce({ id: 'gs-1', status: 'active', current_round: 0 });
+      mockedQueryOne.mockResolvedValueOnce({ id: '11111111-1111-1111-1111-111111111111', status: 'active', current_round: 0 });
 
       const joinHandler = getHandler(socket, 'game:join');
       const ack = jest.fn();
-      await joinHandler({ sessionId: 'gs-1' }, ack);
+      await joinHandler({ sessionId: '11111111-1111-1111-1111-111111111111' }, ack);
 
       expect(ack).toHaveBeenCalledWith(expect.objectContaining({
         ok: true,
@@ -91,7 +91,7 @@ describe('Socket Game Handlers — Security', () => {
 
       const joinHandler = getHandler(socket, 'game:join');
       const ack = jest.fn();
-      await joinHandler({ sessionId: 'gs-1' }, ack);
+      await joinHandler({ sessionId: '11111111-1111-1111-1111-111111111111' }, ack);
 
       expect(ack).toHaveBeenCalledWith(expect.objectContaining({ ok: false }));
       expect(socket.join).not.toHaveBeenCalled();
@@ -114,7 +114,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ name: 'user' });
 
       const startHandler = getHandler(socket, 'game:start');
-      await startHandler({ sessionId: 'gs-1' });
+      await startHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
@@ -132,15 +132,15 @@ describe('Socket Game Handlers — Security', () => {
       mockedTransaction.mockImplementation(async (fn) => {
         const mockClient = {
           query: jest.fn()
-            .mockResolvedValueOnce({ rows: [{ id: 'gs-1', current_round: 0, status: 'active' }] })
+            .mockResolvedValueOnce({ rows: [{ id: '11111111-1111-1111-1111-111111111111', current_round: 0, status: 'active' }] })
             .mockResolvedValueOnce({ rows: [] })
-            .mockResolvedValueOnce({ rows: [{ id: 'round-1', round_number: 1, status: 'active' }] }),
+            .mockResolvedValueOnce({ rows: [{ id: '22222222-2222-2222-2222-222222222222', round_number: 1, status: 'active' }] }),
         };
         return fn(mockClient as any);
       });
 
       const startHandler = getHandler(socket, 'game:start');
-      await startHandler({ sessionId: 'gs-1' });
+      await startHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       // Should NOT emit error
       const errors = socket._emitted.filter((e: any) => e.event === 'error');
@@ -155,15 +155,15 @@ describe('Socket Game Handlers — Security', () => {
       mockedTransaction.mockImplementation(async (fn) => {
         const mockClient = {
           query: jest.fn()
-            .mockResolvedValueOnce({ rows: [{ id: 'gs-1', current_round: 0, status: 'active' }] })
+            .mockResolvedValueOnce({ rows: [{ id: '11111111-1111-1111-1111-111111111111', current_round: 0, status: 'active' }] })
             .mockResolvedValueOnce({ rows: [] })
-            .mockResolvedValueOnce({ rows: [{ id: 'round-1', round_number: 1 }] }),
+            .mockResolvedValueOnce({ rows: [{ id: '22222222-2222-2222-2222-222222222222', round_number: 1 }] }),
         };
         return fn(mockClient as any);
       });
 
       const startHandler = getHandler(socket, 'game:start');
-      await startHandler({ sessionId: 'gs-1' });
+      await startHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       const errors = socket._emitted.filter((e: any) => e.event === 'error');
       expect(errors).toHaveLength(0);
@@ -182,7 +182,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ name: 'user' });
 
       const endHandler = getHandler(socket, 'game:end');
-      await endHandler({ sessionId: 'gs-1' });
+      await endHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
@@ -200,7 +200,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedTransaction.mockImplementation(async (fn) => {
         const mockClient = {
           query: jest.fn()
-            .mockResolvedValueOnce({ rows: [{ id: 'gs-1', status: 'active' }] })
+            .mockResolvedValueOnce({ rows: [{ id: '11111111-1111-1111-1111-111111111111', status: 'active' }] })
             .mockResolvedValueOnce({ rows: [] })
             .mockResolvedValueOnce({ rows: [] })
             .mockResolvedValueOnce({ rows: [] }), // no actions
@@ -209,7 +209,7 @@ describe('Socket Game Handlers — Security', () => {
       });
 
       const endHandler = getHandler(socket, 'game:end');
-      await endHandler({ sessionId: 'gs-1' });
+      await endHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       const errors = socket._emitted.filter((e: any) => e.event === 'error');
       expect(errors).toHaveLength(0);
@@ -227,7 +227,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ name: 'user' });
 
       const roundHandler = getHandler(socket, 'game:round_start');
-      await roundHandler({ sessionId: 'gs-1', roundNumber: 2 });
+      await roundHandler({ sessionId: '11111111-1111-1111-1111-111111111111', roundNumber: 2 });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
@@ -246,7 +246,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ name: 'user' });
 
       const roundEndHandler = getHandler(socket, 'game:round_end');
-      await roundEndHandler({ sessionId: 'gs-1', roundId: 'round-1' });
+      await roundEndHandler({ sessionId: '11111111-1111-1111-1111-111111111111', roundId: '22222222-2222-2222-2222-222222222222' });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
@@ -260,15 +260,15 @@ describe('Socket Game Handlers — Security', () => {
       // Mock: admin role
       mockedQueryOne.mockResolvedValueOnce({ name: 'admin' });
       // Mock: DB update
-      mockedQueryOne.mockResolvedValueOnce({ id: 'round-1' });
+      mockedQueryOne.mockResolvedValueOnce({ id: '22222222-2222-2222-2222-222222222222' });
 
       const roundEndHandler = getHandler(socket, 'game:round_end');
-      await roundEndHandler({ sessionId: 'gs-1', roundId: 'round-1' });
+      await roundEndHandler({ sessionId: '11111111-1111-1111-1111-111111111111', roundId: '22222222-2222-2222-2222-222222222222' });
 
       // Verify DB was called to update the round
       expect(mockedQueryOne).toHaveBeenCalledWith(
         expect.stringContaining('UPDATE game_rounds'),
-        expect.arrayContaining(['round-1', 'gs-1'])
+        expect.arrayContaining(['22222222-2222-2222-2222-222222222222', '11111111-1111-1111-1111-111111111111'])
       );
     });
   });
@@ -285,9 +285,9 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ id: 'real-participant-for-user1' });
 
       // Mock: getSession
-      mockedQueryOne.mockResolvedValueOnce({ id: 'gs-1', status: 'active', event_id: 'event-1' });
+      mockedQueryOne.mockResolvedValueOnce({ id: '11111111-1111-1111-1111-111111111111', status: 'active', event_id: 'event-1' });
       // Mock: round check
-      mockedQueryOne.mockResolvedValueOnce({ id: 'round-1', status: 'active' });
+      mockedQueryOne.mockResolvedValueOnce({ id: '22222222-2222-2222-2222-222222222222', status: 'active' });
       // Mock: participant validation in submitAction
       mockedQueryOne.mockResolvedValueOnce({ id: 'real-participant-for-user1' });
       // Mock: INSERT action
@@ -298,8 +298,8 @@ describe('Socket Game Handlers — Security', () => {
       const actionHandler = getHandler(socket, 'game:action');
       // Client sends NO participantId — server resolves it
       await actionHandler({
-        sessionId: 'gs-1',
-        roundId: 'round-1',
+        sessionId: '11111111-1111-1111-1111-111111111111',
+        roundId: '22222222-2222-2222-2222-222222222222',
         actionType: 'answer',
         payload: { answer: 42 },
       });
@@ -317,8 +317,8 @@ describe('Socket Game Handlers — Security', () => {
 
       const actionHandler = getHandler(socket, 'game:action');
       await actionHandler({
-        sessionId: 'gs-1',
-        roundId: 'round-1',
+        sessionId: '11111111-1111-1111-1111-111111111111',
+        roundId: '22222222-2222-2222-2222-222222222222',
         actionType: 'answer',
         payload: {},
       });
@@ -337,8 +337,8 @@ describe('Socket Game Handlers — Security', () => {
 
       const actionHandler = getHandler(socket, 'game:action');
       await actionHandler({
-        sessionId: 'gs-1',
-        roundId: 'round-1',
+        sessionId: '11111111-1111-1111-1111-111111111111',
+        roundId: '22222222-2222-2222-2222-222222222222',
         actionType: 'answer',
         payload: { data: 'x'.repeat(20000) }, // >10KB
       });
@@ -360,7 +360,7 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce(null); // not a participant
 
       const stateHandler = getHandler(socket, 'game:state_sync');
-      await stateHandler({ sessionId: 'gs-1' });
+      await stateHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'FORBIDDEN' }) })
@@ -375,15 +375,15 @@ describe('Socket Game Handlers — Security', () => {
       mockedQueryOne.mockResolvedValueOnce({ id: 'participant-1' });
       // Mock: getSession
       mockedQueryOne.mockResolvedValueOnce({
-        id: 'gs-1', status: 'active', current_round: 2,
+        id: '11111111-1111-1111-1111-111111111111', status: 'active', current_round: 2,
         started_at: '2026-01-01T00:00:00Z', ended_at: null,
       });
 
       const stateHandler = getHandler(socket, 'game:state_sync');
-      await stateHandler({ sessionId: 'gs-1' });
+      await stateHandler({ sessionId: '11111111-1111-1111-1111-111111111111' });
 
       expect(socket.emit).toHaveBeenCalledWith('game:state', expect.objectContaining({
-        sessionId: 'gs-1',
+        sessionId: '11111111-1111-1111-1111-111111111111',
         state: expect.objectContaining({ status: 'active', currentRound: 2 }),
       }));
     });
@@ -410,7 +410,7 @@ describe('Socket Game Handlers — Security', () => {
       connectionHandler(socket);
 
       const actionHandler = getHandler(socket, 'game:action');
-      await actionHandler({ sessionId: 'gs-1' }); // missing roundId and actionType
+      await actionHandler({ sessionId: '11111111-1111-1111-1111-111111111111' }); // missing roundId and actionType
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'VALIDATION' }) })
@@ -422,7 +422,7 @@ describe('Socket Game Handlers — Security', () => {
       connectionHandler(socket);
 
       const roundHandler = getHandler(socket, 'game:round_start');
-      await roundHandler({ sessionId: 'gs-1', roundNumber: -1 });
+      await roundHandler({ sessionId: '11111111-1111-1111-1111-111111111111', roundNumber: -1 });
 
       expect(socket._emitted).toContainEqual(
         expect.objectContaining({ event: 'error', data: expect.objectContaining({ code: 'VALIDATION' }) })

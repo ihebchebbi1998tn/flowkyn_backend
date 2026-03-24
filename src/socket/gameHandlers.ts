@@ -8,6 +8,7 @@ import { GamesService } from '../services/games.service';
 import { CoffeeRouletteConfigService } from '../services/coffeeRouletteConfig.service';
 import { query, queryOne, transaction } from '../config/database';
 import crypto from 'crypto';
+import { emitEventNotification } from './emitter';
 
 const gamesService = new GamesService();
 const coffeeService = new CoffeeRouletteConfigService();
@@ -1759,6 +1760,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
               snapshotRevisionId: savedSnapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
             });
+
+            // Redundant broadcast on the events namespace to reliably wake up
+            // clients that haven't joined the game room yet.
+            if (data.actionType === 'two_truths:start' && next.phase === 'submit') {
+              emitEventNotification(session.event_id, 'game:session_created', {
+                sessionId: data.sessionId,
+              });
+            }
 
             return savedSnapshot;
           });
