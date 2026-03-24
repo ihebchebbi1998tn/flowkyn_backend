@@ -76,7 +76,7 @@ FROM (
       FROM public.game_rounds gr
       WHERE gr.game_session_id = gv2.game_session_id
         AND gr.status = 'active'
-      ORDER BY gr.round_number DESC NULLS LAST, gr.created_at DESC NULLS LAST
+      ORDER BY gr.round_number DESC NULLS LAST, gr.started_at DESC NULLS LAST, gr.id DESC
       LIMIT 1
     ) AS rid
   FROM public.game_votes gv2
@@ -93,7 +93,7 @@ FROM (
       SELECT gr.id
       FROM public.game_rounds gr
       WHERE gr.game_session_id = gv2.game_session_id
-      ORDER BY gr.round_number DESC NULLS LAST, gr.created_at DESC NULLS LAST
+      ORDER BY gr.round_number DESC NULLS LAST, gr.started_at DESC NULLS LAST, gr.id DESC
       LIMIT 1
     ) AS rid
   FROM public.game_votes gv2
@@ -135,7 +135,7 @@ FROM (
       SELECT gr.id
       FROM public.game_rounds gr
       WHERE gr.game_session_id = gv2.game_session_id
-      ORDER BY gr.round_number DESC NULLS LAST, gr.created_at DESC NULLS LAST
+      ORDER BY gr.round_number DESC NULLS LAST, gr.started_at DESC NULLS LAST, gr.id DESC
       LIMIT 1
     ) AS rid
   FROM public.game_votes gv2

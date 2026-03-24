@@ -175,92 +175,16 @@ export async function enforceCoffeeChatTimeouts() {
 }
 
 /**
- * Advance Two Truths phases when authoritative phase deadlines are reached.
- * Transitions are idempotent: only snapshots currently in the expected phase are updated.
+ * Two Truths no longer uses server timer-driven phase changes.
+ *
+ * All transitions go through socket `game:action` + `reduceTwoTruthsState`, which applies
+ * `sanitizeTwoTruthsStateForPublic` on emits. submitEndsAt / voteEndsAt are client hints only.
+ *
+ * (Historically this job auto-advanced phases and could desync the state machine or leak
+ * correctLieId via unsanitized `emitGameUpdate` payloads.)
  */
 export async function enforceTwoTruthsPhaseTimeouts() {
-  const candidates = await query<{ session_id: string; state: any }>(
-    `SELECT gs.id as session_id, latest.state
-     FROM game_sessions gs
-     JOIN game_types gt ON gt.id = gs.game_type_id
-     JOIN LATERAL (
-       SELECT gss.state
-       FROM game_state_snapshots gss
-       WHERE gss.game_session_id = gs.id
-       ORDER BY gss.created_at DESC
-       LIMIT 1
-     ) latest ON TRUE
-     WHERE gs.status = 'active'
-       AND gt.key = 'two-truths'
-     LIMIT 100`,
-    []
-  );
-
-  let advanced = 0;
-
-  for (const row of candidates) {
-    const state = row.state as any;
-    if (!state || state.kind !== 'two-truths') continue;
-
-    try {
-      if (state.phase === 'submit' && state.submitEndsAt) {
-        const submitEndsAtMs = new Date(state.submitEndsAt).getTime();
-        if (Number.isFinite(submitEndsAtMs) && submitEndsAtMs <= Date.now() && Array.isArray(state.statements) && state.statements.length === 3) {
-          const voteSeconds = Math.max(5, Number(state.voteSeconds || 20));
-          const next = {
-            ...state,
-            phase: 'vote',
-            voteEndsAt: new Date(Date.now() + voteSeconds * 1000).toISOString(),
-          };
-          const snapshot = await gamesService.saveSnapshot(row.session_id, next);
-          emitGameUpdate(row.session_id, 'game:data', {
-            sessionId: row.session_id,
-            gameData: next,
-            snapshotRevisionId: snapshot?.id || null,
-            snapshotCreatedAt: snapshot?.created_at || null,
-          });
-          advanced++;
-          continue;
-        }
-      }
-
-      if (state.phase === 'vote' && state.voteEndsAt) {
-        const voteEndsAtMs = new Date(state.voteEndsAt).getTime();
-        if (Number.isFinite(voteEndsAtMs) && voteEndsAtMs <= Date.now()) {
-          const lie = ['s0', 's1', 's2'].includes(state.correctLieId) ? state.correctLieId : 's2';
-          const updatedScores = { ...(state.scores || {}) } as Record<string, number>;
-          const votes = (state.votes || {}) as Record<string, 's0' | 's1' | 's2'>;
-          for (const [voterId, choice] of Object.entries(votes)) {
-            if (choice === lie) {
-              updatedScores[voterId] = (updatedScores[voterId] || 0) + 100;
-            }
-          }
-
-          const next = {
-            ...state,
-            phase: 'reveal',
-            revealedLie: lie,
-            scores: updatedScores,
-          };
-          const snapshot = await gamesService.saveSnapshot(row.session_id, next);
-          emitGameUpdate(row.session_id, 'game:data', {
-            sessionId: row.session_id,
-            gameData: next,
-            snapshotRevisionId: snapshot?.id || null,
-            snapshotCreatedAt: snapshot?.created_at || null,
-          });
-          advanced++;
-        }
-      }
-    } catch (err) {
-      console.warn('[TimingJob] enforceTwoTruthsPhaseTimeouts failed', {
-        sessionId: row.session_id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
-  return { processed: candidates.length, advanced };
+  return { processed: 0, advanced: 0 };
 }
 
 /**

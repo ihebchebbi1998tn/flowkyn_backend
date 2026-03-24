@@ -13,10 +13,23 @@ export async function assertCanStartSession(req: AuthRequest, eventId: string, a
     );
     if (!member) throw new AppError('You are not a member of this event\'s organization', 403, 'NOT_A_MEMBER');
 
-    if (!allowParticipantGameControl && !['owner', 'admin', 'moderator'].includes(member.role_name)) {
-      throw new AppError('Only admins and moderators can start game sessions', 403, 'INSUFFICIENT_PERMISSIONS');
-    }
-    return;
+    if (['owner', 'admin', 'moderator'].includes(member.role_name)) return;
+
+    const joinedParticipant = await queryOne<{ id: string }>(
+      `SELECT p.id FROM participants p
+       JOIN organization_members om ON om.id = p.organization_member_id
+       WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
+      [eventId, req.user.userId]
+    );
+    if (joinedParticipant) return;
+
+    if (allowParticipantGameControl) return;
+
+    throw new AppError(
+      'Join this event as a participant to start a game, or ask an event admin.',
+      403,
+      'INSUFFICIENT_PERMISSIONS'
+    );
   }
 
   if (req.guest) {
@@ -37,9 +50,6 @@ export async function assertCanStartSession(req: AuthRequest, eventId: string, a
       throw new AppError('You are not a participant in this event.', 403, 'NOT_PARTICIPANT');
     }
 
-    if (!allowParticipantGameControl) {
-      throw new AppError('Forbidden', 403, 'FORBIDDEN');
-    }
     return;
   }
 
