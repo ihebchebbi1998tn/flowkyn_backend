@@ -350,6 +350,16 @@ type TwoTruthsState = {
   gameStatus?: 'waiting' | 'in_progress' | 'finished';
 };
 
+/** Never send `correctLieId` to clients while voting is in progress (join / state_sync / broadcasts). */
+function sanitizeTwoTruthsStateForPublic(state: unknown): unknown {
+  if (!state || typeof state !== 'object') return state;
+  const s = state as TwoTruthsState & Record<string, unknown>;
+  if (s.kind !== 'two-truths') return state;
+  if (s.phase !== 'vote') return state;
+  const { correctLieId: _, ...rest } = s;
+  return rest;
+}
+
 function shuffleArray<T>(array: T[]): T[] {
   const shuffled = [...array];
   for (let i = shuffled.length - 1; i > 0; i--) {
@@ -367,8 +377,10 @@ async function reduceTwoTruthsState(args: {
   payload: any;
   prev: TwoTruthsState | null;
   session?: any;
+  /** Required for persisting votes to `game_votes` (unique per session + round + participant). */
+  activeRoundId?: string | null;
 }): Promise<TwoTruthsState> {
-  const { eventId, participantId, actionType, payload, prev, session } = args;
+  const { eventId, participantId, actionType, payload, prev, session, activeRoundId } = args;
 
   const base: TwoTruthsState = prev || {
     kind: 'two-truths',
@@ -465,15 +477,18 @@ async function reduceTwoTruthsState(args: {
     // FIX #1: Atomic vote recording - use database INSERT with unique constraint
     // to prevent race conditions. Never fall back to in-memory state.
     try {
-      // This will use the unique constraint to prevent duplicate votes
-      // and atomic INSERT ensures only one vote per participant
-      const voteResult = await query(
-        `INSERT INTO game_votes (game_session_id, participant_id, statement_id)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (game_session_id, participant_id) 
+      const roundIdForVote = activeRoundId || null;
+      if (!session?.id || !roundIdForVote) {
+        throw new Error('Cannot record vote: missing session or active round');
+      }
+      // Must match UNIQUE (game_session_id, round_id, participant_id) on `game_votes`.
+      const voteResult = await query<{ statement_id: string }>(
+        `INSERT INTO game_votes (game_session_id, round_id, participant_id, statement_id)
+         VALUES ($1, $2, $3, $4)
+         ON CONFLICT (game_session_id, round_id, participant_id)
          DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()
          RETURNING statement_id`,
-        [session?.id, participantId, choice]
+        [session.id, roundIdForVote, participantId, choice]
       );
       
       if (!voteResult?.[0]) {
@@ -1449,6 +1464,10 @@ export function setupGameHandlers(gamesNs: Namespace) {
             }
           }
 
+          const snapshotForClient = enrichedSnapshot
+            ? sanitizeTwoTruthsStateForPublic(enrichedSnapshot)
+            : null;
+
           ack?.({
             ok: true,
             data: {
@@ -1457,7 +1476,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
               totalRounds: session.total_rounds || 4,
               activeRoundId: activeRound?.id || null,
               participantId: participant.participantId,
-              snapshot: enrichedSnapshot || null,
+              snapshot: snapshotForClient,
               snapshotRevisionId: snapshot?.id || null,
               snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
               sessionDeadlineAt: (session as any)?.session_deadline_at || null,
@@ -1662,21 +1681,6 @@ export function setupGameHandlers(gamesNs: Namespace) {
           return;
         }
 
-        // Persist action to DB using server-resolved participant ID
-        const action = await gamesService.submitAction(
-          data.sessionId, roundId, participant.participantId, data.actionType, data.payload || {}
-        );
-
-        // Broadcast to all players in session
-        gamesNs.to(`game:${data.sessionId}`).emit('game:action', {
-          userId: user.userId,
-          participantId: participant.participantId,
-          actionType: data.actionType,
-          payload: data.payload,
-          timestamp: action.created_at,
-        });
-
-        // Shared game snapshots for supported games — parallelise DB reads
         const [gameKey, session] = await Promise.all([
           getSessionGameKey(data.sessionId),
           gamesService.getSession(data.sessionId),
@@ -1745,13 +1749,10 @@ export function setupGameHandlers(gamesNs: Namespace) {
               payload: data.payload,
               prev: (freshLatest?.state as any) || null,
               session,
+              activeRoundId: roundId,
             });
 
-            // SECURITY: strip correctLieId during vote phase so clients can't cheat.
-            const publiclySafeState = { ...next };
-            if (next.phase === 'vote' && publiclySafeState.correctLieId) {
-              delete publiclySafeState.correctLieId;
-            }
+            const publiclySafeState = sanitizeTwoTruthsStateForPublic(next);
 
             const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
             gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
@@ -1777,7 +1778,40 @@ export function setupGameHandlers(gamesNs: Namespace) {
             ttRun.then(() => undefined).catch(() => undefined),
           );
 
-          const savedSnapshot = await ttRun;
+          let savedSnapshot: Awaited<typeof ttRun>;
+          try {
+            savedSnapshot = await ttRun;
+          } catch (ttErr: any) {
+            console.error('[Games] two-truths snapshot/vote failed:', ttErr?.message || ttErr);
+            socket.emit('error', { message: ttErr?.message || 'Game action failed', code: 'ACTION_ERROR' });
+            return;
+          }
+
+          let action: { created_at: Date };
+          try {
+            action = await gamesService.submitAction(
+              data.sessionId,
+              roundId,
+              participant.participantId,
+              data.actionType,
+              data.payload || {}
+            );
+          } catch (submitErr: any) {
+            console.error('[Games] two-truths submitAction after snapshot:', submitErr?.message || submitErr);
+            socket.emit('error', {
+              message: submitErr?.message || 'Failed to persist action',
+              code: (submitErr as any)?.code || 'ACTION_ERROR',
+            });
+            return;
+          }
+
+          gamesNs.to(`game:${data.sessionId}`).emit('game:action', {
+            userId: user.userId,
+            participantId: participant.participantId,
+            actionType: data.actionType,
+            payload: data.payload,
+            timestamp: action.created_at,
+          });
 
           // FIX #4: Log vote actions to audit trail for dispute resolution
           if (data.actionType === 'two_truths:vote' && savedSnapshot) {
@@ -1799,7 +1833,22 @@ export function setupGameHandlers(gamesNs: Namespace) {
               status: 'success',
             });
           }
-        }
+        } else {
+          const action = await gamesService.submitAction(
+            data.sessionId,
+            roundId,
+            participant.participantId,
+            data.actionType,
+            data.payload || {}
+          );
+
+          gamesNs.to(`game:${data.sessionId}`).emit('game:action', {
+            userId: user.userId,
+            participantId: participant.participantId,
+            actionType: data.actionType,
+            payload: data.payload,
+            timestamp: action.created_at,
+          });
 
         if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
           console.log('[CoffeeRoulette] Processing coffee action', {
@@ -2013,6 +2062,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
           await strRun;
         }
+        }
       } catch (err: any) {
         console.error(`[Games] game:action error:`, err.message);
         socket.emit('error', { message: err.message, code: 'ACTION_ERROR' });
@@ -2180,6 +2230,9 @@ export function setupGameHandlers(gamesNs: Namespace) {
           gamesService.getActiveRound(data.sessionId),
           gamesService.getLatestSnapshot(data.sessionId),
         ]);
+        const snapshotState = snapshot?.state
+          ? sanitizeTwoTruthsStateForPublic(snapshot.state)
+          : null;
         socket.emit('game:state', {
           sessionId: data.sessionId,
           state: {
@@ -2190,7 +2243,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
             sessionDeadlineAt: (session as any).session_deadline_at || null,
             resolvedTiming: (session as any).resolved_timing || null,
             activeRoundId: activeRound?.id || null,
-            snapshot: snapshot?.state || null,
+            snapshot: snapshotState,
             snapshotRevisionId: snapshot?.id || null,
             snapshotCreatedAt: toSnapshotCreatedAt(snapshot?.created_at),
           },
