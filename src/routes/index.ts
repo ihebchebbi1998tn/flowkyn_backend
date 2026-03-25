@@ -17,6 +17,7 @@ import { activityFeedbacksRoutes } from './activityFeedbacks.routes';
 import { earlyAccessRoutes } from './earlyAccess.routes';
 import coffeeRouletteConfigRoutes from './coffeeRouletteConfig.routes';
 import { logsRouter } from './logs';
+import { aiEventsRoutes } from '../ai-events/routes/aiEvents.routes';
 
 const router = Router();
 
@@ -39,5 +40,6 @@ router.use('/smtp-test', smtpTestRoutes);
 router.use('/early-access', earlyAccessRoutes);
 router.use('/coffee-roulette', coffeeRouletteConfigRoutes);
 router.use('/logs', logsRouter);
+router.use('/ai-events', aiEventsRoutes);
 
 export { router as routes };

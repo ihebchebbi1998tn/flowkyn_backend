@@ -1003,6 +1003,164 @@ const migrations: { version: number; name: string; sql: string }[] = [
       CREATE INDEX IF NOT EXISTS idx_bug_history_created ON bug_report_history(created_at);
     `,
   },
+  {
+    version: 24,
+    name: 'add_ai_events_tables',
+    sql: `
+      -- ─── AI Events (dynamic templates + deterministic runtime) ───
+
+      -- Templates
+      CREATE TABLE IF NOT EXISTS ai_event_templates (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name VARCHAR(200) NOT NULL,
+        goal TEXT NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'draft',
+        template_version INT NOT NULL DEFAULT 1,
+        dsl_version INT NOT NULL DEFAULT 1,
+        dsl_json JSONB NOT NULL,
+        validation_report JSONB,
+        model_provider TEXT,
+        model_name TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_templates_org ON ai_event_templates(organization_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_event_templates_status ON ai_event_templates(status);
+
+      -- Template versions
+      CREATE TABLE IF NOT EXISTS ai_event_template_versions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        template_id UUID NOT NULL REFERENCES ai_event_templates(id) ON DELETE CASCADE,
+        version_number INT NOT NULL,
+        dsl_json JSONB NOT NULL,
+        change_note TEXT,
+        created_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (template_id, version_number)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_template_versions_template ON ai_event_template_versions(template_id);
+
+      -- OpenRouter generation audit
+      CREATE TABLE IF NOT EXISTS ai_generation_requests (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        event_template_id UUID REFERENCES ai_event_templates(id) ON DELETE SET NULL,
+        requested_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        input_context_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        provider TEXT NOT NULL,
+        model TEXT NOT NULL,
+        prompt_tokens INT,
+        completion_tokens INT,
+        cost_usd_estimate NUMERIC,
+        latency_ms INT,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        error_code TEXT,
+        error_message TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_generation_requests_org_created ON ai_generation_requests(organization_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS ai_generation_outputs (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        generation_request_id UUID NOT NULL REFERENCES ai_generation_requests(id) ON DELETE CASCADE,
+        raw_output_text TEXT NOT NULL,
+        parsed_json JSONB,
+        safety_flags_json JSONB,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (generation_request_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_generation_outputs_req ON ai_generation_outputs(generation_request_id);
+
+      -- Runtime instances
+      CREATE TABLE IF NOT EXISTS ai_event_instances (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        template_id UUID NOT NULL REFERENCES ai_event_templates(id) ON DELETE CASCADE,
+        template_version_id UUID NOT NULL REFERENCES ai_event_template_versions(id) ON DELETE CASCADE,
+        event_id UUID REFERENCES events(id) ON DELETE SET NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'waiting',
+        current_activity_index INT NOT NULL DEFAULT 0,
+        started_by_participant_id UUID REFERENCES participants(id) ON DELETE SET NULL,
+        started_at TIMESTAMP,
+        ended_at TIMESTAMP,
+        instance_config_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_instances_event ON ai_event_instances(event_id);
+      CREATE INDEX IF NOT EXISTS idx_ai_event_instances_status ON ai_event_instances(status);
+
+      CREATE TABLE IF NOT EXISTS ai_event_instance_participants (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        instance_id UUID NOT NULL REFERENCES ai_event_instances(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        role_key TEXT,
+        persona_json JSONB,
+        joined_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (instance_id, participant_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_instance_participants_instance ON ai_event_instance_participants(instance_id);
+
+      CREATE TABLE IF NOT EXISTS ai_event_instance_actions (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        instance_id UUID NOT NULL REFERENCES ai_event_instances(id) ON DELETE CASCADE,
+        activity_id TEXT NOT NULL,
+        participant_id UUID REFERENCES participants(id) ON DELETE SET NULL,
+        action_type TEXT NOT NULL,
+        payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_instance_actions_instance_created ON ai_event_instance_actions(instance_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS ai_event_instance_snapshots (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        instance_id UUID NOT NULL REFERENCES ai_event_instances(id) ON DELETE CASCADE,
+        revision BIGINT NOT NULL,
+        state_json JSONB NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (instance_id, revision)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_instance_snapshots_instance_created ON ai_event_instance_snapshots(instance_id, created_at);
+
+      CREATE TABLE IF NOT EXISTS ai_event_private_participant_views (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        instance_id UUID NOT NULL REFERENCES ai_event_instances(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        revision BIGINT NOT NULL,
+        payload_json JSONB NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (instance_id, participant_id, revision)
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_private_views_instance_revision
+        ON ai_event_private_participant_views(instance_id, revision);
+
+      -- Governance
+      CREATE TABLE IF NOT EXISTS ai_event_policy_bindings (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        template_id UUID NOT NULL REFERENCES ai_event_templates(id) ON DELETE CASCADE,
+        policy_json JSONB NOT NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_policy_bindings_template ON ai_event_policy_bindings(template_id);
+
+      CREATE TABLE IF NOT EXISTS ai_event_model_configs (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        provider TEXT NOT NULL,
+        default_model TEXT NOT NULL,
+        fallback_models JSONB NOT NULL DEFAULT '[]'::jsonb,
+        temperature NUMERIC,
+        max_tokens INT,
+        is_active BOOLEAN NOT NULL DEFAULT true,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_ai_event_model_configs_org_active
+        ON ai_event_model_configs(organization_id, is_active);
+    `,
+  },
 ];
 
 /**

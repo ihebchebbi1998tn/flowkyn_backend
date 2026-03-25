@@ -8,6 +8,7 @@ import { verifyAccessToken, verifyGuestToken } from '../utils/jwt';
 import { setupEventHandlers } from './eventHandlers';
 import { setupEventVoiceHandlers } from './eventVoiceHandlers';
 import { setupGameHandlers } from './gameHandlers';
+import { setupAiEventHandlers } from './aiEventHandlers';
 import { setupNotificationHandlers } from './notificationHandlers';
 import { AuthenticatedSocket } from './types';
 
@@ -238,6 +239,11 @@ export function initializeSocket(server: HttpServer) {
   const gamesNs = io.of('/games');
   gamesNs.use(socketAuthMiddleware);
   setupGameHandlers(gamesNs);
+
+  // ─── AI Events namespace (/ai-events) ───
+  const aiNs = io.of('/ai-events');
+  aiNs.use(socketAuthMiddleware);
+  setupAiEventHandlers(aiNs);
 
   // ─── Notifications namespace (/notifications) ───
   const notificationsNs = io.of('/notifications');
