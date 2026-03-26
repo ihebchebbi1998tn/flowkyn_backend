@@ -821,6 +821,19 @@ const migrations: { version: number; name: string; sql: string }[] = [
     version: 18,
     name: 'early_access_provision_delivery_state',
     sql: `
+      -- Ensure early_access_requests table exists (fresh DB bootstrap)
+      CREATE TABLE IF NOT EXISTS early_access_requests (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        first_name VARCHAR(100) NOT NULL,
+        last_name VARCHAR(100) NOT NULL,
+        email VARCHAR(255) UNIQUE NOT NULL,
+        company_name VARCHAR(255),
+        ip_address VARCHAR(45),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_early_access_requests_email ON early_access_requests(email);
+      CREATE INDEX IF NOT EXISTS idx_early_access_requests_created ON early_access_requests(created_at DESC);
+
       -- Track account provisioning + credentials delivery state per request
       ALTER TABLE early_access_requests
         ADD COLUMN IF NOT EXISTS provisioned_user_id UUID REFERENCES users(id) ON DELETE SET NULL;
@@ -1159,6 +1172,259 @@ const migrations: { version: number; name: string; sql: string }[] = [
       );
       CREATE INDEX IF NOT EXISTS idx_ai_event_model_configs_org_active
         ON ai_event_model_configs(organization_id, is_active);
+    `,
+  },
+  {
+    version: 25,
+    name: 'missing_tables_and_columns',
+    sql: `
+      -- ─── Feature Flags ───
+      CREATE TABLE IF NOT EXISTS feature_flags (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        key VARCHAR(100) UNIQUE NOT NULL,
+        name VARCHAR(200) NOT NULL,
+        description TEXT,
+        enabled BOOLEAN NOT NULL DEFAULT false,
+        rollout_percentage INT NOT NULL DEFAULT 0,
+        is_multivariant BOOLEAN NOT NULL DEFAULT false,
+        variants JSONB,
+        targeting_rules JSONB,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        updated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        deleted_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_feature_flags_key ON feature_flags(key) WHERE deleted_at IS NULL;
+
+      CREATE TABLE IF NOT EXISTS feature_flag_evaluations (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        flag_id UUID NOT NULL REFERENCES feature_flags(id) ON DELETE CASCADE,
+        user_id UUID REFERENCES users(id) ON DELETE SET NULL,
+        organization_id UUID REFERENCES organizations(id) ON DELETE SET NULL,
+        assigned_variant VARCHAR(100),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_feature_flag_evaluations_flag ON feature_flag_evaluations(flag_id);
+      CREATE INDEX IF NOT EXISTS idx_feature_flag_evaluations_user ON feature_flag_evaluations(user_id);
+
+      -- ─── Analytics Reports ───
+      CREATE TABLE IF NOT EXISTS analytics_reports (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        name VARCHAR(200) NOT NULL,
+        report_type VARCHAR(50) NOT NULL,
+        data JSONB NOT NULL DEFAULT '{}'::jsonb,
+        format VARCHAR(20) NOT NULL DEFAULT 'json',
+        schedule_frequency VARCHAR(20),
+        last_generated_at TIMESTAMP,
+        next_scheduled_at TIMESTAMP,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_analytics_reports_type ON analytics_reports(report_type);
+      CREATE INDEX IF NOT EXISTS idx_analytics_reports_created ON analytics_reports(created_at DESC);
+
+      -- ─── Content Moderation Queue ───
+      CREATE TABLE IF NOT EXISTS content_moderation_queue (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        content_id UUID NOT NULL,
+        content_type VARCHAR(100) NOT NULL,
+        flagged_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        reason VARCHAR(200) NOT NULL,
+        description TEXT,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        moderated_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        moderation_notes TEXT,
+        moderated_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_content_moderation_status ON content_moderation_queue(status);
+      CREATE INDEX IF NOT EXISTS idx_content_moderation_type ON content_moderation_queue(content_type);
+      CREATE INDEX IF NOT EXISTS idx_content_moderation_created ON content_moderation_queue(created_at ASC);
+
+      -- ─── Game Content Library ───
+      CREATE TABLE IF NOT EXISTS game_content (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_key VARCHAR(50) NOT NULL,
+        content_type VARCHAR(50) NOT NULL,
+        title VARCHAR(200) NOT NULL,
+        content TEXT NOT NULL,
+        difficulty_level VARCHAR(20) NOT NULL DEFAULT 'easy',
+        category VARCHAR(100),
+        tags TEXT[] DEFAULT '{}',
+        usage_count INT NOT NULL DEFAULT 0,
+        approval_status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        approved_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        approved_at TIMESTAMP,
+        created_by UUID REFERENCES users(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_game_content_game_key ON game_content(game_key);
+      CREATE INDEX IF NOT EXISTS idx_game_content_approval ON game_content(approval_status);
+      CREATE INDEX IF NOT EXISTS idx_game_content_difficulty ON game_content(game_key, difficulty_level);
+
+      -- ─── Batch Assignments (large-group Two Truths scheduling) ───
+      CREATE TABLE IF NOT EXISTS batch_assignments (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        batch_number INT NOT NULL,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        presenter_index INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_batch_assignments_session ON batch_assignments(game_session_id);
+      CREATE INDEX IF NOT EXISTS idx_batch_assignments_batch ON batch_assignments(game_session_id, batch_number);
+
+      -- ─── Game Teams (parallel team mode for Strategic Escape) ───
+      CREATE TABLE IF NOT EXISTS game_teams (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        team_number INT NOT NULL,
+        team_id VARCHAR(50) NOT NULL,
+        participant_count INT NOT NULL DEFAULT 0,
+        status VARCHAR(20) NOT NULL DEFAULT 'active',
+        final_solution TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_game_teams_session_team ON game_teams(game_session_id, team_id);
+      CREATE INDEX IF NOT EXISTS idx_game_teams_session_status ON game_teams(game_session_id, status);
+
+      CREATE TABLE IF NOT EXISTS game_team_results (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        team_id VARCHAR(50) NOT NULL,
+        solution_summary TEXT,
+        approach TEXT,
+        effectiveness_score INT,
+        creativity_score INT,
+        collaboration_feedback TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (game_session_id, team_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_game_team_results_session ON game_team_results(game_session_id);
+
+      -- ─── Player Insights (Two Truths per-player analytics) ───
+      CREATE TABLE IF NOT EXISTS player_insights (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        game_session_id UUID NOT NULL REFERENCES game_sessions(id) ON DELETE CASCADE,
+        participant_id UUID NOT NULL REFERENCES participants(id) ON DELETE CASCADE,
+        game_type VARCHAR(50) NOT NULL,
+        total_guesses INT NOT NULL DEFAULT 0,
+        correct_guesses INT NOT NULL DEFAULT 0,
+        accuracy_percentage NUMERIC NOT NULL DEFAULT 0,
+        best_guess_round INT,
+        best_guess_statement TEXT,
+        best_guess_accuracy_percentage NUMERIC,
+        trickiest_statement_text TEXT,
+        trickiest_statement_fool_percentage NUMERIC,
+        previous_accuracy_percentage NUMERIC,
+        percentile_rank NUMERIC,
+        total_players_compared INT,
+        calculated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_player_insights_session ON player_insights(game_session_id);
+      CREATE INDEX IF NOT EXISTS idx_player_insights_participant ON player_insights(participant_id);
+      CREATE INDEX IF NOT EXISTS idx_player_insights_game_type ON player_insights(game_type, created_at DESC);
+
+      -- ─── User Engagement Metrics ───
+      CREATE TABLE IF NOT EXISTS user_engagement_metrics (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+        engagement_score INT NOT NULL DEFAULT 0,
+        last_active_at TIMESTAMP,
+        total_sessions INT NOT NULL DEFAULT 0,
+        total_games_played INT NOT NULL DEFAULT 0,
+        average_session_duration_minutes NUMERIC NOT NULL DEFAULT 0,
+        user_tags TEXT[] DEFAULT '{}',
+        current_streak_days INT NOT NULL DEFAULT 0,
+        highest_streak_days INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_user_engagement_user ON user_engagement_metrics(user_id);
+      CREATE INDEX IF NOT EXISTS idx_user_engagement_score ON user_engagement_metrics(engagement_score DESC);
+
+      -- ─── Organization Engagement Metrics ───
+      CREATE TABLE IF NOT EXISTS organization_engagement_metrics (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        org_id UUID NOT NULL UNIQUE REFERENCES organizations(id) ON DELETE CASCADE,
+        health_score INT NOT NULL DEFAULT 50,
+        member_count INT NOT NULL DEFAULT 0,
+        active_member_count INT NOT NULL DEFAULT 0,
+        average_engagement_score NUMERIC NOT NULL DEFAULT 0,
+        feature_adoption_percentage NUMERIC NOT NULL DEFAULT 0,
+        total_sessions_this_month INT NOT NULL DEFAULT 0,
+        total_games_this_month INT NOT NULL DEFAULT 0,
+        average_session_duration_minutes NUMERIC NOT NULL DEFAULT 0,
+        retention_rate NUMERIC NOT NULL DEFAULT 100,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE INDEX IF NOT EXISTS idx_org_engagement_org ON organization_engagement_metrics(org_id);
+      CREATE INDEX IF NOT EXISTS idx_org_engagement_health ON organization_engagement_metrics(health_score DESC);
+
+      -- ─── Posts Tags (Wins of the Week tagging) ───
+      CREATE TABLE IF NOT EXISTS posts_tags (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        post_id UUID NOT NULL REFERENCES activity_posts(id) ON DELETE CASCADE,
+        tag VARCHAR(100) NOT NULL,
+        created_by_member_id UUID REFERENCES organization_members(id) ON DELETE SET NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMP NOT NULL DEFAULT NOW(),
+        UNIQUE (post_id, tag)
+      );
+      CREATE INDEX IF NOT EXISTS idx_posts_tags_post ON posts_tags(post_id);
+      CREATE INDEX IF NOT EXISTS idx_posts_tags_tag ON posts_tags(tag);
+
+      -- ─── Admin Stats Cache (single-row performance cache) ───
+      CREATE TABLE IF NOT EXISTS admin_stats_cache (
+        id INT PRIMARY KEY DEFAULT 1 CHECK (id = 1),
+        total_users INT NOT NULL DEFAULT 0,
+        total_organizations INT NOT NULL DEFAULT 0,
+        total_events INT NOT NULL DEFAULT 0,
+        total_game_sessions INT NOT NULL DEFAULT 0,
+        active_users_30d INT NOT NULL DEFAULT 0,
+        new_users_today INT NOT NULL DEFAULT 0,
+        new_orgs_today INT NOT NULL DEFAULT 0,
+        two_truths_sessions_today INT NOT NULL DEFAULT 0,
+        coffee_roulette_sessions_today INT NOT NULL DEFAULT 0,
+        wins_of_week_sessions_today INT NOT NULL DEFAULT 0,
+        strategic_escape_sessions_today INT NOT NULL DEFAULT 0,
+        trivia_sessions_today INT NOT NULL DEFAULT 0,
+        scavenger_hunt_sessions_today INT NOT NULL DEFAULT 0,
+        gratitude_sessions_today INT NOT NULL DEFAULT 0,
+        last_updated TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      -- Seed the single cache row so getStats() always has a value to return
+      INSERT INTO admin_stats_cache (id) VALUES (1) ON CONFLICT (id) DO NOTHING;
+
+      -- ─── Add missing columns to game_sessions (batch + team scaling) ───
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS execution_mode VARCHAR(20) DEFAULT 'standard';
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS batch_size INT;
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS current_batch INT DEFAULT 0;
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS total_batches INT DEFAULT 0;
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS team_mode VARCHAR(20);
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS team_size INT;
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS current_team_number INT DEFAULT 0;
+      ALTER TABLE game_sessions ADD COLUMN IF NOT EXISTS total_teams INT DEFAULT 0;
+
+      -- ─── Add team assignment columns to strategic_roles ───
+      ALTER TABLE strategic_roles ADD COLUMN IF NOT EXISTS team_id VARCHAR(50);
+      ALTER TABLE strategic_roles ADD COLUMN IF NOT EXISTS team_number INT;
+      CREATE INDEX IF NOT EXISTS idx_strategic_roles_team ON strategic_roles(game_session_id, team_id)
+        WHERE team_id IS NOT NULL;
+
+      -- ─── Add missing columns to activity_posts ───
+      ALTER TABLE activity_posts ADD COLUMN IF NOT EXISTS category JSONB;
+      ALTER TABLE activity_posts ADD COLUMN IF NOT EXISTS tags TEXT[] DEFAULT '{}';
+      ALTER TABLE activity_posts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
     `,
   },
 ];

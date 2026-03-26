@@ -31,8 +31,13 @@ export class OpenRouterProvider {
     // IMPORTANT: Rotate/revoke this key after testing.
     const hardcodedTestKey =
       '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';
-    this.apiKey = process.env.OPENROUTER_API_KEY || hardcodedTestKey;
-    this.baseUrl = process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1';
+    const useEnvKey = (process.env.OPENROUTER_USE_ENV_KEY || '').trim().toLowerCase() === 'true';
+    const envKey = process.env.OPENROUTER_API_KEY?.trim();
+    // For local testing, prefer the hardcoded key unless explicitly told to use env.
+    this.apiKey = useEnvKey && envKey ? envKey : hardcodedTestKey;
+
+    const envBaseUrl = process.env.OPENROUTER_BASE_URL?.trim();
+    this.baseUrl = envBaseUrl ? envBaseUrl : 'https://openrouter.ai/api/v1';
     this.fallbackModels = (process.env.OPENROUTER_FALLBACK_MODELS || '')
       .split(',')
       .map((v) => v.trim())
@@ -72,7 +77,11 @@ export class OpenRouterProvider {
         });
         if (!response.ok) {
           const text = await response.text();
-          throw new Error(`OpenRouter failed (${response.status}): ${text}`);
+          const hint =
+            response.status === 401
+              ? ' (Unauthorized: check OPENROUTER_API_KEY)'
+              : '';
+          throw new Error(`OpenRouter failed (${response.status})${hint}: ${text}`);
         }
         const json = (await response.json()) as any;
         const message = json?.choices?.[0]?.message || {};

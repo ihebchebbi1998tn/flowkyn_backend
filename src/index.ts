@@ -16,18 +16,11 @@ async function bootstrap() {
     process.exit(1);
   }
 
-  const shouldRunMigrations = String(process.env.RUN_MIGRATIONS || '').toLowerCase() === 'true';
-  const shouldSeedSuperAdmin = String(process.env.SEED_SUPER_ADMIN || '').toLowerCase() === 'true';
+  // 2. Run auto-migrations (always — idempotent, skips already-applied versions)
+  await runMigrations();
 
-  // 2. Run auto-migrations (opt-in)
-  if (shouldRunMigrations) {
-    await runMigrations();
-  } else {}
-
-  // 3. Seed super admin (opt-in)
-  if (shouldSeedSuperAdmin) {
-    await seedSuperAdmin();
-  } else {}
+  // 3. Seed super admin (always — no-op if account already exists)
+  await seedSuperAdmin();
 
   // 4. Create HTTP server & attach Socket.io
   const server = createServer(app);
