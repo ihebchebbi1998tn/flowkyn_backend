@@ -174,6 +174,7 @@ export class EventMessagesService {
       event_id: p.event_id,
       author_participant_id: p.author_participant_id,
       content: p.content,
+      parent_post_id: p.parent_post_id || null,
       created_at: p.created_at,
       author_name: p.author_name,
       author_avatar: p.author_avatar,
@@ -192,15 +193,15 @@ export class EventMessagesService {
   }
 
   /**
-   * Create an activity post in an event.
-   * Posts are longer-form content (up to 5000 chars) displayed in the activity feed.
+   * Create an activity post in an event, optionally as a reply to another post.
    *
    * @param eventId - The event to create the post in
    * @param participantId - The author's participant ID
    * @param content - Raw post content (sanitized to 5000 chars max)
+   * @param parentPostId - Optional parent post ID for threaded replies
    * @throws {AppError} 403 if participant doesn't belong to this event
    */
-  async createPost(eventId: string, participantId: string, content: string) {
+  async createPost(eventId: string, participantId: string, content: string, parentPostId?: string) {
     await this.requireEventOpenForPosts(eventId);
 
     const participant = await queryOne(
@@ -209,13 +210,22 @@ export class EventMessagesService {
     );
     if (!participant) throw new AppError('Invalid participant for this event', 403, 'NOT_PARTICIPANT');
 
+    // Validate parent post exists and belongs to this event
+    if (parentPostId) {
+      const parent = await queryOne(
+        'SELECT id FROM activity_posts WHERE id = $1 AND event_id = $2',
+        [parentPostId, eventId]
+      );
+      if (!parent) throw new AppError('Parent post not found', 404, 'NOT_FOUND');
+    }
+
     const sanitizedContent = sanitizeText(content, 5000);
     if (sanitizedContent.length === 0) throw new AppError('Post content cannot be empty', 400, 'VALIDATION_FAILED');
 
     const [post] = await query(
-      `INSERT INTO activity_posts (id, event_id, author_participant_id, content, created_at)
-       VALUES ($1, $2, $3, $4, NOW()) RETURNING *`,
-      [uuid(), eventId, participantId, sanitizedContent]
+      `INSERT INTO activity_posts (id, event_id, author_participant_id, content, parent_post_id, created_at)
+       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
+      [uuid(), eventId, participantId, sanitizedContent, parentPostId || null]
     );
     return post;
   }
