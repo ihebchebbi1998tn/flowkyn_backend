@@ -35,6 +35,7 @@ router.delete('/users/:id', ctrl.deleteUser);
 
 // Organizations
 router.get('/organizations', ctrl.listOrganizations);
+router.get('/organizations/:orgId/pulse-survey', ctrl.getOrgPulseSurvey);
 router.patch('/organizations/:id/status', ctrl.updateOrganizationStatus);
 router.post('/organizations/:orgId/ban', ctrl.banOrganization);
 router.post('/organizations/:orgId/unban', ctrl.unbanOrganization);

@@ -1427,6 +1427,26 @@ const migrations: { version: number; name: string; sql: string }[] = [
       ALTER TABLE activity_posts ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP NOT NULL DEFAULT NOW();
     `,
   },
+  {
+    version: 26,
+    name: 'onboarding_pulse_surveys',
+    sql: `
+      CREATE TABLE IF NOT EXISTS onboarding_pulse_surveys (
+        id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+        organization_id UUID NOT NULL REFERENCES organizations(id) ON DELETE CASCADE,
+        submitted_by_user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        team_connectedness INT NOT NULL CHECK (team_connectedness BETWEEN 1 AND 10),
+        relationship_quality INT NOT NULL CHECK (relationship_quality BETWEEN 1 AND 10),
+        team_familiarity INT NOT NULL CHECK (team_familiarity BETWEEN 1 AND 10),
+        expectations TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT NOW()
+      );
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_pulse_surveys_org_user
+        ON onboarding_pulse_surveys(organization_id, submitted_by_user_id);
+      CREATE INDEX IF NOT EXISTS idx_pulse_surveys_org
+        ON onboarding_pulse_surveys(organization_id);
+    `,
+  },
 ];
 
 /**

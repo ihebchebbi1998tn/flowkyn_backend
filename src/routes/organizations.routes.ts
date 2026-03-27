@@ -43,5 +43,6 @@ router.delete('/:orgId/members/:memberId', authenticate, validate(orgMemberParam
 router.post('/:orgId/logo', authenticate, validate(orgIdParam, 'params'), upload.single('logo'), ctrl.uploadLogo);
 router.post('/:orgId/invitations', authenticate, validate(orgIdParam, 'params'), validate(inviteMemberSchema), ctrl.inviteMember);
 router.post('/invitations/accept', authenticate, validate(acceptInvitationSchema), ctrl.acceptInvitation);
+router.post('/:orgId/pulse-survey', authenticate, validate(orgIdParam, 'params'), ctrl.savePulseSurvey);
 
 export { router as organizationsRoutes };

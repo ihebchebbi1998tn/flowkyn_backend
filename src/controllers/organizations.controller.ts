@@ -202,4 +202,44 @@ export class OrganizationsController {
       next(err);
     }
   }
+
+  /** POST /:orgId/pulse-survey — Save onboarding team pulse survey */
+  async savePulseSurvey(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const orgId = req.params.orgId;
+      const userId = req.user!.userId;
+
+      // Verify user is an org member
+      const member = await queryOne<{ id: string }>(
+        `SELECT id FROM organization_members WHERE organization_id = $1 AND user_id = $2 AND status = 'active'`,
+        [orgId, userId]
+      );
+      if (!member) throw new AppError('Not a member of this organization', 403, 'NOT_A_MEMBER');
+
+      const { team_connectedness, relationship_quality, team_familiarity, expectations } = req.body;
+
+      // Validate ratings are 1-10
+      for (const [key, val] of Object.entries({ team_connectedness, relationship_quality, team_familiarity })) {
+        if (typeof val !== 'number' || val < 1 || val > 10) {
+          throw new AppError(`${key} must be a number between 1 and 10`, 400, 'VALIDATION_FAILED');
+        }
+      }
+
+      await query(
+        `INSERT INTO onboarding_pulse_surveys (id, organization_id, submitted_by_user_id, team_connectedness, relationship_quality, team_familiarity, expectations, created_at)
+         VALUES (uuid_generate_v4(), $1, $2, $3, $4, $5, $6, NOW())
+         ON CONFLICT (organization_id, submitted_by_user_id) DO UPDATE SET
+           team_connectedness = EXCLUDED.team_connectedness,
+           relationship_quality = EXCLUDED.relationship_quality,
+           team_familiarity = EXCLUDED.team_familiarity,
+           expectations = EXCLUDED.expectations`,
+        [orgId, userId, team_connectedness, relationship_quality, team_familiarity, expectations || null]
+      );
+
+      await audit.create(orgId, userId, 'ONBOARDING_PULSE_SURVEY', { team_connectedness, relationship_quality, team_familiarity });
+      res.json({ message: 'Pulse survey saved' });
+    } catch (err) {
+      next(err);
+    }
+  }
 }

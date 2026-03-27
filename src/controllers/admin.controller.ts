@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import { AdminService } from '../services/admin.service';
 import { AuditLogsService } from '../services/auditLogs.service';
 import { AuthRequest } from '../types';
+import { query } from '../config/database';
 
 const adminService = new AdminService();
 const auditLogsService = new AuditLogsService();
@@ -142,6 +143,21 @@ export class AdminController {
         organizationName: org.name,
       });
       res.json({ message: 'Organization unbanned successfully', organization: org });
+    } catch (err) { next(err); }
+  }
+
+  /** GET /admin/organizations/:orgId/pulse-survey — Get pulse survey results for an org */
+  async getOrgPulseSurvey(req: Request, res: Response, next: NextFunction) {
+    try {
+      const rows = await query(
+        `SELECT ps.*, u.name as submitted_by_name, u.email as submitted_by_email
+         FROM onboarding_pulse_surveys ps
+         JOIN users u ON u.id = ps.submitted_by_user_id
+         WHERE ps.organization_id = $1
+         ORDER BY ps.created_at DESC`,
+        [req.params.orgId]
+      );
+      res.json(rows);
     } catch (err) { next(err); }
   }
 }
