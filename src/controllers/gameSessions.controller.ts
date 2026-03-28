@@ -34,7 +34,7 @@ export class GameSessionsController {
     try {
       const { sessionId } = req.params;
       if (!sessionId) throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
-      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_MISSING_TOKEN');
 
       const eventId = await getSessionEventId(sessionId);
       await assertCanViewSessionAdmin(eventId, req.user.userId);
@@ -54,7 +54,7 @@ export class GameSessionsController {
     try {
       const { sessionId } = req.params;
       if (!sessionId) throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
-      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_MISSING_TOKEN');
 
       const eventId = await getSessionEventId(sessionId);
       await assertCanViewSessionAdmin(eventId, req.user.userId);
@@ -76,7 +76,7 @@ export class GameSessionsController {
     try {
       const { sessionId } = req.params;
       if (!sessionId) throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
-      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_MISSING_TOKEN');
 
       const eventId = await getSessionEventId(sessionId);
       await assertCanViewSessionAdmin(eventId, req.user.userId);
@@ -113,7 +113,7 @@ export class GameSessionsController {
     try {
       const { sessionId } = req.params;
       if (!sessionId) throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
-      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_MISSING_TOKEN');
 
       const eventId = await getSessionEventId(sessionId);
       const allow = await allowParticipantGameControlForEvent(eventId);
@@ -134,7 +134,7 @@ export class GameSessionsController {
     try {
       const { sessionId } = req.params;
       if (!sessionId) throw new AppError('Session ID is required', 400, 'VALIDATION_FAILED');
-      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_REQUIRED');
+      if (!req.user) throw new AppError('Authentication required', 401, 'AUTH_MISSING_TOKEN');
 
       const eventId = await getSessionEventId(sessionId);
       await assertCanViewSessionAdmin(eventId, req.user.userId);
