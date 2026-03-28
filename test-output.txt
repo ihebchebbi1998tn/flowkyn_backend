@@ -1,0 +1,397 @@
+
+> flowkyn-backend@1.0.0 test
+> jest --forceExit --detectOpenHandles tests/socket/gameHandlers.test.ts
+
+  console.log
+    [GameAction] Received action from client {
+      actionType: 'answer',
+      sessionId: 'gs-1',
+      socketId: 'socket-00000000-0000-0000-0000-000000000001',
+      userId: '00000000-0000-0000-0000-000000000001',
+      timestamp: '2026-03-24T13:15:47.658Z'
+    }
+
+      at src/socket/gameHandlers.ts:1626:15
+
+  console.warn
+    [GameAction] Validation failed: Invalid session ID
+
+    [0m [90m 1634 |[39m       [36mconst[39m validation [33m=[39m gameActionSchema[33m.[39msafeParse(data)[33m;[39m
+     [90m 1635 |[39m       [36mif[39m ([33m![39mvalidation[33m.[39msuccess) {
+    [31m[1m>[22m[39m[90m 1636 |[39m         console[33m.[39mwarn([32m'[GameAction] Validation failed:'[39m[33m,[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage)[33m;[39m
+     [90m      |[39m                 [31m[1m^[22m[39m
+     [90m 1637 |[39m         socket[33m.[39memit([32m'error'[39m[33m,[39m { message[33m:[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage[33m,[39m code[33m:[39m [32m'VALIDATION'[39m })[33m;[39m
+     [90m 1638 |[39m         [36mreturn[39m[33m;[39m
+     [90m 1639 |[39m       }[0m
+
+      at src/socket/gameHandlers.ts:1636:17
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:300:13)
+
+  console.log
+    [GameAction] Received action from client {
+      actionType: 'answer',
+      sessionId: 'gs-1',
+      socketId: 'socket-00000000-0000-0000-0000-000000000002',
+      userId: '00000000-0000-0000-0000-000000000002',
+      timestamp: '2026-03-24T13:15:47.724Z'
+    }
+
+      at src/socket/gameHandlers.ts:1626:15
+
+  console.warn
+    [GameAction] Validation failed: Invalid session ID
+
+    [0m [90m 1634 |[39m       [36mconst[39m validation [33m=[39m gameActionSchema[33m.[39msafeParse(data)[33m;[39m
+     [90m 1635 |[39m       [36mif[39m ([33m![39mvalidation[33m.[39msuccess) {
+    [31m[1m>[22m[39m[90m 1636 |[39m         console[33m.[39mwarn([32m'[GameAction] Validation failed:'[39m[33m,[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage)[33m;[39m
+     [90m      |[39m                 [31m[1m^[22m[39m
+     [90m 1637 |[39m         socket[33m.[39memit([32m'error'[39m[33m,[39m { message[33m:[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage[33m,[39m code[33m:[39m [32m'VALIDATION'[39m })[33m;[39m
+     [90m 1638 |[39m         [36mreturn[39m[33m;[39m
+     [90m 1639 |[39m       }[0m
+
+      at src/socket/gameHandlers.ts:1636:17
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:319:13)
+
+  console.log
+    [GameAction] Received action from client {
+      actionType: 'answer',
+      sessionId: 'gs-1',
+      socketId: 'socket-00000000-0000-0000-0000-000000000001',
+      userId: '00000000-0000-0000-0000-000000000001',
+      timestamp: '2026-03-24T13:15:47.754Z'
+    }
+
+      at src/socket/gameHandlers.ts:1626:15
+
+  console.warn
+    [GameAction] Validation failed: Invalid session ID
+
+    [0m [90m 1634 |[39m       [36mconst[39m validation [33m=[39m gameActionSchema[33m.[39msafeParse(data)[33m;[39m
+     [90m 1635 |[39m       [36mif[39m ([33m![39mvalidation[33m.[39msuccess) {
+    [31m[1m>[22m[39m[90m 1636 |[39m         console[33m.[39mwarn([32m'[GameAction] Validation failed:'[39m[33m,[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage)[33m;[39m
+     [90m      |[39m                 [31m[1m^[22m[39m
+     [90m 1637 |[39m         socket[33m.[39memit([32m'error'[39m[33m,[39m { message[33m:[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage[33m,[39m code[33m:[39m [32m'VALIDATION'[39m })[33m;[39m
+     [90m 1638 |[39m         [36mreturn[39m[33m;[39m
+     [90m 1639 |[39m       }[0m
+
+      at src/socket/gameHandlers.ts:1636:17
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:339:13)
+
+  console.log
+    [GameAction] Received action from client {
+      actionType: undefined,
+      sessionId: 'gs-1',
+      socketId: 'socket-00000000-0000-0000-0000-000000000001',
+      userId: '00000000-0000-0000-0000-000000000001',
+      timestamp: '2026-03-24T13:15:47.808Z'
+    }
+
+      at src/socket/gameHandlers.ts:1626:15
+
+  console.warn
+    [GameAction] Validation failed: Invalid session ID
+
+    [0m [90m 1634 |[39m       [36mconst[39m validation [33m=[39m gameActionSchema[33m.[39msafeParse(data)[33m;[39m
+     [90m 1635 |[39m       [36mif[39m ([33m![39mvalidation[33m.[39msuccess) {
+    [31m[1m>[22m[39m[90m 1636 |[39m         console[33m.[39mwarn([32m'[GameAction] Validation failed:'[39m[33m,[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage)[33m;[39m
+     [90m      |[39m                 [31m[1m^[22m[39m
+     [90m 1637 |[39m         socket[33m.[39memit([32m'error'[39m[33m,[39m { message[33m:[39m validation[33m.[39merror[33m.[39missues[[35m0[39m][33m.[39mmessage[33m,[39m code[33m:[39m [32m'VALIDATION'[39m })[33m;[39m
+     [90m 1638 |[39m         [36mreturn[39m[33m;[39m
+     [90m 1639 |[39m       }[0m
+
+      at src/socket/gameHandlers.ts:1636:17
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:413:13)
+
+FAIL tests/socket/gameHandlers.test.ts (9.08 s)
+  Socket Game Handlers ΓÇö Security
+    game:join ΓÇö participant verification
+      ├ù should allow joining when user is a participant in the game event (31 ms)
+      ├ù should REJECT joining when user is NOT a participant (6 ms)
+    game:start ΓÇö admin authorization
+      ├ù should REJECT game start from non-admin user (5 ms)
+      ├ù should allow game start from admin user (5 ms)
+      ├ù should allow game start from moderator (4 ms)
+    game:end ΓÇö admin authorization
+      ├ù should REJECT game end from non-admin user (4 ms)
+      ├ù should allow game end from owner (3 ms)
+    game:round_start ΓÇö admin authorization
+      ├ù should REJECT round start from non-admin (4 ms)
+    game:round_end ΓÇö admin authorization & persistence
+      ├ù should REJECT round end from non-admin (4 ms)
+      ├ù should persist round end to DB when admin ends it (3 ms)
+    game:action ΓÇö participant ownership
+      ├ù should resolve participantId from authenticated user, preventing impersonation (72 ms)
+      ├ù should REJECT action when user is NOT a game participant (31 ms)
+      ΓêÜ should reject oversized payloads (33 ms)
+    game:state_sync ΓÇö participant access
+      ├ù should REJECT state sync from non-participant (5 ms)
+      ├ù should return game state to verified participant (7 ms)
+    input validation
+      ΓêÜ should reject game:join with missing sessionId (6 ms)
+      ΓêÜ should reject game:action with missing fields (62 ms)
+      ΓêÜ should reject game:round_start with invalid round number (4 ms)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:join ΓÇö participant verification ΓÇ║ should allow joining when user is a participant in the game event
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: ObjectContaining {"data": ObjectContaining {"participantId": "participant-1"}, "ok": true}
+    Received: {"code": "VALIDATION", "details": {"issue": {"code": "invalid_string", "message": "Invalid session ID", "path": ["sessionId"], "validation": "uuid"}}, "error": "Invalid session ID", "ok": false}
+
+    Number of calls: 1
+
+    [0m [90m 76 |[39m       [36mawait[39m joinHandler({ sessionId[33m:[39m [32m'gs-1'[39m }[33m,[39m ack)[33m;[39m
+     [90m 77 |[39m
+    [31m[1m>[22m[39m[90m 78 |[39m       expect(ack)[33m.[39mtoHaveBeenCalledWith(expect[33m.[39mobjectContaining({
+     [90m    |[39m                   [31m[1m^[22m[39m
+     [90m 79 |[39m         ok[33m:[39m [36mtrue[39m[33m,[39m
+     [90m 80 |[39m         data[33m:[39m expect[33m.[39mobjectContaining({ participantId[33m:[39m [32m'participant-1'[39m })[33m,[39m
+     [90m 81 |[39m       }))[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:78:19)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:join ΓÇö participant verification ΓÇ║ should REJECT joining when user is NOT a participant
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m  96 |[39m       expect(ack)[33m.[39mtoHaveBeenCalledWith(expect[33m.[39mobjectContaining({ ok[33m:[39m [36mfalse[39m }))[33m;[39m
+     [90m  97 |[39m       expect(socket[33m.[39mjoin)[33m.[39mnot[33m.[39mtoHaveBeenCalled()[33m;[39m
+    [31m[1m>[22m[39m[90m  98 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m  99 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 100 |[39m       )[33m;[39m
+     [90m 101 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:98:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:start ΓÇö admin authorization ΓÇ║ should REJECT game start from non-admin user
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 117 |[39m       [36mawait[39m startHandler({ sessionId[33m:[39m [32m'gs-1'[39m })[33m;[39m
+     [90m 118 |[39m
+    [31m[1m>[22m[39m[90m 119 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 120 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 121 |[39m       )[33m;[39m
+     [90m 122 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:119:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:start ΓÇö admin authorization ΓÇ║ should allow game start from admin user
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 0
+    Received length: 1
+    Received array:  [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 145 |[39m       [90m// Should NOT emit error[39m
+     [90m 146 |[39m       [36mconst[39m errors [33m=[39m socket[33m.[39m_emitted[33m.[39mfilter((e[33m:[39m any) [33m=>[39m e[33m.[39mevent [33m===[39m [32m'error'[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 147 |[39m       expect(errors)[33m.[39mtoHaveLength([35m0[39m)[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 148 |[39m     })[33m;[39m
+     [90m 149 |[39m
+     [90m 150 |[39m     it([32m'should allow game start from moderator'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:147:22)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:start ΓÇö admin authorization ΓÇ║ should allow game start from moderator
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 0
+    Received length: 1
+    Received array:  [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 167 |[39m
+     [90m 168 |[39m       [36mconst[39m errors [33m=[39m socket[33m.[39m_emitted[33m.[39mfilter((e[33m:[39m any) [33m=>[39m e[33m.[39mevent [33m===[39m [32m'error'[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 169 |[39m       expect(errors)[33m.[39mtoHaveLength([35m0[39m)[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 170 |[39m     })[33m;[39m
+     [90m 171 |[39m   })[33m;[39m
+     [90m 172 |[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:169:22)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:end ΓÇö admin authorization ΓÇ║ should REJECT game end from non-admin user
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 185 |[39m       [36mawait[39m endHandler({ sessionId[33m:[39m [32m'gs-1'[39m })[33m;[39m
+     [90m 186 |[39m
+    [31m[1m>[22m[39m[90m 187 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 188 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 189 |[39m       )[33m;[39m
+     [90m 190 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:187:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:end ΓÇö admin authorization ΓÇ║ should allow game end from owner
+
+    expect(received).toHaveLength(expected)
+
+    Expected length: 0
+    Received length: 1
+    Received array:  [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 213 |[39m
+     [90m 214 |[39m       [36mconst[39m errors [33m=[39m socket[33m.[39m_emitted[33m.[39mfilter((e[33m:[39m any) [33m=>[39m e[33m.[39mevent [33m===[39m [32m'error'[39m)[33m;[39m
+    [31m[1m>[22m[39m[90m 215 |[39m       expect(errors)[33m.[39mtoHaveLength([35m0[39m)[33m;[39m
+     [90m     |[39m                      [31m[1m^[22m[39m
+     [90m 216 |[39m     })[33m;[39m
+     [90m 217 |[39m   })[33m;[39m
+     [90m 218 |[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:215:22)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:round_start ΓÇö admin authorization ΓÇ║ should REJECT round start from non-admin
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 230 |[39m       [36mawait[39m roundHandler({ sessionId[33m:[39m [32m'gs-1'[39m[33m,[39m roundNumber[33m:[39m [35m2[39m })[33m;[39m
+     [90m 231 |[39m
+    [31m[1m>[22m[39m[90m 232 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 233 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 234 |[39m       )[33m;[39m
+     [90m 235 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:232:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:round_end ΓÇö admin authorization & persistence ΓÇ║ should REJECT round end from non-admin
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 249 |[39m       [36mawait[39m roundEndHandler({ sessionId[33m:[39m [32m'gs-1'[39m[33m,[39m roundId[33m:[39m [32m'round-1'[39m })[33m;[39m
+     [90m 250 |[39m
+    [31m[1m>[22m[39m[90m 251 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 252 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 253 |[39m       )[33m;[39m
+     [90m 254 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:251:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:round_end ΓÇö admin authorization & persistence ΓÇ║ should persist round end to DB when admin ends it
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: StringContaining "UPDATE game_rounds", ArrayContaining ["round-1", "gs-1"]
+
+    Number of calls: 0
+
+    [0m [90m 267 |[39m
+     [90m 268 |[39m       [90m// Verify DB was called to update the round[39m
+    [31m[1m>[22m[39m[90m 269 |[39m       expect(mockedQueryOne)[33m.[39mtoHaveBeenCalledWith(
+     [90m     |[39m                              [31m[1m^[22m[39m
+     [90m 270 |[39m         expect[33m.[39mstringContaining([32m'UPDATE game_rounds'[39m)[33m,[39m
+     [90m 271 |[39m         expect[33m.[39marrayContaining([[32m'round-1'[39m[33m,[39m [32m'gs-1'[39m])
+     [90m 272 |[39m       )[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:269:30)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:action ΓÇö participant ownership ΓÇ║ should resolve participantId from authenticated user, preventing impersonation
+
+    TypeError: Cannot read properties of undefined (reading '1')
+
+    [0m [90m 306 |[39m
+     [90m 307 |[39m       [90m// The first queryOne call should use the authenticated userId[39m
+    [31m[1m>[22m[39m[90m 308 |[39m       expect(mockedQueryOne[33m.[39mmock[33m.[39mcalls[[35m0[39m][[35m1[39m])[33m.[39mtoContain([33mTEST_USER[39m[33m.[39muserId)[33m;[39m
+     [90m     |[39m                                          [31m[1m^[22m[39m
+     [90m 309 |[39m     })[33m;[39m
+     [90m 310 |[39m
+     [90m 311 |[39m     it([32m'should REJECT action when user is NOT a game participant'[39m[33m,[39m [36masync[39m () [33m=>[39m {[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:308:42)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:action ΓÇö participant ownership ΓÇ║ should REJECT action when user is NOT a game participant
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 324 |[39m       })[33m;[39m
+     [90m 325 |[39m
+    [31m[1m>[22m[39m[90m 326 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 327 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 328 |[39m       )[33m;[39m
+     [90m 329 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:326:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:state_sync ΓÇö participant access ΓÇ║ should REJECT state sync from non-participant
+
+    expect(received).toContainEqual(expected) // deep equality
+
+    Expected value: ObjectContaining {"data": ObjectContaining {"code": "FORBIDDEN"}, "event": "error"}
+    Received array: [{"data": {"code": "VALIDATION", "message": "Invalid session ID"}, "event": "error"}]
+
+    [0m [90m 363 |[39m       [36mawait[39m stateHandler({ sessionId[33m:[39m [32m'gs-1'[39m })[33m;[39m
+     [90m 364 |[39m
+    [31m[1m>[22m[39m[90m 365 |[39m       expect(socket[33m.[39m_emitted)[33m.[39mtoContainEqual(
+     [90m     |[39m                               [31m[1m^[22m[39m
+     [90m 366 |[39m         expect[33m.[39mobjectContaining({ event[33m:[39m [32m'error'[39m[33m,[39m data[33m:[39m expect[33m.[39mobjectContaining({ code[33m:[39m [32m'FORBIDDEN'[39m }) })
+     [90m 367 |[39m       )[33m;[39m
+     [90m 368 |[39m     })[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:365:31)
+
+  ΓùÅ Socket Game Handlers ΓÇö Security ΓÇ║ game:state_sync ΓÇö participant access ΓÇ║ should return game state to verified participant
+
+    expect(jest.fn()).toHaveBeenCalledWith(...expected)
+
+    Expected: "game:state", ObjectContaining {"sessionId": "gs-1", "state": ObjectContaining {"currentRound": 2, "status": "active"}}
+    Received: "error", {"code": "VALIDATION", "message": "Invalid session ID"}
+
+    Number of calls: 1
+
+    [0m [90m 383 |[39m       [36mawait[39m stateHandler({ sessionId[33m:[39m [32m'gs-1'[39m })[33m;[39m
+     [90m 384 |[39m
+    [31m[1m>[22m[39m[90m 385 |[39m       expect(socket[33m.[39memit)[33m.[39mtoHaveBeenCalledWith([32m'game:state'[39m[33m,[39m expect[33m.[39mobjectContaining({
+     [90m     |[39m                           [31m[1m^[22m[39m
+     [90m 386 |[39m         sessionId[33m:[39m [32m'gs-1'[39m[33m,[39m
+     [90m 387 |[39m         state[33m:[39m expect[33m.[39mobjectContaining({ status[33m:[39m [32m'active'[39m[33m,[39m currentRound[33m:[39m [35m2[39m })[33m,[39m
+     [90m 388 |[39m       }))[33m;[39m[0m
+
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:385:27)
+
+Test Suites: 1 failed, 1 total
+Tests:       14 failed, 4 passed, 18 total
+Snapshots:   0 total
+Time:        9.677 s, estimated 13 s
+Ran all test suites matching /tests\\socket\\gameHandlers.test.ts/i.
+
+Jest has detected the following 1 open handle potentially keeping Jest from exiting:
+
+  ΓùÅ  Timeout
+
+    [0m [90m 1303 |[39m   [90m// Proactively evict expired WebRTC offer cache entries every 10 minutes.[39m
+     [90m 1304 |[39m   [90m// On-read TTL checks only cover retrieved entries; this prevents unbounded growth.[39m
+    [31m[1m>[22m[39m[90m 1305 |[39m   setInterval(() [33m=>[39m {
+     [90m      |[39m   [31m[1m^[22m[39m
+     [90m 1306 |[39m     [36mconst[39m now [33m=[39m [33mDate[39m[33m.[39mnow()[33m;[39m
+     [90m 1307 |[39m     [36mfor[39m ([36mconst[39m [key[33m,[39m entry] [36mof[39m coffeeVoiceOfferCache) {
+     [90m 1308 |[39m       [36mif[39m (now [33m-[39m entry[33m.[39mcreatedAt [33m>[39m [33mCOFFEE_VOICE_OFFER_TTL_MS[39m) {[0m
+
+      at setupGameHandlers (src/socket/gameHandlers.ts:1305:3)
+      at Object.<anonymous> (tests/socket/gameHandlers.test.ts:54:22)
+
