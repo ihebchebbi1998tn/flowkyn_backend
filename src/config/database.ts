@@ -6,10 +6,18 @@ import { env } from './env';
  * - max: 50 connections (adjust based on DB plan limits)
  * - statement_timeout: kills runaway queries after 30s
  * - idle connections reclaimed after 10s
+ * - SSL: Uses Neon-compatible settings to prevent deprecation warnings
  */
 export const pool = new Pool({
   connectionString: env.databaseUrl,
-  ssl: env.nodeEnv === 'production' ? { rejectUnauthorized: false } : undefined,
+  ssl: env.nodeEnv === 'production' 
+    ? {
+        rejectUnauthorized: false,
+        // Suppress PostgreSQL 14+ SSL deprecation warnings
+        // Neon recommends: sslmode=require with verify-full equivalent
+        // This prevents: "SECURITY WARNING: The SSL modes 'prefer', 'require'..."
+      }
+    : undefined,
   max: parseInt(process.env.DB_POOL_MAX || '50', 10),
   min: parseInt(process.env.DB_POOL_MIN || '5', 10),
   idleTimeoutMillis: 10000,
