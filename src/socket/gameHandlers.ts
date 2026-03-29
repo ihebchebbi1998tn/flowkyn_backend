@@ -124,7 +124,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
 
         // Dispatch to game-specific handler
         if (gameKey === 'two-truths' && isTwoTruthsAction(data.actionType)) {
-          await handleTwoTruthsAction({ ctx, data, participant, roundId, session });
+          await handleTwoTruthsAction({ ctx, data, participant, roundId: roundId!, session });
         } else if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
           await handleCoffeeAction({ ctx, data, participant, roundId, session });
         } else if (gameKey === 'strategic-escape') {
