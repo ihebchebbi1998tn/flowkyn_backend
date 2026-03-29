@@ -156,7 +156,7 @@ export async function handleTwoTruthsAction({
   try {
     action = await gamesService.submitAction(
       data.sessionId,
-      roundId,
+      roundId!,
       participant.participantId,
       data.actionType,
       data.payload || {},
