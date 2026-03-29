@@ -1,0 +1,112 @@
+-- Database Migration: Add Organization Ban/Status Feature
+-- File: database/migrations/20260321_add_organization_ban_status.sql
+-- Purpose: Enable admin to ban organizations and prevent user login
+-- Created: March 21, 2026
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ADD ORGANIZATION STATUS AND BAN TRACKING
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- Status values: 'active' (normal), 'banned' (policy violation), 'suspended' (temporary)
+ALTER TABLE organizations
+ADD COLUMN IF NOT EXISTS status VARCHAR(20) NOT NULL DEFAULT 'active',
+ADD COLUMN IF NOT EXISTS banned_at TIMESTAMP,
+ADD COLUMN IF NOT EXISTS ban_reason TEXT;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- CREATE INDEX FOR ADMIN QUERIES
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE INDEX IF NOT EXISTS idx_organizations_status
+ON organizations(status);
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PERFORMANCE IMPACT
+-- ═══════════════════════════════════════════════════════════════════════════
+-- Query type: Login verification (during authentication)
+-- Current: Check user status
+-- New: Also check organization status
+-- Expected: 1-2ms additional per login (one index lookup)
+-- 
+-- This check happens in auth.service.ts login() method:
+-- 1. User status check (existing)
+-- 2. Organization status check (NEW)
+-- 
+-- If organization.status = 'banned', reject login with error code 'ORG_BANNED'
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- LOGIN FLOW WITH BAN CHECK
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- 1. User enters email/password
+-- 2. Backend validates credentials against users table
+-- 3. Backend checks user.status (existing: pending, active, suspended)
+-- 4. Backend queries organization_members → organizations to get org status (NEW)
+-- 5. If org.status = 'banned', throw AppError with code 'ORG_BANNED'
+-- 6. Frontend receives error code and shows translated message
+--
+-- Error response format:
+-- {
+--   "error": "Your organization has been banned: Terms of Service violation",
+--   "code": "ORG_BANNED",
+--   "status": 403
+-- }
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- USAGE
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Admin API to ban organization:
+-- POST /api/admin/organizations/{orgId}/ban
+-- { "reason": "Terms of Service violation" }
+--
+-- SQL to ban:
+-- UPDATE organizations SET status = 'banned', banned_at = NOW(), ban_reason = 'reason'
+-- WHERE id = '{orgId}'
+--
+-- SQL to unban:
+-- UPDATE organizations SET status = 'active', banned_at = NULL, ban_reason = NULL
+-- WHERE id = '{orgId}'
+--
+-- Query banned organizations:
+-- SELECT * FROM organizations WHERE status = 'banned'
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- ADMIN AUDIT TRAIL
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- All ban/unban actions are logged in audit_logs table:
+-- - Action: 'ADMIN_BAN_ORGANIZATION'
+-- - Action: 'ADMIN_UNBAN_ORGANIZATION'
+-- - Includes: admin user_id, organization_id, timestamp, reason
+--
+-- Query admin action history:
+-- SELECT * FROM audit_logs
+-- WHERE action IN ('ADMIN_BAN_ORGANIZATION', 'ADMIN_UNBAN_ORGANIZATION')
+-- ORDER BY created_at DESC
+--
+-- ═══════════════════════════════════════════════════════════════════════════
+-- MIGRATION NOTES
+-- ═══════════════════════════════════════════════════════════════════════════
+--
+-- Backward compatible:
+-- - Adds nullable columns (banned_at, ban_reason)
+-- - Adds NOT NULL column with default value (status = 'active')
+-- - Existing organizations remain 'active' (no change in behavior)
+-- - Can be run on production without downtime
+--
+-- Files affected:
+-- Backend:
+--   - src/services/auth.service.ts (login method)
+--   - src/services/admin.service.ts (new ban/unban methods)
+--   - src/controllers/admin.controller.ts (new endpoints)
+--   - src/routes/admin.routes.ts (new routes)
+--
+-- Frontend:
+--   - src/features/auth/pages/Login.tsx (error handling)
+--   - src/features/admin/pages/AdminOrganizations.tsx (status column)
+--   - src/i18n/en.json (translations)
+--   - src/i18n/fr.json (translations)
+--   - src/i18n/de.json (translations)
+--
+-- ═══════════════════════════════════════════════════════════════════════════
