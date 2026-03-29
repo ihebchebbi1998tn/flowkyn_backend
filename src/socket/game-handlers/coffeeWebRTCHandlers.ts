@@ -27,36 +27,66 @@ function findCallerInPair(
 }
 
 export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
-  const { socket, gamesNs, gamesService, voiceCaches } = ctx;
+  const { socket, gamesNs, gamesService, voiceCaches, perSocket } = ctx;
   const user = ctx.user;
+
+  const resolveParticipantForSession = async (sessionId: string) => {
+    const cachedParticipantId = perSocket.joinedParticipantBySessionId.get(sessionId);
+    if (cachedParticipantId) {
+      return { participantId: cachedParticipantId };
+    }
+
+    const participant = await verifyGameParticipant(sessionId, user.userId, socket);
+    if (participant) {
+      perSocket.joinedParticipantBySessionId.set(sessionId, participant.participantId);
+    }
+    return participant;
+  };
+
+  const rejectVoice = (ack: ((payload: unknown) => void) | undefined, code: string, socketMessage?: string) => {
+    if (socketMessage) {
+      socket.emit('error', { message: socketMessage, code });
+    }
+    ack?.({ ok: false, error: code });
+  };
 
   // ─── WebRTC: Voice Offer ───
   socket.on('coffee:voice_offer', async (data: unknown, ack) => {
     const validation = coffeeVoiceOfferSchema.safeParse(data);
     if (!validation.success) {
-      ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+      rejectVoice(ack, 'VALIDATION', validation.error.issues[0]?.message || 'Invalid payload');
       return;
     }
 
     try {
-      const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
-      if (!caller) { ack?.({ ok: false, error: 'FORBIDDEN' }); return; }
+      const caller = await resolveParticipantForSession(validation.data.sessionId);
+      if (!caller) { rejectVoice(ack, 'FORBIDDEN', 'Not a participant'); return; }
 
       const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
       const state = latest?.state as any;
       if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
-        ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' }); return;
+        rejectVoice(ack, 'VOICE_NOT_ACTIVE', 'Voice is only available during active chat'); return;
       }
 
       const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
-      if (!pair) { ack?.({ ok: false, error: 'PAIR_NOT_FOUND' }); return; }
+      if (!pair) { rejectVoice(ack, 'PAIR_NOT_FOUND', 'Voice pair not found'); return; }
 
       const info = findCallerInPair(pair, caller.participantId);
-      if (!info) { ack?.({ ok: false, error: 'NOT_IN_PAIR' }); return; }
-      if (info.callerSide !== 'person1') { ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' }); return; }
-      if (!info.partnerParticipantId) { ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' }); return; }
+      if (!info) {
+        console.warn('[CoffeeVoice] Caller not found in pair', {
+          sessionId: validation.data.sessionId,
+          pairId: validation.data.pairId,
+          callerParticipantId: caller.participantId,
+          pairPerson1: pair?.person1?.participantId,
+          pairPerson2: pair?.person2?.participantId,
+          userId: user.userId,
+        });
+        rejectVoice(ack, 'NOT_IN_PAIR', 'Caller is not in this voice pair');
+        return;
+      }
+      if (info.callerSide !== 'person1') { rejectVoice(ack, 'VOICE_ROLE_MISMATCH', 'Only person1 can initiate voice'); return; }
+      if (!info.partnerParticipantId) { rejectVoice(ack, 'PARTNER_NOT_FOUND', 'Voice partner not found'); return; }
 
-      // Cache offer for late joiners
       const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
       voiceCaches.coffeeVoiceOfferCache.set(cacheKey, {
         sdp: validation.data.sdp,
@@ -91,7 +121,7 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
       ack?.({ ok: true, waiting: !delivery.delivered });
     } catch (err) {
       console.error('[voice_offer] error:', err);
-      ack?.({ ok: false, error: 'VOICE_OFFER_ERROR' });
+      rejectVoice(ack, 'VOICE_OFFER_ERROR', 'Voice offer failed');
     }
   });
 
@@ -99,34 +129,34 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
   socket.on('coffee:voice_request_offer', async (data: unknown, ack) => {
     const validation = coffeeVoiceRequestOfferSchema.safeParse(data);
     if (!validation.success) {
-      ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+      rejectVoice(ack, 'VALIDATION', validation.error.issues[0]?.message || 'Invalid payload');
       return;
     }
 
     try {
-      const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
-      if (!caller) { ack?.({ ok: false, error: 'FORBIDDEN' }); return; }
+      const caller = await resolveParticipantForSession(validation.data.sessionId);
+      if (!caller) { rejectVoice(ack, 'FORBIDDEN', 'Not a participant'); return; }
 
       const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
       const state = latest?.state as any;
       if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
-        ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' }); return;
+        rejectVoice(ack, 'VOICE_NOT_ACTIVE', 'Voice is only available during active chat'); return;
       }
 
       const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
-      if (!pair) { ack?.({ ok: false, error: 'PAIR_NOT_FOUND' }); return; }
+      if (!pair) { rejectVoice(ack, 'PAIR_NOT_FOUND', 'Voice pair not found'); return; }
 
       const info = findCallerInPair(pair, caller.participantId);
-      if (!info) { ack?.({ ok: false, error: 'NOT_IN_PAIR' }); return; }
-      if (info.callerSide !== 'person2') { ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' }); return; }
+      if (!info) { rejectVoice(ack, 'NOT_IN_PAIR', 'Caller is not in this voice pair'); return; }
+      if (info.callerSide !== 'person2') { rejectVoice(ack, 'VOICE_ROLE_MISMATCH', 'Only person2 can request cached offer'); return; }
 
       const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
       const cached = voiceCaches.coffeeVoiceOfferCache.get(cacheKey);
-      if (!cached) { ack?.({ ok: false, error: 'OFFER_NOT_READY' }); return; }
+      if (!cached) { rejectVoice(ack, 'OFFER_NOT_READY', 'Voice offer not ready yet'); return; }
 
       if (Date.now() - cached.createdAt > voiceCaches.COFFEE_VOICE_OFFER_TTL_MS) {
         voiceCaches.coffeeVoiceOfferCache.delete(cacheKey);
-        ack?.({ ok: false, error: 'OFFER_EXPIRED' });
+        rejectVoice(ack, 'OFFER_EXPIRED', 'Voice offer expired');
         return;
       }
 
@@ -140,7 +170,7 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
       ack?.({ ok: true });
     } catch (err) {
       console.error('[CoffeeVoice] voice_request_offer error:', err);
-      ack?.({ ok: false, error: 'VOICE_REQUEST_OFFER_ERROR' });
+      rejectVoice(ack, 'VOICE_REQUEST_OFFER_ERROR', 'Voice offer request failed');
     }
   });
 
@@ -148,27 +178,27 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
   socket.on('coffee:voice_answer', async (data: unknown, ack) => {
     const validation = coffeeVoiceAnswerSchema.safeParse(data);
     if (!validation.success) {
-      ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+      rejectVoice(ack, 'VALIDATION', validation.error.issues[0]?.message || 'Invalid payload');
       return;
     }
 
     try {
-      const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
-      if (!caller) { ack?.({ ok: false, error: 'FORBIDDEN' }); return; }
+      const caller = await resolveParticipantForSession(validation.data.sessionId);
+      if (!caller) { rejectVoice(ack, 'FORBIDDEN', 'Not a participant'); return; }
 
       const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
       const state = latest?.state as any;
       if (state?.kind !== 'coffee-roulette' || state?.phase !== 'chatting') {
-        ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' }); return;
+        rejectVoice(ack, 'VOICE_NOT_ACTIVE', 'Voice is only available during active chat'); return;
       }
 
       const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
-      if (!pair) { ack?.({ ok: false, error: 'PAIR_NOT_FOUND' }); return; }
+      if (!pair) { rejectVoice(ack, 'PAIR_NOT_FOUND', 'Voice pair not found'); return; }
 
       const info = findCallerInPair(pair, caller.participantId);
-      if (!info) { ack?.({ ok: false, error: 'NOT_IN_PAIR' }); return; }
-      if (info.callerSide !== 'person2') { ack?.({ ok: false, error: 'VOICE_ROLE_MISMATCH' }); return; }
-      if (!info.partnerParticipantId) { ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' }); return; }
+      if (!info) { rejectVoice(ack, 'NOT_IN_PAIR', 'Caller is not in this voice pair'); return; }
+      if (info.callerSide !== 'person2') { rejectVoice(ack, 'VOICE_ROLE_MISMATCH', 'Only person2 can answer voice'); return; }
+      if (!info.partnerParticipantId) { rejectVoice(ack, 'PARTNER_NOT_FOUND', 'Voice partner not found'); return; }
 
       emitToParticipantOrQueue({
         gamesNs,
@@ -187,32 +217,29 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
       ack?.({ ok: true });
     } catch (err) {
       console.error('[voice_answer] error:', err);
-      ack?.({ ok: false, error: 'VOICE_ANSWER_ERROR' });
+      rejectVoice(ack, 'VOICE_ANSWER_ERROR', 'Voice answer failed');
     }
   });
 
   // ─── WebRTC: ICE Candidate ───
-  // Performance: ICE candidates fire in rapid bursts (5-20+ per call).
-  // We skip the expensive snapshot lookup and only verify participant + relay to partner.
   socket.on('coffee:voice_ice_candidate', async (data: unknown, ack) => {
     const validation = coffeeVoiceIceCandidateSchema.safeParse(data);
     if (!validation.success) {
-      ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+      rejectVoice(ack, 'VALIDATION', validation.error.issues[0]?.message || 'Invalid payload');
       return;
     }
 
     try {
-      const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
-      if (!caller) { ack?.({ ok: false, error: 'FORBIDDEN' }); return; }
+      const caller = await resolveParticipantForSession(validation.data.sessionId);
+      if (!caller) { rejectVoice(ack, 'FORBIDDEN', 'Not a participant'); return; }
 
       const { sessionId, pairId } = validation.data;
-
       const latest = await gamesService.getLatestSnapshot(sessionId);
       const state = latest?.state as any;
       const pair = (state?.pairs || []).find((p: any) => p.id === pairId);
-      if (!pair) { ack?.({ ok: false, error: 'PAIR_NOT_FOUND' }); return; }
+      if (!pair) { rejectVoice(ack, 'PAIR_NOT_FOUND', 'Voice pair not found'); return; }
       const info = findCallerInPair(pair, caller.participantId);
-      if (!info || !info.partnerParticipantId) { ack?.({ ok: false, error: 'NOT_IN_PAIR' }); return; }
+      if (!info || !info.partnerParticipantId) { rejectVoice(ack, 'NOT_IN_PAIR', 'Caller is not in this voice pair'); return; }
 
       emitToParticipantOrQueue({
         gamesNs,
@@ -231,7 +258,7 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
       ack?.({ ok: true });
     } catch (err) {
       console.error('[voice_ice_candidate] error:', err);
-      ack?.({ ok: false, error: 'VOICE_ICE_ERROR' });
+      rejectVoice(ack, 'VOICE_ICE_ERROR', 'Voice ICE relay failed');
     }
   });
 
@@ -239,26 +266,26 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
   socket.on('coffee:voice_hangup', async (data: unknown, ack) => {
     const validation = coffeeVoiceHangupSchema.safeParse(data);
     if (!validation.success) {
-      ack?.({ ok: false, error: validation.error.issues[0]?.message || 'Invalid payload' });
+      rejectVoice(ack, 'VALIDATION', validation.error.issues[0]?.message || 'Invalid payload');
       return;
     }
 
     try {
-      const caller = await verifyGameParticipant(validation.data.sessionId, user.userId, socket);
-      if (!caller) { ack?.({ ok: false, error: 'FORBIDDEN' }); return; }
+      const caller = await resolveParticipantForSession(validation.data.sessionId);
+      if (!caller) { rejectVoice(ack, 'FORBIDDEN', 'Not a participant'); return; }
 
       const latest = await gamesService.getLatestSnapshot(validation.data.sessionId);
       const state = latest?.state as any;
       if (state?.kind !== 'coffee-roulette') {
-        ack?.({ ok: false, error: 'VOICE_NOT_ACTIVE' }); return;
+        rejectVoice(ack, 'VOICE_NOT_ACTIVE', 'Voice is not active'); return;
       }
 
       const pair = (state?.pairs || []).find((p: any) => p.id === validation.data.pairId);
-      if (!pair) { ack?.({ ok: false, error: 'PAIR_NOT_FOUND' }); return; }
+      if (!pair) { rejectVoice(ack, 'PAIR_NOT_FOUND', 'Voice pair not found'); return; }
 
       const info = findCallerInPair(pair, caller.participantId);
-      if (!info) { ack?.({ ok: false, error: 'NOT_IN_PAIR' }); return; }
-      if (!info.partnerParticipantId) { ack?.({ ok: false, error: 'PARTNER_NOT_FOUND' }); return; }
+      if (!info) { rejectVoice(ack, 'NOT_IN_PAIR', 'Caller is not in this voice pair'); return; }
+      if (!info.partnerParticipantId) { rejectVoice(ack, 'PARTNER_NOT_FOUND', 'Voice partner not found'); return; }
 
       emitToParticipantOrQueue({
         gamesNs,
@@ -273,14 +300,13 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
         },
       });
 
-      // Clear cached offer
       const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
       voiceCaches.coffeeVoiceOfferCache.delete(cacheKey);
 
       ack?.({ ok: true });
     } catch (err) {
       console.error('[voice_hangup] error:', err);
-      ack?.({ ok: false, error: 'VOICE_HANGUP_ERROR' });
+      rejectVoice(ack, 'VOICE_HANGUP_ERROR', 'Voice hangup failed');
     }
   });
 }
