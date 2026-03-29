@@ -7,6 +7,7 @@ module.exports = {
       exec_mode: 'fork',        // Fork mode (no cluster) — avoids cross-worker Socket.IO issues
       env: {
         NODE_ENV: 'production',
+        NODE_OPTIONS: '--no-deprecation',
       },
       
       // ═══════════════════════════════════════════════════════════════
@@ -94,6 +95,7 @@ module.exports = {
       
       env: {
         NODE_ENV: 'production',
+        NODE_OPTIONS: '--no-deprecation',
       },
     },
   ],
