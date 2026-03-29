@@ -86,7 +86,7 @@ export const reactToPostSchema = z.object({
 
 export const guestJoinSchema = z.object({
   name: z.string().trim().min(1, 'Name is required').max(100),
-  email: z.string().trim().email().max(255).optional().or(z.literal('')).transform(v => v || undefined),
+  email: z.union([z.string().trim().email().max(255), z.literal('')]).optional().transform(v => v || undefined),
   avatar_url: z.string().max(500).optional().nullable().transform(v => v || undefined),
   token: z.string().max(255).optional(),
   guest_identity_key: z.string().trim().min(16).max(128).regex(/^[A-Za-z0-9_-]+$/, 'Invalid guest identity key').optional(),
