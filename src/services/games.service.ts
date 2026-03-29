@@ -205,8 +205,14 @@ export class GamesService {
     });
 
     if (!result.isNew) {
-      // Just fetch the full existing session to return it
-      const fullExistingSession = await queryOne('SELECT * FROM game_sessions WHERE id = $1', [result.session.id]);
+      // Just fetch the full existing session with game_type_key to return it
+      const fullExistingSession = await queryOne(
+        `SELECT gs.*, gt.key as game_type_key
+         FROM game_sessions gs
+         JOIN game_types gt ON gt.id = gs.game_type_id
+         WHERE gs.id = $1`,
+        [result.session.id]
+      );
       return { ...fullExistingSession, active_round_id: result.roundId } as any;
     }
 
@@ -228,8 +234,8 @@ export class GamesService {
       }
     }
 
-    // Include roundId for convenience to callers that need it.
-    return { ...result.session, active_round_id: result.roundId } as any;
+    // Include roundId and game_type_key for convenience to callers that need it.
+    return { ...result.session, active_round_id: result.roundId, game_type_key: gameType.key } as any;
   }
 
   async getSession(sessionId: string) {

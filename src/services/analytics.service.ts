@@ -376,68 +376,112 @@ export class AnalyticsService {
       sessionMetrics,
       participantBreakdown,
       timelineData,
+      messageStats,
+      feedbackStats,
     ] = await Promise.all([
       queryOne<any>(
         `SELECT 
-           e.id, e.title, e.status, e.event_mode, e.created_at,
+           e.id, e.title, e.status, e.event_mode, e.created_at, e.start_time, e.end_time,
            COUNT(DISTINCT p.id) as total_participants,
            COUNT(DISTINCT p.id) FILTER (WHERE p.left_at IS NULL) as active_participants,
-           COUNT(DISTINCT gs.id) as total_sessions
+           COUNT(DISTINCT gs.id) as total_sessions,
+           COUNT(DISTINCT em.id) as total_messages,
+           ROUND(EXTRACT(EPOCH FROM (COALESCE(e.end_time, NOW()) - e.start_time)) / 60) as duration_minutes
          FROM events e
          LEFT JOIN participants p ON p.event_id = e.id
          LEFT JOIN game_sessions gs ON gs.event_id = e.id
+         LEFT JOIN event_messages em ON em.event_id = e.id
          WHERE e.id = $1
-         GROUP BY e.id, e.title, e.status, e.event_mode, e.created_at`,
+         GROUP BY e.id, e.title, e.status, e.event_mode, e.created_at, e.start_time, e.end_time`,
         [eventId]
       ),
-      // Session metrics
+      // Session metrics with actual per-session participant counts
       query<any>(
         `SELECT 
            gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at,
-           gt.name as game_name,
-           COUNT(DISTINCT p.id) as participant_count
+           gt.name as game_name, gt.key as game_key,
+           ROUND(EXTRACT(EPOCH FROM (COALESCE(gs.ended_at, NOW()) - gs.started_at)) / 60) as duration_minutes,
+           (SELECT COUNT(DISTINCT ga.participant_id) FROM game_actions ga WHERE ga.game_session_id = gs.id) as participant_count,
+           (SELECT COUNT(*) FROM game_actions ga WHERE ga.game_session_id = gs.id) as total_actions
          FROM game_sessions gs
          JOIN game_types gt ON gt.id = gs.game_type_id
-         LEFT JOIN participants p ON p.event_id = gs.event_id
          WHERE gs.event_id = $1
-         GROUP BY gs.id, gs.status, gs.current_round, gs.started_at, gs.ended_at, gt.name
          ORDER BY gs.started_at DESC`,
         [eventId]
       ),
-      // Participant engagement
+      // Participant engagement with proper name resolution
       query<any>(
         `SELECT 
-           p.id, p.display_name, p.created_at, p.left_at,
+           p.id,
+           COALESCE(ep.display_name, p.guest_name, u.name, 'Unknown') as display_name,
+           COALESCE(ep.avatar_url, p.guest_avatar, u.avatar_url) as avatar_url,
+           p.participant_type,
+           p.joined_at, p.left_at,
            COUNT(DISTINCT ga.id) as interaction_count,
-           MAX(ga.created_at) as last_activity_at
+           COUNT(DISTINCT em.id) as message_count,
+           MAX(GREATEST(ga.created_at, em.created_at)) as last_activity_at
          FROM participants p
+         LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
          LEFT JOIN game_actions ga ON ga.participant_id = p.id
+         LEFT JOIN event_messages em ON em.participant_id = p.id AND em.event_id = p.event_id
          WHERE p.event_id = $1
-         GROUP BY p.id, p.display_name, p.created_at, p.left_at
+         GROUP BY p.id, ep.display_name, p.guest_name, u.name, ep.avatar_url, p.guest_avatar, u.avatar_url,
+                  p.participant_type, p.joined_at, p.left_at
          ORDER BY interaction_count DESC`,
         [eventId]
       ),
-      // Timeline of key events
+      // Timeline of sessions
       query<any>(
         `SELECT 
            gs.id, gs.started_at, gs.ended_at, gs.status,
            gt.name as game_name,
-           COUNT(DISTINCT p.id) as participant_count
+           (SELECT COUNT(DISTINCT ga.participant_id) FROM game_actions ga WHERE ga.game_session_id = gs.id) as participant_count
          FROM game_sessions gs
          JOIN game_types gt ON gt.id = gs.game_type_id
-         LEFT JOIN participants p ON p.event_id = gs.event_id AND p.created_at <= gs.ended_at
          WHERE gs.event_id = $1
          GROUP BY gs.id, gs.started_at, gs.ended_at, gs.status, gt.name
          ORDER BY gs.started_at ASC`,
         [eventId]
       ),
+      // Message activity over time (hourly buckets)
+      query<any>(
+        `SELECT 
+           date_trunc('hour', em.created_at) as hour,
+           COUNT(*) as message_count,
+           COUNT(DISTINCT em.participant_id) as active_senders
+         FROM event_messages em
+         WHERE em.event_id = $1
+         GROUP BY date_trunc('hour', em.created_at)
+         ORDER BY hour ASC`,
+        [eventId]
+      ),
+      // Feedback summary
+      query<any>(
+        `SELECT 
+           ROUND(AVG(af.rating), 1) as avg_rating,
+           COUNT(*) as total_feedbacks,
+           COUNT(*) FILTER (WHERE af.rating >= 4) as positive_count,
+           COUNT(*) FILTER (WHERE af.rating <= 2) as negative_count
+         FROM activity_feedbacks af
+         WHERE af.event_id = $1`,
+        [eventId]
+      ),
     ]);
 
+    // Compute engagement rate: participants with at least 1 action / total participants
+    const totalP = parseInt(eventDetails?.total_participants || '0');
+    const activeInteractors = participantBreakdown.filter((p: any) => parseInt(p.interaction_count) > 0).length;
+    const engagementRate = totalP > 0 ? Math.round((activeInteractors / totalP) * 100) : 0;
+
     return {
-      event: eventDetails,
+      event: { ...eventDetails, engagement_rate: engagementRate },
       sessions: sessionMetrics,
       participants: participantBreakdown,
       timeline: timelineData,
+      messageActivity: messageStats,
+      feedback: feedbackStats[0] || { avg_rating: null, total_feedbacks: 0, positive_count: 0, negative_count: 0 },
     };
   }
 

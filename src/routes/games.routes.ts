@@ -83,7 +83,7 @@ router.get('/game-sessions/:sessionId/messages', authenticate, validate(sessionI
 router.get('/game-sessions/:sessionId/export', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.exportSessionData);
 router.post('/game-sessions/:sessionId/close', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.closeSession);
 router.delete('/game-sessions/:sessionId', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.deleteSession);
-// NOTE: GET /events/:eventId/game-sessions/active is already registered above (line 51) with authenticateOrGuest support.
-// Do NOT duplicate it here. Use the route on line 51 which supports both authenticated users and guests.
+// List ALL active sessions for an event (returns array) — used by admin session management
+router.get('/events/:eventId/game-sessions/active-list', authenticate, validate(eventIdParam, 'params'), sessionCtrl.getActiveSessionsForEvent);
 
 export { router as gamesRoutes };

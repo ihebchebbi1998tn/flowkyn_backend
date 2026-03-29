@@ -50,11 +50,14 @@ async function verifyVoiceParticipant(
     display_name: string;
     avatar_url: string | null;
   }>(
-    `SELECT ep.participant_id, COALESCE(ep.display_name, u.full_name, u.email) as display_name, ep.avatar_url
+    `SELECT p.id as participant_id,
+            COALESCE(ep.display_name, u.name, u.email) as display_name,
+            COALESCE(ep.avatar_url, u.avatar_url) as avatar_url
      FROM participants p
-     JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
-     LEFT JOIN users u ON u.id = ep.user_id
-     WHERE p.event_id = $1 AND ep.user_id = $2 AND p.left_at IS NULL`,
+     LEFT JOIN event_profiles ep ON ep.event_id = p.event_id AND ep.participant_id = p.id
+     LEFT JOIN organization_members om ON om.id = p.organization_member_id
+     LEFT JOIN users u ON u.id = om.user_id
+     WHERE p.event_id = $1 AND om.user_id = $2 AND p.left_at IS NULL`,
     [eventId, userId]
   );
 
