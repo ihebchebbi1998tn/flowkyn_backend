@@ -1,6 +1,6 @@
 export type StrategicState = {
   kind: 'strategic-escape';
-  phase: 'setup' | 'roles_assignment' | 'pre_discussion' | 'discussion' | 'debrief';
+  phase: 'setup' | 'roles_assignment' | 'discussion' | 'debrief';
   industryKey: string | null;
   crisisKey: string | null;
   difficultyKey: 'easy' | 'medium' | 'hard';

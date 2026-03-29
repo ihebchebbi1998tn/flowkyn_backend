@@ -159,20 +159,20 @@ export async function handleCoffeeAction({
 
   actionQueues.coffeeActionQueue.set(
     data.sessionId,
-    run
-      .then(() => undefined)
-      .catch((err) => {
-        console.error('[CoffeeRoulette] Async action failed:', {
-          sessionId: data.sessionId,
-          actionType: data.actionType,
-          userId: ctx.user.userId,
-          error: err instanceof Error ? err.message : String(err),
-          stack: err instanceof Error ? err.stack : undefined,
-        });
-        throw err;
-      }),
+    run.catch(() => undefined),
   );
-  await run;
+
+  try {
+    await run;
+  } catch (err: any) {
+    console.error('[CoffeeRoulette] Action failed:', {
+      sessionId: data.sessionId,
+      actionType: data.actionType,
+      userId: ctx.user.userId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    socket.emit('error', { message: err?.message || 'Coffee action failed', code: 'ACTION_ERROR' });
+  }
 }
 
 /**
@@ -229,15 +229,7 @@ export async function handleCoffeeRematchOnLeave(
 
   actionQueues.coffeeActionQueue.set(
     sessionId,
-    run.then(() => undefined).catch((err) => {
-      console.error('[GameCleanup] Async action failed:', {
-        sessionId,
-        participantId,
-        error: err instanceof Error ? err.message : String(err),
-        stack: err instanceof Error ? err.stack : undefined,
-      });
-      throw err;
-    }),
+    run.catch(() => undefined),
   );
   void run;
 }

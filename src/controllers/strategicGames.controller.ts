@@ -115,17 +115,39 @@ export class StrategicGamesController {
   async acknowledgeMyStrategicRole(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const participantId = await this.resolveParticipantIdForSession(req.params.sessionId, req);
+      const sessionId = req.params.sessionId;
 
       const result = await query(
         `UPDATE strategic_roles
          SET revealed_at = COALESCE(revealed_at, NOW())
          WHERE game_session_id = $1 AND participant_id = $2`,
-        [req.params.sessionId, participantId]
+        [sessionId, participantId]
       );
 
       if ((result as any)?.rowCount === 0) {
         throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
       }
+
+      // Emit updated reveal status to all players in the session
+      const row = await queryOne<{ total: string; acknowledged: string }>(
+        `WITH assigned AS (
+           SELECT sr.participant_id, sr.revealed_at
+           FROM strategic_roles sr
+           WHERE sr.game_session_id = $1
+         )
+         SELECT
+           (SELECT COUNT(*)::text FROM assigned) as total,
+           (SELECT COUNT(*)::text FROM assigned WHERE revealed_at IS NOT NULL) as acknowledged`,
+        [sessionId]
+      );
+      const total = Number(row?.total || 0);
+      const acknowledged = Number(row?.acknowledged || 0);
+      emitGameUpdate(sessionId, 'strategic:reveal_status', {
+        sessionId,
+        total,
+        acknowledged,
+        allAcknowledged: total > 0 && acknowledged >= total,
+      });
 
       res.status(204).send();
     } catch (err) {
@@ -160,17 +182,39 @@ export class StrategicGamesController {
   async readyMyStrategicRole(req: AuthRequest, res: Response, next: NextFunction) {
     try {
       const participantId = await this.resolveParticipantIdForSession(req.params.sessionId, req);
+      const sessionId = req.params.sessionId;
 
       const result = await query(
         `UPDATE strategic_roles
          SET ready_at = COALESCE(ready_at, NOW())
          WHERE game_session_id = $1 AND participant_id = $2`,
-        [req.params.sessionId, participantId]
+        [sessionId, participantId]
       );
 
       if ((result as any)?.rowCount === 0) {
         throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
       }
+
+      // Emit updated ready status to all players in the session
+      const row = await queryOne<{ total: string; ready: string }>(
+        `WITH assigned AS (
+           SELECT sr.participant_id, sr.ready_at
+           FROM strategic_roles sr
+           WHERE sr.game_session_id = $1
+         )
+         SELECT
+           (SELECT COUNT(*)::text FROM assigned) as total,
+           (SELECT COUNT(*)::text FROM assigned WHERE ready_at IS NOT NULL) as ready`,
+        [sessionId]
+      );
+      const total = Number(row?.total || 0);
+      const ready = Number(row?.ready || 0);
+      emitGameUpdate(sessionId, 'strategic:ready_status', {
+        sessionId,
+        total,
+        ready,
+        allReady: total > 0 && ready >= total,
+      });
 
       res.status(204).send();
     } catch (err) {
