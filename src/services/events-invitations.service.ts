@@ -13,6 +13,7 @@
 
 import { v4 as uuid } from 'uuid';
 import { query, queryOne, transaction } from '../config/database';
+import { hasGuestIdentityKey } from '../utils/dbSafeColumns';
 import { sendEmail } from './email.service';
 import { AppError } from '../middleware/errorHandler';
 import { parsePagination, buildPaginatedResponse } from '../utils/pagination';
@@ -180,8 +181,10 @@ export class EventInvitationsService {
     const identityKey = typeof data.guest_identity_key === 'string' ? data.guest_identity_key.trim() : '';
     const normalizedIdentityKey = identityKey || null;
 
+    const hasIdentityCol = await hasGuestIdentityKey();
+
     return await transaction(async (client) => {
-      if (normalizedIdentityKey) {
+      if (normalizedIdentityKey && hasIdentityCol) {
         const existingByIdentity = await client.query<{ id: string; guest_name: string | null }>(
           `SELECT id, guest_name
            FROM participants
@@ -218,9 +221,6 @@ export class EventInvitationsService {
 
       const participantId = uuid();
 
-      // Check for name conflicts across both guest_name and event_profiles.display_name
-      // Exclude the new guest being added (since this is a new participant, there's no existing ID to exclude)
-      // However, if someone rejoins from the same device/browser, we need to allow them
       const conflict = await client.query(
         `SELECT id FROM (
           SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
@@ -237,11 +237,19 @@ export class EventInvitationsService {
         throw new AppError('This name is already taken in this lobby. Please choose a slightly different one.', 400, 'NAME_TAKEN');
       }
 
-      await client.query(
-        `INSERT INTO participants (id, event_id, guest_name, guest_avatar, guest_identity_key, participant_type, joined_at, created_at)
-         VALUES ($1, $2, $3, $4, $5, 'guest', NOW(), NOW())`,
-        [participantId, eventId, sanitizedName, data.avatar_url || null, normalizedIdentityKey]
-      );
+      if (hasIdentityCol) {
+        await client.query(
+          `INSERT INTO participants (id, event_id, guest_name, guest_avatar, guest_identity_key, participant_type, joined_at, created_at)
+           VALUES ($1, $2, $3, $4, $5, 'guest', NOW(), NOW())`,
+          [participantId, eventId, sanitizedName, data.avatar_url || null, normalizedIdentityKey]
+        );
+      } else {
+        await client.query(
+          `INSERT INTO participants (id, event_id, guest_name, guest_avatar, participant_type, joined_at, created_at)
+           VALUES ($1, $2, $3, $4, 'guest', NOW(), NOW())`,
+          [participantId, eventId, sanitizedName, data.avatar_url || null]
+        );
+      }
 
       if (data.token) {
         await client.query(

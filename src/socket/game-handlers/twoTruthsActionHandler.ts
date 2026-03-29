@@ -119,7 +119,12 @@ export async function handleTwoTruthsAction({
 
     const publiclySafeState = sanitizeTwoTruthsStateForPublic(next);
 
-    const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    let savedSnapshot: any = null;
+    try {
+      savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    } catch (snapErr: any) {
+      console.error('[TwoTruths] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
+    }
     gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
       sessionId: data.sessionId,
       gameData: publiclySafeState,
@@ -157,7 +162,7 @@ export async function handleTwoTruthsAction({
     return;
   }
 
-  let action: { created_at: Date };
+  let action: { created_at: Date } | null = null;
   try {
     action = await gamesService.submitAction(
       data.sessionId,
@@ -167,17 +172,12 @@ export async function handleTwoTruthsAction({
       data.payload || {},
     );
   } catch (submitErr: any) {
-    console.error('[Games] two-truths submitAction after snapshot:', {
+    console.error('[Games] two-truths submitAction after snapshot (non-fatal):', {
       sessionId: data.sessionId,
       actionType: data.actionType,
       userId: ctx.user.userId,
       error: submitErr instanceof Error ? submitErr.message : String(submitErr),
     });
-    socket.emit('error', {
-      message: submitErr?.message || 'Failed to persist action',
-      code: (submitErr as any)?.code || 'ACTION_ERROR',
-    });
-    return;
   }
 
   gamesNs.to(`game:${data.sessionId}`).emit('game:action', {
@@ -185,7 +185,7 @@ export async function handleTwoTruthsAction({
     participantId: participant.participantId,
     actionType: data.actionType,
     payload: data.payload,
-    timestamp: action.created_at,
+    timestamp: action?.created_at || new Date().toISOString(),
   });
 
   // Log vote actions to audit trail for dispute resolution

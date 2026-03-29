@@ -73,7 +73,12 @@ export async function handleStrategicAction({
       prev: (freshLatest?.state as any) || null,
       session,
     });
-    const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    let savedSnapshot: any = null;
+    try {
+      savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    } catch (snapErr: any) {
+      console.error('[Strategic] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
+    }
     gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
       sessionId: data.sessionId,
       gameData: next,

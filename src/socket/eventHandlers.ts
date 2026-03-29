@@ -8,6 +8,7 @@ import { addPresence, removePresence, getPresence } from './index';
 import { EventMessagesService } from '../services/events-messages.service';
 import { query, queryOne } from '../config/database';
 import { sanitizeText } from '../utils/sanitize';
+import { hasGuestIdentityKey } from '../utils/dbSafeColumns';
 import crypto from 'crypto';
 
 const messagesService = new EventMessagesService();
@@ -47,8 +48,8 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
     
     // Reload/self-heal fallback: if participantId from token no longer resolves,
     // recover by stable guest_identity_key for this event.
-    if (!socket.guestPayload.guestIdentityKey) {
-      console.warn('[Events] Recovery BLOCKED: no identity key in guest payload', {
+    if (!socket.guestPayload.guestIdentityKey || !(await hasGuestIdentityKey())) {
+      console.warn('[Events] Recovery BLOCKED: no identity key in guest payload or column missing', {
         eventId: eventId.substring(0, 8) + '...',
         socketId: socket.id,
       });
@@ -97,6 +98,11 @@ async function verifyParticipant(eventId: string, userId: string, socket?: Authe
         recovery: recoveryEventId,
         socketId: socket.id,
       });
+      return null;
+    }
+
+    if (!(await hasGuestIdentityKey())) {
+      console.warn('[Events] Guest recovery blocked: guest_identity_key column not yet available');
       return null;
     }
 

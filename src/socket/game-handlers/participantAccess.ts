@@ -1,5 +1,6 @@
 import crypto from 'crypto';
 import { query, queryOne } from '../../config/database';
+import { hasGuestIdentityKey } from '../../utils/dbSafeColumns';
 import type { AuthenticatedSocket } from '../types';
 
 /** Verify the user is a participant in the game session's event and return their participant ID */
@@ -26,8 +27,8 @@ export async function verifyGameParticipant(
       socketId: socket.id,
     });
 
-    if (!socket.guestPayload.guestIdentityKey) {
-      console.warn('[Games] Recovery BLOCKED: no identity key in guest payload', {
+    if (!socket.guestPayload.guestIdentityKey || !(await hasGuestIdentityKey())) {
+      console.warn('[Games] Recovery BLOCKED: no identity key or column missing', {
         sessionId: sessionId.substring(0, 8) + '...',
         socketId: socket.id,
       });
@@ -64,8 +65,8 @@ export async function verifyGameParticipant(
     const recoveryEventId = typeof socket.handshake.auth.eventId === 'string' ? socket.handshake.auth.eventId : '';
     const recoveryKey = socket.handshake.auth.guestIdentityKey;
 
-    if (!recoveryEventId) {
-      console.warn('[Games] Guest recovery blocked: missing eventId', { sessionId: sessionId.substring(0, 8) + '...' });
+    if (!recoveryEventId || !(await hasGuestIdentityKey())) {
+      console.warn('[Games] Guest recovery blocked: missing eventId or column', { sessionId: sessionId.substring(0, 8) + '...' });
       return null;
     }
 

@@ -103,6 +103,9 @@ export class EventMessagesService {
   async getPosts(eventId: string, pagination: { page?: number; limit?: number }, currentParticipantId?: string) {
     const { page, limit, offset } = parsePagination(pagination);
 
+    // Ensure tables exist before querying
+    await this.ensurePostsTables();
+
     // Fetch posts with author display info
     const [posts, [{ count }]] = await Promise.all([
       query(
@@ -212,15 +215,27 @@ export class EventMessagesService {
 
     // Validate parent post exists and belongs to this event
     if (parentPostId) {
-      const parent = await queryOne(
-        'SELECT id FROM activity_posts WHERE id = $1 AND event_id = $2',
-        [parentPostId, eventId]
-      );
-      if (!parent) throw new AppError('Parent post not found', 404, 'NOT_FOUND');
+      try {
+        const parent = await queryOne(
+          'SELECT id FROM activity_posts WHERE id = $1 AND event_id = $2',
+          [parentPostId, eventId]
+        );
+        if (!parent) throw new AppError('Parent post not found', 404, 'NOT_FOUND');
+      } catch (err: any) {
+        // Table might not exist yet
+        if (err?.code === '42P01') {
+          // Will be created below
+        } else if (err instanceof AppError) {
+          throw err;
+        }
+      }
     }
 
     const sanitizedContent = sanitizeText(content, 5000);
     if (sanitizedContent.length === 0) throw new AppError('Post content cannot be empty', 400, 'VALIDATION_FAILED');
+
+    // Ensure activity_posts table exists (auto-create if missing)
+    await this.ensurePostsTables();
 
     const [post] = await query(
       `INSERT INTO activity_posts (id, event_id, author_participant_id, content, parent_post_id, created_at)
@@ -228,6 +243,36 @@ export class EventMessagesService {
       [uuid(), eventId, participantId, sanitizedContent, parentPostId || null]
     );
     return post;
+  }
+
+  private async ensurePostsTables(): Promise<void> {
+    try {
+      await query(
+        `CREATE TABLE IF NOT EXISTS activity_posts (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          event_id UUID NOT NULL,
+          author_participant_id UUID NOT NULL,
+          content TEXT NOT NULL,
+          parent_post_id UUID,
+          created_at TIMESTAMPTZ DEFAULT NOW()
+        )`,
+        []
+      );
+    } catch { /* table likely exists or no DDL permission */ }
+
+    try {
+      await query(
+        `CREATE TABLE IF NOT EXISTS post_reactions (
+          id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+          post_id UUID NOT NULL,
+          participant_id UUID NOT NULL,
+          reaction_type VARCHAR(50) NOT NULL,
+          created_at TIMESTAMPTZ DEFAULT NOW(),
+          UNIQUE(post_id, participant_id, reaction_type)
+        )`,
+        []
+      );
+    } catch { /* table likely exists or no DDL permission */ }
   }
 
   /**
@@ -239,6 +284,8 @@ export class EventMessagesService {
    * @param reactionType - Reaction emoji/type string
    */
   async reactToPost(postId: string, participantId: string, reactionType: string) {
+    await this.ensurePostsTables();
+
     const postRow = await queryOne<{ event_id: string }>(
       'SELECT event_id FROM activity_posts WHERE id = $1',
       [postId]

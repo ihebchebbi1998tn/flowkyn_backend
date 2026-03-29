@@ -84,18 +84,27 @@ export async function handleCoffeeAction({
       session,
     });
 
-    const savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    let savedSnapshot: any = null;
+    try {
+      savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
+    } catch (snapErr: any) {
+      console.error('[CoffeeRoulette] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
+    }
 
     // Persist action to DB AFTER validation and reducer succeed
     const coffeeRoundId = roundId || (await gamesService.getActiveRound(data.sessionId))?.id;
     if (coffeeRoundId) {
-      await gamesService.submitAction(
-        data.sessionId,
-        coffeeRoundId,
-        participant.participantId,
-        data.actionType,
-        data.payload || {},
-      );
+      try {
+        await gamesService.submitAction(
+          data.sessionId,
+          coffeeRoundId,
+          participant.participantId,
+          data.actionType,
+          data.payload || {},
+        );
+      } catch (submitErr: any) {
+        console.error('[CoffeeRoulette] submitAction failed (non-fatal)', { error: submitErr?.message });
+      }
     }
 
     const roomId = `game:${data.sessionId}`;

@@ -48,17 +48,19 @@ export class EventsParticipationController {
           const { verifyGuestToken } = await import('../../utils/jwt');
           const guestPayload = verifyGuestToken(token);
           if (guestPayload.eventId === _req.params.eventId) {
-            const pt = await queryOne<{ id: string; guest_name: string; guest_identity_key: string | null }>(
-              'SELECT id, guest_name, guest_identity_key FROM participants WHERE id = $1 AND left_at IS NULL',
+            const pt = await queryOne<{ id: string; guest_name: string; guest_identity_key?: string | null }>(
+              'SELECT id, guest_name FROM participants WHERE id = $1 AND left_at IS NULL',
               [guestPayload.participantId]
             );
             if (pt) {
               const incomingIdentityKey = typeof _req.body?.guest_identity_key === 'string' ? _req.body.guest_identity_key : null;
-              if (incomingIdentityKey && !pt.guest_identity_key) {
-                await query(
-                  `UPDATE participants SET guest_identity_key = $1 WHERE id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
-                  [incomingIdentityKey, pt.id]
-                );
+              if (incomingIdentityKey) {
+                try {
+                  await query(
+                    `UPDATE participants SET guest_identity_key = $1 WHERE id = $2 AND participant_type = 'guest' AND left_at IS NULL`,
+                    [incomingIdentityKey, pt.id]
+                  );
+                } catch { /* column may not exist yet */ }
               }
               const displayRow = await queryOne<{ display_name: string | null }>(
                 `SELECT ep.display_name FROM event_profiles ep WHERE ep.event_id = $1 AND ep.participant_id = $2`,

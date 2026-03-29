@@ -43,11 +43,11 @@ export async function reduceStrategicState(args: {
     if (base.phase !== 'setup') return base;
     return {
       ...base,
-      industryKey: payload?.industryKey ?? base.industryKey,
-      crisisKey: payload?.crisisKey ?? base.crisisKey,
+      industryKey: payload?.industryKey ?? payload?.industry ?? base.industryKey,
+      crisisKey: payload?.crisisKey ?? payload?.crisis ?? base.crisisKey,
       difficultyKey: payload?.difficultyKey || payload?.difficulty || base.difficultyKey,
       industryLabel: payload?.industryLabel || payload?.industry || base.industryLabel,
-      crisisLabel: payload?.crisisLabel || payload?.crisisType || base.crisisLabel,
+      crisisLabel: payload?.crisisLabel || payload?.crisis || payload?.crisisType || base.crisisLabel,
       difficultyLabel: payload?.difficultyLabel || payload?.difficulty || base.difficultyLabel,
       phase: 'setup',
       gameStatus: 'waiting',
@@ -55,8 +55,8 @@ export async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:assign_roles') {
-    if (base.phase !== 'setup') return base;
-    if (base.rolesAssigned) return base;
+    if (base.phase !== 'setup' && base.phase !== 'roles_assignment') return base;
+    if (base.rolesAssigned && base.phase === 'roles_assignment') return base;
     return {
       ...base,
       rolesAssigned: true,

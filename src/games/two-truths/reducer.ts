@@ -135,39 +135,41 @@ export async function reduceTwoTruthsState(args: {
     if (!['s0', 's1', 's2'].includes(choice)) return base;
     if (base.presenterParticipantId && participantId === base.presenterParticipantId) return base;
 
+    // Try to persist vote to DB, but don't block in-memory tracking if DB fails
     try {
       const roundIdForVote = activeRoundId || null;
-      if (!session?.id || !roundIdForVote) {
-        throw new Error('Cannot record vote: missing session or active round');
-      }
-      const voteResult = await query<{ statement_id: string }>(
-        `INSERT INTO game_votes (game_session_id, round_id, participant_id, statement_id)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (game_session_id, round_id, participant_id)
-         DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()
-         RETURNING statement_id`,
-        [session.id, roundIdForVote, participantId, choice]
-      );
+      if (session?.id && roundIdForVote) {
+        const voteResult = await query<{ statement_id: string }>(
+          `INSERT INTO game_votes (game_session_id, round_id, participant_id, statement_id)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (game_session_id, round_id, participant_id)
+           DO UPDATE SET statement_id = EXCLUDED.statement_id, voted_at = NOW()
+           RETURNING statement_id`,
+          [session.id, roundIdForVote, participantId, choice]
+        );
 
-      if (!voteResult?.[0]) {
-        throw new Error('Vote insertion returned no result - database write failed');
+        console.log('[TwoTruths] Atomic vote recorded successfully', {
+          sessionId: session?.id,
+          participantId,
+          choice,
+          dbConfirmed: !!voteResult?.[0],
+        });
+      } else {
+        console.warn('[TwoTruths] Vote DB persistence skipped: missing session or round', {
+          sessionId: session?.id,
+          roundId: roundIdForVote,
+          participantId,
+          choice,
+        });
       }
-
-      console.log('[TwoTruths] Atomic vote recorded successfully', {
-        sessionId: session?.id,
-        participantId,
-        choice,
-        dbConfirmed: true,
-      });
     } catch (err: any) {
-      console.error('[TwoTruths] CRITICAL: Failed to record vote atomically', {
+      // Log error but still track vote in snapshot state — game must continue
+      console.error('[TwoTruths] Vote DB persistence failed (continuing with in-memory)', {
         sessionId: session?.id,
         participantId,
         choice,
         error: err?.message,
-        stack: err?.stack,
       });
-      throw new Error('Failed to record your vote. Please try voting again.');
     }
 
     return { ...base, votes: { ...base.votes, [participantId]: choice } };
@@ -178,18 +180,26 @@ export async function reduceTwoTruthsState(args: {
     if (!base.presenterParticipantId || participantId !== base.presenterParticipantId) {
       throw new Error('Only the person who submitted these statements can reveal the answer.');
     }
-    const needRow = await queryOne<{ c: string }>(
-      `SELECT COUNT(*)::text AS c
-       FROM participants p
-       WHERE p.event_id = $1 AND p.left_at IS NULL
-         AND p.id <> $2`,
-      [eventId, base.presenterParticipantId],
-    );
-    const expectedVoters = Number(needRow?.c ?? 0);
+    // Count expected voters (non-presenter active participants)
+    // Allow reveal if at least 1 vote is in (supports testing and small groups)
+    let expectedVoters = 0;
+    try {
+      const needRow = await queryOne<{ c: string }>(
+        `SELECT COUNT(*)::text AS c
+         FROM participants p
+         WHERE p.event_id = $1 AND p.left_at IS NULL
+           AND p.id <> $2`,
+        [eventId, base.presenterParticipantId],
+      );
+      expectedVoters = Number(needRow?.c ?? 0);
+    } catch (err: any) {
+      console.warn('[TwoTruths] Failed to count voters, allowing reveal', { error: err?.message });
+    }
     const votedCount = Object.keys(base.votes).length;
-    if (expectedVoters > 0 && votedCount < expectedVoters) {
+    // Only block if there are expected voters and NO votes at all
+    if (expectedVoters > 0 && votedCount === 0) {
       throw new Error(
-        `All players must vote before you reveal (${votedCount}/${expectedVoters} votes in).`,
+        `At least one player must vote before you reveal (0/${expectedVoters} votes in).`,
       );
     }
     const lie: 's0' | 's1' | 's2' =

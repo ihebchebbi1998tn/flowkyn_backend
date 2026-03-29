@@ -62,9 +62,9 @@ export const coffeeVoiceHangupSchema = z.object({
 });
 
 export const coffeeNextPromptSchema = z.object({
-  expectedPromptsUsed: z.number().int().min(0, 'Expected prompts used cannot be negative'),
+  expectedPromptsUsed: z.number().int().min(0, 'Expected prompts used cannot be negative').optional(),
 });
 
 export const coffeeContinueSchema = z.object({
-  expectedPromptsUsed: z.number().int().min(0, 'Expected prompts used cannot be negative'),
+  expectedPromptsUsed: z.number().int().min(0, 'Expected prompts used cannot be negative').optional(),
 });

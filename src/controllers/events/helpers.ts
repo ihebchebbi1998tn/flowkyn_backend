@@ -4,6 +4,7 @@
 import { AuthRequest } from '../../types';
 import { AppError } from '../../middleware/errorHandler';
 import { queryOne } from '../../config/database';
+import { hasGuestIdentityKey } from '../../utils/dbSafeColumns';
 
 export async function requireOrgMember(orgId: string, userId: string): Promise<{ id: string; role_name: string }> {
   const member = await queryOne<{ id: string; role_name: string }>(
@@ -83,7 +84,7 @@ export async function requireCurrentParticipantId(eventId: string, userPayload: 
     );
     if (byId) return byId.id;
 
-    if (typeof userPayload.guestIdentityKey === 'string' && userPayload.guestIdentityKey.trim()) {
+    if (typeof userPayload.guestIdentityKey === 'string' && userPayload.guestIdentityKey.trim() && (await hasGuestIdentityKey())) {
       const byIdentity = await queryOne<{ id: string }>(
         `SELECT id FROM participants
          WHERE event_id = $1 AND participant_type = 'guest' AND guest_identity_key = $2 AND left_at IS NULL
