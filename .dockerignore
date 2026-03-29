@@ -1,9 +1,0 @@
-node_modules
-dist
-.env
-*.log
-.git
-tests
-jest.config.ts
-*.test.ts
-flowkyn_uploads
