@@ -50,12 +50,20 @@ export class AnalyticsService {
          WHERE e.organization_id IN (${placeholders}) AND gs.status = 'active'`,
         ids
       ),
-      // Total team members across orgs
-      query<{ team_members: string }>(
-        `SELECT COUNT(DISTINCT om.user_id) as team_members FROM organization_members om
-         WHERE om.organization_id IN (${placeholders}) AND om.status = 'active'`,
-        ids
-      ),
+      // Total team members across orgs (active members + pending invitations)
+      (async () => {
+        const [{ active_count }] = await query<{ active_count: string }>(
+          `SELECT COUNT(DISTINCT om.user_id) as active_count FROM organization_members om
+           WHERE om.organization_id IN (${placeholders}) AND om.status = 'active'`,
+          ids
+        );
+        const [{ pending_count }] = await query<{ pending_count: string }>(
+          `SELECT COUNT(*) as pending_count FROM organization_invitations oi
+           WHERE oi.organization_id IN (${placeholders}) AND oi.status = 'pending'`,
+          ids
+        );
+        return [{ team_members: String(parseInt(active_count) + parseInt(pending_count)) }];
+      })(),
       // Total events
       query<{ total_events: string }>(
         `SELECT COUNT(*) as total_events FROM events

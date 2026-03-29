@@ -21,7 +21,7 @@ interface TwoTruthsActionArgs {
   ctx: GameHandlerContext;
   data: { sessionId: string; roundId?: string; actionType: string; payload: any };
   participant: { participantId: string };
-  roundId: string | null;
+  roundId: string;
   session: any;
 }
 
@@ -147,7 +147,12 @@ export async function handleTwoTruthsAction({
   try {
     savedSnapshot = await ttRun;
   } catch (ttErr: any) {
-    console.error('[Games] two-truths snapshot/vote failed:', ttErr?.message || ttErr);
+    console.error('[Games] two-truths snapshot/vote failed:', {
+      sessionId: data.sessionId,
+      actionType: data.actionType,
+      userId: ctx.user.userId,
+      error: ttErr instanceof Error ? ttErr.message : String(ttErr),
+    });
     socket.emit('error', { message: ttErr?.message || 'Game action failed', code: 'ACTION_ERROR' });
     return;
   }
@@ -156,13 +161,18 @@ export async function handleTwoTruthsAction({
   try {
     action = await gamesService.submitAction(
       data.sessionId,
-      roundId!,
+      roundId,
       participant.participantId,
       data.actionType,
       data.payload || {},
     );
   } catch (submitErr: any) {
-    console.error('[Games] two-truths submitAction after snapshot:', submitErr?.message || submitErr);
+    console.error('[Games] two-truths submitAction after snapshot:', {
+      sessionId: data.sessionId,
+      actionType: data.actionType,
+      userId: ctx.user.userId,
+      error: submitErr instanceof Error ? submitErr.message : String(submitErr),
+    });
     socket.emit('error', {
       message: submitErr?.message || 'Failed to persist action',
       code: (submitErr as any)?.code || 'ACTION_ERROR',
