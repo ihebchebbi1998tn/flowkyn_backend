@@ -28,9 +28,13 @@ export class StrategicGamesController {
 
   async createStrategicSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can create strategic sessions', 403, 'FORBIDDEN');
-
-      await assertIsEventAdmin(req.params.eventId, req.user.userId);
+      if (req.user) {
+        await assertIsEventAdmin(req.params.eventId, req.user.userId);
+      } else if (req.guest) {
+        // Allow guests to create strategic sessions — they are participants
+      } else {
+        throw new AppError('Authorization required', 401, 'AUTH_MISSING_TOKEN');
+      }
 
       const session = await gamesService.createStrategicSession(req.params.eventId, {
         industry: req.body.industry,
@@ -41,7 +45,7 @@ export class StrategicGamesController {
         difficultyLabel: req.body.difficultyLabel,
       });
 
-      await audit.create(null, req.user.userId, 'GAME_CREATE_STRATEGIC_SESSION', {
+      await audit.create(null, req.user?.userId ?? null, 'GAME_CREATE_STRATEGIC_SESSION', {
         eventId: req.params.eventId,
         sessionId: session.id,
         config: req.body,

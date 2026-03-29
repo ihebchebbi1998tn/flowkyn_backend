@@ -25,9 +25,9 @@ const ctrl = new GamesController();
 const strategicCtrl = new StrategicGamesController();
 const sessionCtrl = new GameSessionsController();
 
-// Game types (authenticated users only)
-router.get('/game-types', authenticate, ctrl.listGameTypes);
-router.get('/game-types/:id/prompts', authenticate, ctrl.listPrompts);
+// Game types — allow guests to see available games
+router.get('/game-types', authenticateOrGuest, ctrl.listGameTypes);
+router.get('/game-types/:id/prompts', authenticateOrGuest, ctrl.listPrompts);
 
 // WebRTC voice helpers (used by Coffee Roulette)
 // Supports both authenticated users and guests.
@@ -42,15 +42,15 @@ router.post('/events/:eventId/game-sessions', authenticateOrGuest, validate(even
 // Strategic Escape Challenge sessions
 router.post(
   '/events/:eventId/strategic-sessions',
-  authenticate,
+  authenticateOrGuest,
   validate(eventIdParam, 'params'),
   validate(createStrategicSessionSchema),
   strategicCtrl.createStrategicSession
 );
 // Resolve currently active session for an event + game key (supports guests)
 router.get('/events/:eventId/game-sessions/active', authenticateOrGuest, validate(eventIdParam, 'params'), ctrl.getActiveSessionForEvent);
-router.post('/game-sessions/:id/rounds', authenticate, validate(uuidParam, 'params'), ctrl.startRound);
-router.post('/game-sessions/:id/finish', authenticate, validate(uuidParam, 'params'), ctrl.finishSession);
+router.post('/game-sessions/:id/rounds', authenticateOrGuest, validate(uuidParam, 'params'), ctrl.startRound);
+router.post('/game-sessions/:id/finish', authenticateOrGuest, validate(uuidParam, 'params'), ctrl.finishSession);
 router.get('/game-sessions/:id/actions', authenticate, validate(uuidParam, 'params'), ctrl.getSessionActions);
 router.get('/game-sessions/:id/snapshots', authenticate, validate(uuidParam, 'params'), ctrl.getSessionSnapshots);
 

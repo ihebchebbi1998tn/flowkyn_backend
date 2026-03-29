@@ -46,59 +46,59 @@
 
 import { Router } from 'express';
 import { authenticate } from '../middleware/auth';
+import { authenticateOrGuest } from '../middleware/guestAuth';
 import { validate } from '../middleware/validate';
 import * as controller from '../controllers/coffeeRouletteConfig.controller';
 import { configIdParam, eventIdParam, questionIdParam, sessionIdParam, topicIdParam } from '../validators/common.validator';
 
 const router = Router();
 
-// All routes require authentication
-router.use(authenticate);
-
 // ─────────────────────── CONFIGURATION ───────────────────────────────
+// Read routes — guests can view config during gameplay
+router.get('/config/:eventId', authenticateOrGuest, validate(eventIdParam, 'params'), controller.getConfig);
+router.get('/config/:eventId/with-details', authenticateOrGuest, validate(eventIdParam, 'params'), controller.getConfigWithDetails);
 
-router.post('/config', controller.createConfig);
-router.get('/config/:eventId', validate(eventIdParam, 'params'), controller.getConfig);
-router.get('/config/:eventId/with-details', validate(eventIdParam, 'params'), controller.getConfigWithDetails);
-router.patch('/config/:configId', validate(configIdParam, 'params'), controller.updateConfig);
-router.delete('/config/:configId', validate(configIdParam, 'params'), controller.deleteConfig);
+// Write routes — admin only
+router.post('/config', authenticate, controller.createConfig);
+router.patch('/config/:configId', authenticate, validate(configIdParam, 'params'), controller.updateConfig);
+router.delete('/config/:configId', authenticate, validate(configIdParam, 'params'), controller.deleteConfig);
 
 // ─────────────────────── TOPICS ───────────────────────────────
+// Read routes — guests can view topics
+router.get('/topics/:configId', authenticateOrGuest, validate(configIdParam, 'params'), controller.getTopics);
+router.get('/topics/:topicId/details', authenticateOrGuest, validate(topicIdParam, 'params'), controller.getTopicWithQuestions);
 
-router.post('/topics', controller.createTopic);
-router.get('/topics/:configId', validate(configIdParam, 'params'), controller.getTopics);
-router.get('/topics/:topicId/details', validate(topicIdParam, 'params'), controller.getTopicWithQuestions);
-router.patch('/topics/:topicId', validate(topicIdParam, 'params'), controller.updateTopic);
-router.delete('/topics/:topicId', validate(topicIdParam, 'params'), controller.deleteTopic);
+// Write routes — admin only
+router.post('/topics', authenticate, controller.createTopic);
+router.patch('/topics/:topicId', authenticate, validate(topicIdParam, 'params'), controller.updateTopic);
+router.delete('/topics/:topicId', authenticate, validate(topicIdParam, 'params'), controller.deleteTopic);
 
 // ─────────────────────── QUESTIONS ───────────────────────────────
+// Read routes — guests can view questions
+router.get('/questions/:configId', authenticateOrGuest, validate(configIdParam, 'params'), controller.getQuestions);
 
-router.post('/questions', controller.createQuestion);
-router.get('/questions/:configId', validate(configIdParam, 'params'), controller.getQuestions);
-router.patch('/questions/:questionId', validate(questionIdParam, 'params'), controller.updateQuestion);
-router.delete('/questions/:questionId', validate(questionIdParam, 'params'), controller.deleteQuestion);
+// Write routes — admin only
+router.post('/questions', authenticate, controller.createQuestion);
+router.patch('/questions/:questionId', authenticate, validate(questionIdParam, 'params'), controller.updateQuestion);
+router.delete('/questions/:questionId', authenticate, validate(questionIdParam, 'params'), controller.deleteQuestion);
 
 // ─────────────────────── MAPPINGS ───────────────────────────────
+router.post('/topic-questions/assign', authenticate, controller.assignQuestionToTopic);
+router.delete('/topic-questions/unassign', authenticate, controller.unassignQuestionFromTopic);
+router.post('/topic-questions/reorder', authenticate, controller.reorderTopicQuestions);
 
-router.post('/topic-questions/assign', controller.assignQuestionToTopic);
-router.delete('/topic-questions/unassign', controller.unassignQuestionFromTopic);
-router.post('/topic-questions/reorder', controller.reorderTopicQuestions);
-
-// ─────────────────────── SELECTION ───────────────────────────────
-
-router.post('/select-topic', controller.selectTopic);
-router.post('/select-question', controller.selectQuestion);
-router.post('/session-questions', controller.getSessionQuestions);
+// ─────────────────────── SELECTION (guests can select during gameplay) ───────────────────────────────
+router.post('/select-topic', authenticateOrGuest, controller.selectTopic);
+router.post('/select-question', authenticateOrGuest, controller.selectQuestion);
+router.post('/session-questions', authenticateOrGuest, controller.getSessionQuestions);
 
 // ─────────────────────── STATISTICS ───────────────────────────────
+router.get('/stats/config/:configId', authenticate, validate(configIdParam, 'params'), controller.getConfigStats);
+router.get('/stats/topic/:topicId', authenticate, validate(topicIdParam, 'params'), controller.getTopicStats);
 
-router.get('/stats/config/:configId', validate(configIdParam, 'params'), controller.getConfigStats);
-router.get('/stats/topic/:topicId', validate(topicIdParam, 'params'), controller.getTopicStats);
-
-// ─────────────────────── SESSION TRACKING ───────────────────────────────
-
-router.post('/sessions/start', controller.startPairSession);
-router.post('/sessions/:sessionId/end', validate(sessionIdParam, 'params'), controller.endPairSession);
-router.post('/sessions/:sessionId/add-question', validate(sessionIdParam, 'params'), controller.addQuestionToSession);
+// ─────────────────────── SESSION TRACKING (guests participate) ───────────────────────────────
+router.post('/sessions/start', authenticateOrGuest, controller.startPairSession);
+router.post('/sessions/:sessionId/end', authenticateOrGuest, validate(sessionIdParam, 'params'), controller.endPairSession);
+router.post('/sessions/:sessionId/add-question', authenticateOrGuest, validate(sessionIdParam, 'params'), controller.addQuestionToSession);
 
 export default router;

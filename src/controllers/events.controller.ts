@@ -418,7 +418,9 @@ export class EventsController {
     try {
       const _req = req as any;
       const event = await eventsService.getById(_req.params.eventId);
-      if (!event.allow_guests) {
+
+      // Default to allowing guests when allow_guests is null/undefined (no event_settings row)
+      if (event.allow_guests === false) {
         throw new AppError('Guests are not allowed for this event', 403, 'GUESTS_NOT_ALLOWED');
       }
 
@@ -444,7 +446,7 @@ export class EventsController {
                   [incomingIdentityKey, pt.id],
                 );
               }
-              // Re-sign token with current display name so guestName stays in sync (display can be updated via event_profiles)
+              // Re-sign token with current display name so guestName stays in sync
               const displayRow = await queryOne<{ display_name: string | null }>(
                 `SELECT ep.display_name FROM event_profiles ep WHERE ep.event_id = $1 AND ep.participant_id = $2`,
                 [_req.params.eventId, pt.id]
@@ -467,7 +469,7 @@ export class EventsController {
             }
           }
         } catch (e) {
-          // Ignore invalid/expired tokens and proceed to create a new one
+          // Ignore invalid/expired tokens (including user JWTs) and proceed to create a new guest
         }
       }
 
@@ -480,7 +482,7 @@ export class EventsController {
         });
       }
 
-      // Notify the event creator that a guest joined (if we can resolve a user_id).
+      // Notify the event creator that a guest joined
       if (!result.already_joined) {
         try {
           const creator = await queryOne<{ user_id: string }>(
@@ -502,7 +504,7 @@ export class EventsController {
         }
       }
 
-      // Generate a guest token so the guest can participate in games and chat via REST/WebSocket
+      // Generate a guest token
       const { signGuestToken } = await import('../utils/jwt');
       const guest_token = signGuestToken({
         participantId: result.participant_id,
@@ -513,7 +515,10 @@ export class EventsController {
       });
 
       res.status(result.already_joined ? 200 : 201).json({ ...result, guest_token });
-    } catch (err) { next(err); }
+    } catch (err) {
+      console.error('[EventsController] joinAsGuest error:', (err as any)?.message, (err as any)?.stack?.split('\n').slice(0, 3).join('\n'));
+      next(err);
+    }
   }
 
   /** GET /events/:eventId/participants — List participants (lobby) */

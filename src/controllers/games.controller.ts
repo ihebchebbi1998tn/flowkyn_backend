@@ -125,11 +125,18 @@ export class GamesController {
 
   async startRound(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can start rounds', 403, 'FORBIDDEN');
-
       const session = await gamesService.getSession(req.params.id);
       const allow = await allowParticipantGameControlForEvent(session.event_id);
-      await assertCanControlGameSession(session.event_id, req.user.userId, allow);
+
+      if (req.user) {
+        await assertCanControlGameSession(session.event_id, req.user.userId, allow);
+      } else if (req.guest) {
+        // Guests can start rounds when participant game control is allowed
+        if (!allow) throw new AppError('Only admins can start rounds', 403, 'FORBIDDEN');
+        if (req.guest.eventId !== session.event_id) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+      } else {
+        throw new AppError('Authorization required', 401, 'AUTH_MISSING_TOKEN');
+      }
 
       const round = await gamesService.startRound(req.params.id);
 
@@ -140,7 +147,7 @@ export class GamesController {
         timestamp: new Date().toISOString(),
       });
 
-      await audit.create(null, req.user.userId, 'GAME_START_ROUND', { sessionId: req.params.id, roundId: round.id, roundNumber: round.round_number });
+      await audit.create(null, req.user?.userId ?? null, 'GAME_START_ROUND', { sessionId: req.params.id, roundId: round.id, roundNumber: round.round_number, isGuest: !!req.guest });
       res.status(201).json(round);
     } catch (err) { next(err); }
   }
@@ -179,11 +186,17 @@ export class GamesController {
 
   async finishSession(req: AuthRequest, res: Response, next: NextFunction) {
     try {
-      if (!req.user) throw new AppError('Only authenticated users can finish game sessions', 403, 'FORBIDDEN');
-
       const session = await gamesService.getSession(req.params.id);
       const allow = await allowParticipantGameControlForEvent(session.event_id);
-      await assertCanControlGameSession(session.event_id, req.user.userId, allow);
+
+      if (req.user) {
+        await assertCanControlGameSession(session.event_id, req.user.userId, allow);
+      } else if (req.guest) {
+        if (!allow) throw new AppError('Only admins can finish sessions', 403, 'FORBIDDEN');
+        if (req.guest.eventId !== session.event_id) throw new AppError('Forbidden', 403, 'FORBIDDEN');
+      } else {
+        throw new AppError('Authorization required', 401, 'AUTH_MISSING_TOKEN');
+      }
 
       const result = await gamesService.finishSession(req.params.id);
 
@@ -193,7 +206,7 @@ export class GamesController {
         timestamp: new Date().toISOString(),
       });
 
-      await audit.create(null, req.user.userId, 'GAME_FINISH_SESSION', { sessionId: req.params.id });
+      await audit.create(null, req.user?.userId ?? null, 'GAME_FINISH_SESSION', { sessionId: req.params.id, isGuest: !!req.guest });
       res.json(result);
     } catch (err) { next(err); }
   }

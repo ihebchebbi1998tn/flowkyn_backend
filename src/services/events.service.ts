@@ -107,9 +107,15 @@ export class EventsService {
    */
   async getById(eventId: string) {
     const event = await queryOne<EventRow>(
-      `SELECT e.*, es.allow_guests, es.allow_chat, es.auto_start_games, es.max_rounds,
-              es.default_session_duration_minutes, es.two_truths_submit_seconds, es.two_truths_vote_seconds,
-              es.coffee_chat_duration_minutes, es.strategic_discussion_duration_minutes
+      `SELECT e.*, COALESCE(es.allow_guests, true) as allow_guests,
+              COALESCE(es.allow_chat, true) as allow_chat,
+              COALESCE(es.auto_start_games, false) as auto_start_games,
+              COALESCE(es.max_rounds, 30) as max_rounds,
+              COALESCE(es.default_session_duration_minutes, 30) as default_session_duration_minutes,
+              COALESCE(es.two_truths_submit_seconds, 30) as two_truths_submit_seconds,
+              COALESCE(es.two_truths_vote_seconds, 20) as two_truths_vote_seconds,
+              COALESCE(es.coffee_chat_duration_minutes, 30) as coffee_chat_duration_minutes,
+              COALESCE(es.strategic_discussion_duration_minutes, 45) as strategic_discussion_duration_minutes
        FROM events e LEFT JOIN event_settings es ON es.event_id = e.id
        WHERE e.id = $1`,
       [eventId]
@@ -127,7 +133,7 @@ export class EventsService {
     const event = await queryOne<any>(
       `SELECT e.id, e.organization_id, e.title, e.description, e.event_mode, e.visibility,
               e.max_participants, e.start_time, e.end_time, e.status,
-              e.created_at, es.allow_guests,
+              e.created_at, COALESCE(es.allow_guests, true) as allow_guests,
               o.name as organization_name, o.logo_url as organization_logo,
               om_creator.user_id as created_by_user_id
        FROM events e
