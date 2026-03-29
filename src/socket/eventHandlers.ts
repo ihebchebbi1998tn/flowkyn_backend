@@ -333,6 +333,11 @@ export function setupEventHandlers(eventsNs: Namespace) {
         
         eventsNs.to(roomId).emit('chat:message', broadcastData);
 
+        // Also emit directly to the sender socket as a reliability fallback.
+        // Room broadcasts can miss the sender if the join hasn't fully flushed
+        // or in multi-node setups with adapter lag.
+        socket.emit('chat:message', broadcastData);
+
         ack?.({ ok: true }); // Send acknowledgment after broadcasting
       } catch (err: any) {
         console.error(`[Events] chat:message error:`, err.message, err.stack);

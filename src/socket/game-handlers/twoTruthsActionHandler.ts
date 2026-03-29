@@ -125,12 +125,21 @@ export async function handleTwoTruthsAction({
     } catch (snapErr: any) {
       console.error('[TwoTruths] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
     }
-    gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+
+    // ALWAYS broadcast game:data — this is the primary state delivery mechanism.
+    // Must never be skipped, even if snapshot save failed.
+    const broadcastPayload = {
       sessionId: data.sessionId,
       gameData: publiclySafeState,
       snapshotRevisionId: savedSnapshot?.id || null,
       snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
-    });
+    };
+    gamesNs.to(`game:${data.sessionId}`).emit('game:data', broadcastPayload);
+
+    // Also emit directly to the acting socket as a reliability fallback.
+    // Socket.IO room broadcasts can miss the sender in edge cases
+    // (e.g., room join not yet flushed, adapter lag).
+    socket.emit('game:data', broadcastPayload);
 
     // Redundant broadcast on the events namespace to reliably wake up
     // clients that haven't joined the game room yet.
@@ -158,6 +167,25 @@ export async function handleTwoTruthsAction({
       userId: ctx.user.userId,
       error: ttErr instanceof Error ? ttErr.message : String(ttErr),
     });
+
+    // Even on error, broadcast the latest known state so clients aren't stuck
+    try {
+      const fallbackSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+      if (fallbackSnapshot?.state) {
+        const fallbackState = sanitizeTwoTruthsStateForPublic(fallbackSnapshot.state);
+        const fallbackPayload = {
+          sessionId: data.sessionId,
+          gameData: fallbackState,
+          snapshotRevisionId: fallbackSnapshot.id || null,
+          snapshotCreatedAt: toSnapshotCreatedAt(fallbackSnapshot.created_at),
+        };
+        gamesNs.to(`game:${data.sessionId}`).emit('game:data', fallbackPayload);
+        socket.emit('game:data', fallbackPayload);
+      }
+    } catch (fallbackErr) {
+      console.error('[TwoTruths] Fallback state broadcast also failed', { error: (fallbackErr as Error)?.message });
+    }
+
     socket.emit('error', { message: ttErr?.message || 'Game action failed', code: 'ACTION_ERROR' });
     return;
   }

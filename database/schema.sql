@@ -25,6 +25,7 @@ CREATE TABLE "activity_posts" (
 	"event_id" uuid NOT NULL,
 	"author_participant_id" uuid NOT NULL,
 	"content" text NOT NULL,
+	"parent_post_id" uuid,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"category" varchar(50) DEFAULT 'general',
 	"tags" text[]
@@ -55,7 +56,13 @@ CREATE TABLE "audit_logs" (
 	"id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
 	"organization_id" uuid,
 	"user_id" uuid,
+	"event_id" uuid,
+	"game_session_id" uuid,
+	"participant_id" uuid,
 	"action" varchar(100) NOT NULL,
+	"details" text,
+	"ip_address" varchar(45),
+	"status" varchar(50),
 	"metadata" jsonb,
 	"created_at" timestamp DEFAULT now() NOT NULL
 );
@@ -435,6 +442,8 @@ CREATE TABLE "game_sessions" (
 	"total_rounds" integer DEFAULT 4,
 	"discussion_ends_at" timestamp,
 	"debrief_sent_at" timestamp,
+	"end_idempotency_key" varchar(255),
+	"end_action_timestamp" timestamp with time zone,
 	"role_assignment_completed_at" timestamp,
 	"session_deadline_at" timestamp,
 	"resolved_timing" jsonb,

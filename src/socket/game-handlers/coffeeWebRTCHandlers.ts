@@ -66,15 +66,23 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
       const partnerKey = `${validation.data.sessionId}:${info.partnerParticipantId}`;
       const partnerSocketId = voiceCaches.voiceSocketByKey.get(partnerKey);
 
+      const offerPayload = {
+        sessionId: validation.data.sessionId,
+        pairId: validation.data.pairId,
+        fromParticipantId: caller.participantId,
+        sdp: validation.data.sdp,
+      };
+
       if (partnerSocketId) {
-        gamesNs.to(partnerSocketId).emit('coffee:voice_offer', {
-          sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          fromParticipantId: caller.participantId,
-          sdp: validation.data.sdp,
-        });
+        // Direct relay to the partner socket
+        gamesNs.to(partnerSocketId).emit('coffee:voice_offer', offerPayload);
         ack?.({ ok: true });
       } else {
+        // Partner socket not yet registered (hasn't called game:join on this session).
+        // Broadcast `coffee:voice_offer` to the entire game room so the partner
+        // picks it up once they're connected. Also emit `coffee:voice_offer_awaiting`
+        // for backward-compatible UI indicators.
+        gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_offer', offerPayload);
         gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_offer_awaiting', {
           pairId: validation.data.pairId,
           fromParticipantId: caller.participantId,

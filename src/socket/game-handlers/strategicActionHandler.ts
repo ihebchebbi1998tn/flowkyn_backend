@@ -79,12 +79,15 @@ export async function handleStrategicAction({
     } catch (snapErr: any) {
       console.error('[Strategic] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
     }
-    gamesNs.to(`game:${data.sessionId}`).emit('game:data', {
+    const broadcastPayload = {
       sessionId: data.sessionId,
       gameData: next,
       snapshotRevisionId: savedSnapshot?.id || null,
       snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
-    });
+    };
+    gamesNs.to(`game:${data.sessionId}`).emit('game:data', broadcastPayload);
+    // Direct emit to sender as reliability fallback
+    socket.emit('game:data', broadcastPayload);
   });
 
   actionQueues.strategicActionQueue.set(

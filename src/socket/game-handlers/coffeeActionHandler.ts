@@ -126,14 +126,17 @@ export async function handleCoffeeAction({
       })),
     });
 
-    gamesNs.to(roomId).emit('game:data', {
+    const broadcastPayload = {
       sessionId: data.sessionId,
       gameData: next,
       snapshotRevisionId: savedSnapshot?.id || null,
       snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
       sequenceNumber: savedSnapshot?.action_sequence_number || 0,
       revisionNumber: savedSnapshot?.revision_number || 1,
-    });
+    };
+    gamesNs.to(roomId).emit('game:data', broadcastPayload);
+    // Direct emit to sender as reliability fallback
+    socket.emit('game:data', broadcastPayload);
 
     console.log('[CoffeeRoulette] game:data broadcast sent to', roomSize, 'clients in room', roomId);
 
@@ -180,6 +183,24 @@ export async function handleCoffeeAction({
       userId: ctx.user.userId,
       error: err instanceof Error ? err.message : String(err),
     });
+
+    // Even on error, broadcast the latest known state so clients aren't stuck
+    try {
+      const fallbackSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
+      if (fallbackSnapshot?.state) {
+        const fallbackPayload = {
+          sessionId: data.sessionId,
+          gameData: fallbackSnapshot.state,
+          snapshotRevisionId: fallbackSnapshot.id || null,
+          snapshotCreatedAt: toSnapshotCreatedAt(fallbackSnapshot.created_at),
+        };
+        gamesNs.to(`game:${data.sessionId}`).emit('game:data', fallbackPayload);
+        socket.emit('game:data', fallbackPayload);
+      }
+    } catch (fallbackErr) {
+      console.error('[CoffeeRoulette] Fallback state broadcast also failed', { error: (fallbackErr as Error)?.message });
+    }
+
     socket.emit('error', { message: err?.message || 'Coffee action failed', code: 'ACTION_ERROR' });
   }
 }

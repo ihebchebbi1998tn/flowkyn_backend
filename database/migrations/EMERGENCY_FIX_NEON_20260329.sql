@@ -20,11 +20,12 @@
 BEGIN;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- STEP 1: Add the missing discussion_ends_at column
+-- STEP 1: Add the missing discussion_ends_at and debrief_sent_at columns
 -- ═══════════════════════════════════════════════════════════════════════════
 
 ALTER TABLE game_sessions
-  ADD COLUMN IF NOT EXISTS discussion_ends_at TIMESTAMP NULL;
+  ADD COLUMN IF NOT EXISTS discussion_ends_at TIMESTAMP NULL,
+  ADD COLUMN IF NOT EXISTS debrief_sent_at TIMESTAMP NULL;
 
 -- ═══════════════════════════════════════════════════════════════════════════
 -- STEP 2: Add the constraint (using DO block to handle if it exists)
