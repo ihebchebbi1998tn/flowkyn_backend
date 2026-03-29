@@ -286,27 +286,39 @@ export function setupEventHandlers(eventsNs: Namespace) {
       });
     });
     // ─── Chat message (persisted to DB) ───
-    socket.on('chat:message', async (data: { eventId: string; message: string }, ack) => {
-      
-      if (!validateFields(data, ['eventId', 'message'])) {
-        console.warn(`[Events] Invalid chat:message data from user ${user.userId}`);
+    socket.on('chat:message', async (data: { eventId?: string; event_id?: string; message?: string; content?: string }, ack) => {
+      // Normalize field names: accept both camelCase and snake_case
+      const normalizedData = {
+        eventId: data?.eventId || data?.event_id || '',
+        message: data?.message || data?.content || '',
+      };
+
+      if (!validateFields(normalizedData, ['eventId', 'message'])) {
+        console.warn(`[Events] Invalid chat:message data from user ${user.userId}`, {
+          hasEventId: !!(data?.eventId || data?.event_id),
+          hasMessage: !!(data?.message || data?.content),
+          dataKeys: data ? Object.keys(data) : [],
+        });
         socket.emit('error', { message: 'Invalid chat message data', code: 'VALIDATION' });
         ack?.({ ok: false, error: 'Invalid data' });
         return;
       }
 
+      // Use normalized data going forward
+      const eventId = normalizedData.eventId;
+
       // Verify the user is a participant and use their ACTUAL participant ID
       // verifyParticipant auto-inserts org members (including organizers) who bypassed the Lobby
-      const participant = await verifyParticipant(data.eventId, user.userId, socket);
+      const participant = await verifyParticipant(eventId, user.userId, socket);
       if (!participant) {
-        console.warn(`[Events] User ${user.userId} is not a participant in event ${data.eventId}`);
+        console.warn(`[Events] User ${user.userId} is not a participant in event ${eventId}`);
         socket.emit('error', { message: 'You are not a participant in this event', code: 'FORBIDDEN' });
         ack?.({ ok: false, error: 'Not a participant' });
         return;
       }
 
       // Sanitize and truncate message
-      const message = sanitizeText(data.message, 2000);
+      const message = sanitizeText(normalizedData.message, 2000);
       if (message.length === 0) {
         socket.emit('error', { message: 'Message cannot be empty', code: 'VALIDATION' });
         ack?.({ ok: false, error: 'Empty message' });
@@ -315,9 +327,9 @@ export function setupEventHandlers(eventsNs: Namespace) {
 
       try {
         // Persist to DB using server-resolved participant ID
-        const saved = await messagesService.sendMessage(data.eventId, participant.participantId, message);
+        const saved = await messagesService.sendMessage(eventId, participant.participantId, message);
 
-        const roomId = `event:${data.eventId}`;
+        const roomId = `event:${eventId}`;
 
         // Broadcast to all in room (including sender for confirmation)
         // Include senderName and senderAvatarUrl for proper display

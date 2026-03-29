@@ -17,6 +17,7 @@ import { verifyGameParticipant, canControlGameFlow } from './participantAccess';
 import { enrichCoffeeSnapshotForLateJoiner } from '../../games/coffee-roulette/lateJoiner';
 import { sanitizeTwoTruthsStateForPublic } from '../../games/two-truths/reducer';
 import { handleCoffeeRematchOnLeave } from './coffeeActionHandler';
+import { flushPendingSignalsForParticipant } from './reliableEmit';
 
 export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void {
   const { socket, gamesNs, gamesService, user, perSocket, voiceCaches } = ctx;
@@ -129,16 +130,23 @@ export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void 
       existing.add(voiceKey);
       voiceCaches.voiceKeysBySocket.set(socket.id, existing);
 
-      // Re-deliver pending voice call requests
+      // Re-deliver pending voice call requests and exact peer signals to this socket
       for (const [, pending] of voiceCaches.pendingVoiceCallRequests) {
         if (
           pending.modal.sessionId === data.sessionId &&
           pending.modal.toParticipantId === participant.participantId &&
           Date.now() - pending.createdAt <= voiceCaches.COFFEE_VOICE_CALL_REQUEST_TTL_MS
         ) {
-          gamesNs.to(roomId).emit('coffee:voice_call_modal', pending.modal);
+          socket.emit('coffee:voice_call_modal', pending.modal);
         }
       }
+
+      flushPendingSignalsForParticipant({
+        socket,
+        voiceCaches,
+        sessionId: data.sessionId,
+        participantId: participant.participantId,
+      });
 
       // Notify others
       socket.to(roomId).emit('game:player_joined', {

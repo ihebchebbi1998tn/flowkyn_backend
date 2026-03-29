@@ -25,6 +25,12 @@ export interface VoiceCaches {
     modal: VoiceCallReceiverModal;
     createdAt: number;
   }>;
+  /** Pending direct peer signals queued until the exact participant socket joins */
+  pendingVoiceSignals: Map<string, Array<{
+    event: string;
+    payload: unknown;
+    createdAt: number;
+  }>>;
   COFFEE_VOICE_OFFER_TTL_MS: number;
   COFFEE_VOICE_CALL_REQUEST_TTL_MS: number;
 }

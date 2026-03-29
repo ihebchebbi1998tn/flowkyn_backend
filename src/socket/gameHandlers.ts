@@ -26,6 +26,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
     voiceKeysBySocket: new Map(),
     coffeeVoiceOfferCache: new Map(),
     pendingVoiceCallRequests: new Map(),
+    pendingVoiceSignals: new Map(),
     COFFEE_VOICE_OFFER_TTL_MS: 35 * 60 * 1000,
     COFFEE_VOICE_CALL_REQUEST_TTL_MS: 45 * 1000,
   };
@@ -47,6 +48,14 @@ export function setupGameHandlers(gamesNs: Namespace) {
     for (const [key, entry] of voiceCaches.pendingVoiceCallRequests) {
       if (now - entry.createdAt > voiceCaches.COFFEE_VOICE_CALL_REQUEST_TTL_MS) {
         voiceCaches.pendingVoiceCallRequests.delete(key);
+      }
+    }
+    for (const [key, entries] of voiceCaches.pendingVoiceSignals) {
+      const freshEntries = entries.filter(entry => now - entry.createdAt <= voiceCaches.COFFEE_VOICE_OFFER_TTL_MS);
+      if (freshEntries.length > 0) {
+        voiceCaches.pendingVoiceSignals.set(key, freshEntries);
+      } else {
+        voiceCaches.pendingVoiceSignals.delete(key);
       }
     }
   }, 10 * 60 * 1000);
@@ -75,7 +84,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
     registerCoffeeVoiceHandlers(ctx);
 
     // ─── Player action (dispatches to game-specific handler) ───
-    socket.on('game:action', async (data: { sessionId: string; roundId?: string; actionType: string; payload: any }) => {
+    socket.on('game:action', async (data: { sessionId: string; roundId?: string; actionType: string; payload: any }, ack?: Function) => {
       console.log('[GameAction] Received action from client', {
         actionType: data.actionType,
         sessionId: data.sessionId,
@@ -88,6 +97,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
       if (!validation.success) {
         console.warn('[GameAction] Validation failed:', validation.error.issues[0].message);
         socket.emit('error', { message: validation.error.issues[0].message, code: 'VALIDATION' });
+        ack?.({ ok: false, error: validation.error.issues[0].message, code: 'VALIDATION' });
         return;
       }
 
@@ -104,6 +114,7 @@ export function setupGameHandlers(gamesNs: Namespace) {
         if (!participant) {
           console.warn('[GameAction] Participant verification failed', { sessionId: data.sessionId, userId: user.userId });
           socket.emit('error', { message: 'You are not a participant in this game', code: 'FORBIDDEN' });
+          ack?.({ ok: false, error: 'Not a participant', code: 'FORBIDDEN' });
           return;
         }
 
@@ -119,20 +130,22 @@ export function setupGameHandlers(gamesNs: Namespace) {
         if (!roundId && !isCoffeeGame) {
           console.warn('[GameAction] No active round found', { sessionId: data.sessionId });
           socket.emit('error', { message: 'No active round for this session', code: 'ROUND_NOT_ACTIVE' });
+          ack?.({ ok: false, error: 'No active round', code: 'ROUND_NOT_ACTIVE' });
           return;
         }
 
-        // Dispatch to game-specific handler
+        // Dispatch to game-specific handler (ack is forwarded for immediate response)
         if (gameKey === 'two-truths' && isTwoTruthsAction(data.actionType)) {
-          await handleTwoTruthsAction({ ctx, data, participant, roundId: roundId!, session });
+          await handleTwoTruthsAction({ ctx, data, participant, roundId: roundId!, session, ack });
         } else if (gameKey === 'coffee-roulette' && isCoffeeAction(data.actionType)) {
-          await handleCoffeeAction({ ctx, data, participant, roundId, session });
+          await handleCoffeeAction({ ctx, data, participant, roundId, session, ack });
         } else if (gameKey === 'strategic-escape') {
-          await handleStrategicAction({ ctx, data, participant, session });
+          await handleStrategicAction({ ctx, data, participant, session, ack });
         } else {
           // Generic fallback for non-game-specific actions
           if (!roundId) {
             socket.emit('error', { message: 'No active round for this session', code: 'ROUND_NOT_ACTIVE' });
+            ack?.({ ok: false, error: 'No active round', code: 'ROUND_NOT_ACTIVE' });
             return;
           }
           const action = await gamesService.submitAction(
@@ -150,10 +163,12 @@ export function setupGameHandlers(gamesNs: Namespace) {
             payload: data.payload,
             timestamp: action.created_at,
           });
+          ack?.({ ok: true });
         }
       } catch (err: any) {
         console.error(`[Games] game:action error:`, err.message);
         socket.emit('error', { message: err.message, code: 'ACTION_ERROR' });
+        ack?.({ ok: false, error: err.message, code: 'ACTION_ERROR' });
       }
     });
   });

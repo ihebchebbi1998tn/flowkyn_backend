@@ -7,6 +7,7 @@ import { toSnapshotCreatedAt } from './snapshotUtils';
 import { queryOne } from '../../config/database';
 import { coffeeNextPromptSchema, coffeeContinueSchema } from './schemas';
 import { reduceCoffeeState } from '../../games/coffee-roulette/reducer';
+import { emitToRoomAndActor } from './reliableEmit';
 
 interface CoffeeActionArgs {
   ctx: GameHandlerContext;
@@ -14,6 +15,7 @@ interface CoffeeActionArgs {
   participant: { participantId: string };
   roundId: string | null;
   session: any;
+  ack?: Function;
 }
 
 export async function handleCoffeeAction({
@@ -22,6 +24,7 @@ export async function handleCoffeeAction({
   participant,
   roundId,
   session,
+  ack,
 }: CoffeeActionArgs): Promise<void> {
   const { socket, gamesNs, gamesService, actionQueues, voiceCaches } = ctx;
 
@@ -36,10 +39,8 @@ export async function handleCoffeeAction({
   if (data.actionType === 'coffee:next_prompt') {
     const payloadValidation = coffeeNextPromptSchema.safeParse(data.payload);
     if (!payloadValidation.success) {
-      socket.emit('error', {
-        message: 'Invalid prompt request: ' + payloadValidation.error.issues[0].message,
-        code: 'VALIDATION',
-      });
+      socket.emit('error', { message: 'Invalid prompt request: ' + payloadValidation.error.issues[0].message, code: 'VALIDATION' });
+      ack?.({ ok: false, error: payloadValidation.error.issues[0].message, code: 'VALIDATION' });
       return;
     }
     data.payload = payloadValidation.data;
@@ -48,10 +49,8 @@ export async function handleCoffeeAction({
   if (data.actionType === 'coffee:continue') {
     const payloadValidation = coffeeContinueSchema.safeParse(data.payload);
     if (!payloadValidation.success) {
-      socket.emit('error', {
-        message: 'Invalid continue request: ' + payloadValidation.error.issues[0].message,
-        code: 'VALIDATION',
-      });
+      socket.emit('error', { message: 'Invalid continue request: ' + payloadValidation.error.issues[0].message, code: 'VALIDATION' });
+      ack?.({ ok: false, error: payloadValidation.error.issues[0].message, code: 'VALIDATION' });
       return;
     }
     data.payload = payloadValidation.data;
@@ -62,19 +61,7 @@ export async function handleCoffeeAction({
 
   const prevQueue = actionQueues.coffeeActionQueue.get(data.sessionId) ?? Promise.resolve();
   const run = prevQueue.then(async () => {
-    console.log('[CoffeeRoulette] Starting action queue execution', {
-      actionType: data.actionType,
-      sessionId: data.sessionId,
-      queueLength: actionQueues.coffeeActionQueue.size,
-    });
-
     const latestSnapshot = await gamesService.getLatestSnapshot(data.sessionId);
-
-    console.log('[CoffeeRoulette] Retrieved latest snapshot for', data.actionType, {
-      sessionId: data.sessionId,
-      currentPhase: (latestSnapshot?.state as any)?.phase,
-      hasSnapshot: !!latestSnapshot,
-    });
 
     const next = await reduceCoffeeState({
       eventId: session.event_id,
@@ -95,36 +82,13 @@ export async function handleCoffeeAction({
     const coffeeRoundId = roundId || (await gamesService.getActiveRound(data.sessionId))?.id;
     if (coffeeRoundId) {
       try {
-        await gamesService.submitAction(
-          data.sessionId,
-          coffeeRoundId,
-          participant.participantId,
-          data.actionType,
-          data.payload || {},
-        );
+        await gamesService.submitAction(data.sessionId, coffeeRoundId, participant.participantId, data.actionType, data.payload || {});
       } catch (submitErr: any) {
         console.error('[CoffeeRoulette] submitAction failed (non-fatal)', { error: submitErr?.message });
       }
     }
 
     const roomId = `game:${data.sessionId}`;
-    const room = (gamesNs.adapter as any).rooms?.get?.(roomId);
-    const roomSize = room && typeof room.size === 'number' ? room.size : 0;
-
-    console.log('[CoffeeRoulette] Broadcasting game:data', {
-      sessionId: data.sessionId,
-      actionType: data.actionType,
-      roomId,
-      roomSize,
-      gamePhase: (next as any)?.phase,
-      pairCount: (next as any)?.pairs?.length,
-      pairs: (next as any)?.pairs?.map((p: any) => ({
-        id: p.id,
-        person1: p.person1.participantId,
-        person2: p.person2.participantId,
-        topic: p.topic,
-      })),
-    });
 
     const broadcastPayload = {
       sessionId: data.sessionId,
@@ -134,11 +98,10 @@ export async function handleCoffeeAction({
       sequenceNumber: savedSnapshot?.action_sequence_number || 0,
       revisionNumber: savedSnapshot?.revision_number || 1,
     };
-    gamesNs.to(roomId).emit('game:data', broadcastPayload);
-    // Direct emit to sender as reliability fallback
-    socket.emit('game:data', broadcastPayload);
+    emitToRoomAndActor(gamesNs, socket, roomId, 'game:data', broadcastPayload);
 
-    console.log('[CoffeeRoulette] game:data broadcast sent to', roomSize, 'clients in room', roomId);
+    // Ack with new state for immediate client feedback
+    ack?.({ ok: true, data: next });
 
     // Evict cached WebRTC offers when session ends
     if (normalizedAction === 'coffee:end') {
@@ -158,21 +121,16 @@ export async function handleCoffeeAction({
 
       if (!existingEnd) {
         const { results } = await gamesService.finishSession(data.sessionId);
-        gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
+        emitToRoomAndActor(gamesNs, socket, `game:${data.sessionId}`, 'game:ended', {
           sessionId: data.sessionId,
           results,
           timestamp: new Date().toISOString(),
         });
-      } else {
-        console.info('[CoffeeRoulette] Game already finished, skipping duplicate end', { sessionId: data.sessionId });
       }
     }
   });
 
-  actionQueues.coffeeActionQueue.set(
-    data.sessionId,
-    run.catch(() => undefined),
-  );
+  actionQueues.coffeeActionQueue.set(data.sessionId, run.catch(() => undefined));
 
   try {
     await run;
@@ -194,11 +152,14 @@ export async function handleCoffeeAction({
           snapshotRevisionId: fallbackSnapshot.id || null,
           snapshotCreatedAt: toSnapshotCreatedAt(fallbackSnapshot.created_at),
         };
-        gamesNs.to(`game:${data.sessionId}`).emit('game:data', fallbackPayload);
-        socket.emit('game:data', fallbackPayload);
+        emitToRoomAndActor(gamesNs, socket, `game:${data.sessionId}`, 'game:data', fallbackPayload);
+        ack?.({ ok: false, error: err?.message, code: 'ACTION_ERROR', data: fallbackSnapshot.state });
+      } else {
+        ack?.({ ok: false, error: err?.message, code: 'ACTION_ERROR' });
       }
     } catch (fallbackErr) {
       console.error('[CoffeeRoulette] Fallback state broadcast also failed', { error: (fallbackErr as Error)?.message });
+      ack?.({ ok: false, error: err?.message, code: 'ACTION_ERROR' });
     }
 
     socket.emit('error', { message: err?.message || 'Coffee action failed', code: 'ACTION_ERROR' });
@@ -207,7 +168,6 @@ export async function handleCoffeeAction({
 
 /**
  * Re-run Coffee Roulette pairing when a paired participant leaves or disconnects.
- * Used by both game:leave and disconnect handlers.
  */
 export async function handleCoffeeRematchOnLeave(
   ctx: GameHandlerContext,
@@ -228,9 +188,7 @@ export async function handleCoffeeRematchOnLeave(
       if (!['matching', 'chatting'].includes(state?.phase)) return;
 
       const inPairs = (state?.pairs || []).some(
-        (p: any) =>
-          p?.person1?.participantId === participantId ||
-          p?.person2?.participantId === participantId,
+        (p: any) => p?.person1?.participantId === participantId || p?.person2?.participantId === participantId,
       );
       if (!inPairs) return;
 
@@ -257,9 +215,6 @@ export async function handleCoffeeRematchOnLeave(
     }
   });
 
-  actionQueues.coffeeActionQueue.set(
-    sessionId,
-    run.catch(() => undefined),
-  );
+  actionQueues.coffeeActionQueue.set(sessionId, run.catch(() => undefined));
   void run;
 }

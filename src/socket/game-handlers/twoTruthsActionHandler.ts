@@ -6,6 +6,7 @@ import type { GameHandlerContext } from './handlerContext';
 import { logAuditEvent } from './audit';
 import { toSnapshotCreatedAt } from './snapshotUtils';
 import { emitEventNotification } from '../emitter';
+import { emitToRoomAndActor } from './reliableEmit';
 import {
   twoTruthsSubmitSchema,
   twoTruthsVoteSchema,
@@ -17,12 +18,19 @@ import {
   type TwoTruthsState,
 } from '../../games/two-truths/reducer';
 
+/** Extract a safe UUID for audit logs. Guest userIds look like "guest:uuid" — use null instead. */
+function safeUserId(userId: string): string | null {
+  if (!userId || userId.startsWith('guest:')) return null;
+  return userId;
+}
+
 interface TwoTruthsActionArgs {
   ctx: GameHandlerContext;
   data: { sessionId: string; roundId?: string; actionType: string; payload: any };
   participant: { participantId: string };
   roundId: string;
   session: any;
+  ack?: Function;
 }
 
 export async function handleTwoTruthsAction({
@@ -31,6 +39,7 @@ export async function handleTwoTruthsAction({
   participant,
   roundId,
   session,
+  ack,
 }: TwoTruthsActionArgs): Promise<void> {
   const { socket, gamesNs, gamesService, actionQueues } = ctx;
 
@@ -40,28 +49,23 @@ export async function handleTwoTruthsAction({
     const latest = await gamesService.getLatestSnapshot(data.sessionId);
     const st = latest?.state as TwoTruthsState | null;
     if (st?.kind !== 'two-truths' || !st.presenterParticipantId) {
-      socket.emit('error', {
-        message: 'Game state is not ready for that action.',
-        code: 'FORBIDDEN',
-      });
+      socket.emit('error', { message: 'Game state is not ready for that action.', code: 'FORBIDDEN' });
+      ack?.({ ok: false, error: 'Game state is not ready', code: 'FORBIDDEN' });
       return;
     }
     if (st.presenterParticipantId !== participant.participantId) {
-      socket.emit('error', {
-        message: 'Only the person who submitted this round\u2019s statements can do that.',
-        code: 'FORBIDDEN',
-      });
+      socket.emit('error', { message: 'Only the person who submitted this round\u2019s statements can do that.', code: 'FORBIDDEN' });
+      ack?.({ ok: false, error: 'Not the presenter', code: 'FORBIDDEN' });
       return;
     }
     if (data.actionType === 'two_truths:reveal' && st.phase !== 'vote') {
       socket.emit('error', { message: 'Reveal is only available during voting.', code: 'FORBIDDEN' });
+      ack?.({ ok: false, error: 'Not in vote phase', code: 'FORBIDDEN' });
       return;
     }
     if (data.actionType === 'two_truths:next_round' && st.phase !== 'reveal') {
-      socket.emit('error', {
-        message: 'Finish the reveal before starting the next round.',
-        code: 'FORBIDDEN',
-      });
+      socket.emit('error', { message: 'Finish the reveal before starting the next round.', code: 'FORBIDDEN' });
+      ack?.({ ok: false, error: 'Not in reveal phase', code: 'FORBIDDEN' });
       return;
     }
   }
@@ -75,6 +79,7 @@ export async function handleTwoTruthsAction({
         code: 'VALIDATION',
         issues: payloadValidation.error.issues.map(i => ({ path: i.path.join('.'), message: i.message })),
       });
+      ack?.({ ok: false, error: payloadValidation.error.issues[0].message, code: 'VALIDATION' });
       return;
     }
     data.payload = payloadValidation.data;
@@ -83,10 +88,8 @@ export async function handleTwoTruthsAction({
   if (data.actionType === 'two_truths:vote') {
     const payloadValidation = twoTruthsVoteSchema.safeParse(data.payload);
     if (!payloadValidation.success) {
-      socket.emit('error', {
-        message: 'Invalid vote: ' + payloadValidation.error.issues[0].message,
-        code: 'VALIDATION',
-      });
+      socket.emit('error', { message: 'Invalid vote: ' + payloadValidation.error.issues[0].message, code: 'VALIDATION' });
+      ack?.({ ok: false, error: payloadValidation.error.issues[0].message, code: 'VALIDATION' });
       return;
     }
     data.payload = payloadValidation.data;
@@ -96,6 +99,7 @@ export async function handleTwoTruthsAction({
     const payloadValidation = twoTruthsRevealSchema.safeParse(data.payload);
     if (!payloadValidation.success) {
       socket.emit('error', { message: 'Invalid reveal', code: 'VALIDATION' });
+      ack?.({ ok: false, error: 'Invalid reveal', code: 'VALIDATION' });
       return;
     }
     data.payload = payloadValidation.data;
@@ -127,26 +131,20 @@ export async function handleTwoTruthsAction({
     }
 
     // ALWAYS broadcast game:data — this is the primary state delivery mechanism.
-    // Must never be skipped, even if snapshot save failed.
     const broadcastPayload = {
       sessionId: data.sessionId,
       gameData: publiclySafeState,
       snapshotRevisionId: savedSnapshot?.id || null,
       snapshotCreatedAt: toSnapshotCreatedAt(savedSnapshot?.created_at),
     };
-    gamesNs.to(`game:${data.sessionId}`).emit('game:data', broadcastPayload);
+    emitToRoomAndActor(gamesNs, socket, `game:${data.sessionId}`, 'game:data', broadcastPayload);
 
-    // Also emit directly to the acting socket as a reliability fallback.
-    // Socket.IO room broadcasts can miss the sender in edge cases
-    // (e.g., room join not yet flushed, adapter lag).
-    socket.emit('game:data', broadcastPayload);
+    // Ack with new state for immediate client feedback
+    ack?.({ ok: true, data: publiclySafeState });
 
-    // Redundant broadcast on the events namespace to reliably wake up
-    // clients that haven't joined the game room yet.
+    // Redundant broadcast on the events namespace for late clients
     if (data.actionType === 'two_truths:start' && next.phase === 'submit') {
-      emitEventNotification(session.event_id, 'game:session_created', {
-        sessionId: data.sessionId,
-      });
+      emitEventNotification(session.event_id, 'game:session_created', { sessionId: data.sessionId });
     }
 
     return savedSnapshot;
@@ -179,11 +177,14 @@ export async function handleTwoTruthsAction({
           snapshotRevisionId: fallbackSnapshot.id || null,
           snapshotCreatedAt: toSnapshotCreatedAt(fallbackSnapshot.created_at),
         };
-        gamesNs.to(`game:${data.sessionId}`).emit('game:data', fallbackPayload);
-        socket.emit('game:data', fallbackPayload);
+        emitToRoomAndActor(gamesNs, socket, `game:${data.sessionId}`, 'game:data', fallbackPayload);
+        ack?.({ ok: false, error: ttErr?.message, code: 'ACTION_ERROR', data: fallbackState });
+      } else {
+        ack?.({ ok: false, error: ttErr?.message, code: 'ACTION_ERROR' });
       }
     } catch (fallbackErr) {
       console.error('[TwoTruths] Fallback state broadcast also failed', { error: (fallbackErr as Error)?.message });
+      ack?.({ ok: false, error: ttErr?.message, code: 'ACTION_ERROR' });
     }
 
     socket.emit('error', { message: ttErr?.message || 'Game action failed', code: 'ACTION_ERROR' });
@@ -223,7 +224,7 @@ export async function handleTwoTruthsAction({
       eventId: session.event_id,
       gameSessionId: data.sessionId,
       participantId: participant.participantId,
-      userId: ctx.user.userId,
+      userId: safeUserId(ctx.user.userId),
       action: 'vote_cast',
       details: {
         game: 'two-truths',

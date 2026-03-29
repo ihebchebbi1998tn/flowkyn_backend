@@ -4,6 +4,7 @@
 import { z } from 'zod';
 import type { GameHandlerContext } from './handlerContext';
 import { verifyGameParticipant } from './participantAccess';
+import { emitToParticipantOrQueue } from './reliableEmit';
 
 export function registerCoffeeVoiceCallHandlers(ctx: GameHandlerContext): void {
   const { socket, gamesNs, gamesService, voiceCaches } = ctx;
@@ -103,8 +104,14 @@ export function registerCoffeeVoiceCallHandlers(ctx: GameHandlerContext): void {
         createdAt: Date.now(),
       });
 
-      const roomId = `game:${validation.data.sessionId}`;
-      gamesNs.to(roomId).emit('coffee:voice_call_modal', receiverModal);
+      emitToParticipantOrQueue({
+        gamesNs,
+        voiceCaches,
+        sessionId: validation.data.sessionId,
+        participantId: partnerParticipantId,
+        event: 'coffee:voice_call_modal',
+        payload: receiverModal,
+      });
 
       ack?.({ ok: true, partnerConnected: !!partnerSocketId });
     } catch (err) {
@@ -172,20 +179,34 @@ export function registerCoffeeVoiceCallHandlers(ctx: GameHandlerContext): void {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
         });
-        gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_accepted', {
+        emitToParticipantOrQueue({
+          gamesNs,
+          voiceCaches,
           sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          toParticipantId: initiatorParticipantId,
+          participantId: initiatorParticipantId,
+          event: 'coffee:voice_call_accepted',
+          payload: {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          },
         });
       } else {
         socket.emit('coffee:voice_call_declined', {
           sessionId: validation.data.sessionId,
           pairId: validation.data.pairId,
         });
-        gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_declined', {
+        emitToParticipantOrQueue({
+          gamesNs,
+          voiceCaches,
           sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          toParticipantId: initiatorParticipantId,
+          participantId: initiatorParticipantId,
+          event: 'coffee:voice_call_declined',
+          payload: {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: initiatorParticipantId,
+          },
         });
       }
 
@@ -230,10 +251,17 @@ export function registerCoffeeVoiceCallHandlers(ctx: GameHandlerContext): void {
       if (partnerParticipantId) {
         const pendingKey = `${validation.data.sessionId}:${validation.data.pairId}:${partnerParticipantId}`;
         voiceCaches.pendingVoiceCallRequests.delete(pendingKey);
-        gamesNs.to(`game:${validation.data.sessionId}`).emit('coffee:voice_call_cancelled', {
+        emitToParticipantOrQueue({
+          gamesNs,
+          voiceCaches,
           sessionId: validation.data.sessionId,
-          pairId: validation.data.pairId,
-          toParticipantId: partnerParticipantId,
+          participantId: partnerParticipantId,
+          event: 'coffee:voice_call_cancelled',
+          payload: {
+            sessionId: validation.data.sessionId,
+            pairId: validation.data.pairId,
+            toParticipantId: partnerParticipantId,
+          },
         });
       }
 
