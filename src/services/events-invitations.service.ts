@@ -170,9 +170,9 @@ export class EventInvitationsService {
 
     if (data.token) {
       await this.validateInvitationToken(eventId, data.token);
-    } else if (event.visibility === 'private') {
-      throw new AppError('A valid invitation token is required to join this private event', 403, 'FORBIDDEN');
     }
+    // Note: visibility check removed — all events allow guest joins when allow_guests is true.
+    // Authentication is only required for admin actions (creating games, managing events).
 
     const sanitizedName = sanitizeText(data.name, 100).trim();
     if (sanitizedName.length === 0) throw new AppError('Name is required', 400, 'VALIDATION_FAILED');

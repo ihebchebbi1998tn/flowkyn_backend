@@ -56,7 +56,7 @@ export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void 
       ]);
       let snapshot = snapshotRaw;
 
-      // Backfill legacy Coffee Roulette sessions
+      // Backfill legacy sessions that do not yet have a snapshot
       if (!snapshot) {
         const typeRow = await queryOne<{ key: string }>(
           `SELECT gt.key FROM game_sessions gs JOIN game_types gt ON gt.id = gs.game_type_id WHERE gs.id = $1`,
@@ -70,6 +70,40 @@ export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void 
             startedChatAt: null,
             promptsUsed: 0,
             decisionRequired: false,
+          };
+          snapshot = await gamesService.saveSnapshot(data.sessionId, state);
+        } else if (typeRow?.key === 'two-truths') {
+          const state = {
+            kind: 'two-truths',
+            phase: 'waiting',
+            round: 1,
+            totalRounds: session.total_rounds || 4,
+            presenterParticipantId: null,
+            statements: null,
+            votes: {},
+            revealedLie: null,
+            scores: {},
+            submitSeconds: Number(session?.resolved_timing?.twoTruths?.submitSeconds || 30),
+            voteSeconds: Number(session?.resolved_timing?.twoTruths?.voteSeconds || 20),
+            gameStatus: 'waiting',
+          };
+          snapshot = await gamesService.saveSnapshot(data.sessionId, state);
+        } else if (typeRow?.key === 'strategic-escape') {
+          const state = {
+            kind: 'strategic-escape',
+            phase: 'setup',
+            industryKey: null,
+            crisisKey: null,
+            difficultyKey: 'medium',
+            industryLabel: 'General',
+            crisisLabel: 'Scenario',
+            difficultyLabel: 'medium',
+            rolesAssigned: false,
+            discussionDurationMinutes: Math.max(
+              1,
+              Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes ?? 45)
+            ),
+            gameStatus: 'waiting',
           };
           snapshot = await gamesService.saveSnapshot(data.sessionId, state);
         }

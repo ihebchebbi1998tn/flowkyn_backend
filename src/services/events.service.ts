@@ -69,7 +69,7 @@ export class EventsService {
           data.title,
           data.description || '',
           data.event_mode || 'sync',
-          data.visibility || 'private',
+          data.visibility || 'public',
           data.max_participants || 50,
           data.start_time || null,
           data.end_time || null,
