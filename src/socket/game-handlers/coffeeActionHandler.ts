@@ -206,10 +206,18 @@ export async function handleCoffeeRematchOnLeave(
   const prevQueue = actionQueues.coffeeActionQueue.get(sessionId) ?? Promise.resolve();
   const run = prevQueue.then(async () => {
     try {
-      const [latestSnapshot, session] = await Promise.all([
-        gamesService.getLatestSnapshot(sessionId),
-        gamesService.getSession(sessionId),
-      ]);
+      // Safely get session - it might have been deleted or finished
+      let session: any;
+      try {
+        session = await gamesService.getSession(sessionId);
+      } catch (e: any) {
+        if (e.message === 'Game session not found' || e.status === 404 || e.statusCode === 404) {
+          return; // Session no longer exists, nothing to reshuffle
+        }
+        throw e; // Bubble up unexpected errors
+      }
+
+      const latestSnapshot = await gamesService.getLatestSnapshot(sessionId);
       const state = latestSnapshot?.state as any;
       if (state?.kind !== 'coffee-roulette') return;
       if (!['matching', 'chatting'].includes(state?.phase)) return;

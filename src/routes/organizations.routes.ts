@@ -45,4 +45,20 @@ router.post('/:orgId/invitations', authenticate, validate(orgIdParam, 'params'),
 router.post('/invitations/accept', authenticate, validate(acceptInvitationSchema), ctrl.acceptInvitation);
 router.post('/:orgId/pulse-survey', authenticate, validate(orgIdParam, 'params'), ctrl.savePulseSurvey);
 
+// Wins categories — return default categories for the organization
+router.get('/:orgId/wins/categories', authenticate, validate(orgIdParam, 'params'), (req, res) => {
+  const orgId = req.params.orgId;
+  const defaults = [
+    { id: `${orgId}-personal`, organization_id: orgId, key: 'personal', label: 'Personal Win', description: 'Individual achievements', color: '#8B5CF6', icon: '🏆', order_index: 0, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { id: `${orgId}-team`, organization_id: orgId, key: 'team', label: 'Team Win', description: 'Team accomplishments', color: '#06B6D4', icon: '👥', order_index: 1, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { id: `${orgId}-milestone`, organization_id: orgId, key: 'milestone', label: 'Milestone', description: 'Important milestones reached', color: '#F59E0B', icon: '🎯', order_index: 2, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+    { id: `${orgId}-shoutout`, organization_id: orgId, key: 'shoutout', label: 'Shoutout', description: 'Recognize someone awesome', color: '#EC4899', icon: '📣', order_index: 3, is_active: true, created_at: new Date().toISOString(), updated_at: new Date().toISOString() },
+  ];
+  res.json(defaults);
+});
+
+router.get('/:orgId/wins/tags', authenticate, validate(orgIdParam, 'params'), (_req, res) => {
+  res.json([]);
+});
+
 export { router as organizationsRoutes };

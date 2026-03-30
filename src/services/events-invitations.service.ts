@@ -293,14 +293,22 @@ export class EventInvitationsService {
       [uuid(), eventId, email, invitedByMemberId, hashedToken]
     );
 
-    // Always include ?game= so recipients land on the intended game (default '1' if none specified)
-    const gameParam = gameId && String(gameId).trim() ? String(gameId).trim() : '1';
+    // Use the provided gameId; if missing, look up the event's active game session; never default to '1'
+    let gameParam = gameId && String(gameId).trim() ? String(gameId).trim() : '';
+    if (!gameParam) {
+      const activeGame = await queryOne<{ key: string }>(
+        `SELECT gt.key FROM game_sessions gs JOIN game_types gt ON gs.game_type_id = gt.id
+         WHERE gs.event_id = $1 AND gs.status != 'finished' ORDER BY gs.created_at DESC LIMIT 1`,
+        [eventId]
+      );
+      gameParam = activeGame?.key || '';
+    }
     await sendEmail({
       to: email,
       type: 'event_invitation',
       data: { 
         eventTitle, 
-        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}&game=${gameParam}`,
+        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameParam ? `&game=${gameParam}` : ''}`,
         startTime: startTime ? String(startTime) : undefined,
         endTime: endTime ? String(endTime) : undefined
       },
