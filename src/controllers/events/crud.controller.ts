@@ -94,6 +94,7 @@ export class EventsCrudController {
         allow_guests, allow_chat, auto_start_games, max_rounds,
         default_session_duration_minutes, two_truths_submit_seconds, two_truths_vote_seconds,
         coffee_chat_duration_minutes, strategic_discussion_duration_minutes,
+        game_id,
         ...eventUpdates
       } = req.body as any;
 
@@ -105,7 +106,8 @@ export class EventsCrudController {
         allow_guests !== undefined || allow_chat !== undefined || auto_start_games !== undefined ||
         max_rounds !== undefined || default_session_duration_minutes !== undefined ||
         two_truths_submit_seconds !== undefined || two_truths_vote_seconds !== undefined ||
-        coffee_chat_duration_minutes !== undefined || strategic_discussion_duration_minutes !== undefined
+        coffee_chat_duration_minutes !== undefined || strategic_discussion_duration_minutes !== undefined ||
+        game_id !== undefined
       ) {
         const fields: string[] = [];
         const values: any[] = [];
@@ -120,6 +122,7 @@ export class EventsCrudController {
         if (two_truths_vote_seconds !== undefined) { fields.push(`two_truths_vote_seconds = $${idx++}`); values.push(Number(two_truths_vote_seconds)); }
         if (coffee_chat_duration_minutes !== undefined) { fields.push(`coffee_chat_duration_minutes = $${idx++}`); values.push(Number(coffee_chat_duration_minutes)); }
         if (strategic_discussion_duration_minutes !== undefined) { fields.push(`strategic_discussion_duration_minutes = $${idx++}`); values.push(Number(strategic_discussion_duration_minutes)); }
+        if (game_id !== undefined) { fields.push(`game_id = $${idx++}`); values.push(String(game_id)); }
 
         if (fields.length > 0) {
           values.push(req.params.eventId);

@@ -46,6 +46,7 @@ export class EventsService {
     two_truths_vote_seconds?: number;
     coffee_chat_duration_minutes?: number;
     strategic_discussion_duration_minutes?: number;
+    game_id?: string;
   }) {
     const eventId = uuid();
     const allowGuests = data.allow_guests !== false; // Default true for backward compatibility
@@ -79,13 +80,14 @@ export class EventsService {
         `INSERT INTO event_settings (
           event_id, allow_guests, allow_chat, auto_start_games, max_rounds,
           default_session_duration_minutes, two_truths_submit_seconds, two_truths_vote_seconds,
-          coffee_chat_duration_minutes, strategic_discussion_duration_minutes
+          coffee_chat_duration_minutes, strategic_discussion_duration_minutes, game_id
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
         [
           eventId, allowGuests, allowChat, autoStartGames, maxRounds,
           defaultSessionDurationMinutes, twoTruthsSubmitSeconds, twoTruthsVoteSeconds,
           coffeeChatDurationMinutes, strategicDiscussionDurationMinutes,
+          data.game_id || null,
         ]
       );
       // Auto-join creator so they can use /me, messages, posts, etc. when landing on play
@@ -115,7 +117,8 @@ export class EventsService {
               COALESCE(es.two_truths_submit_seconds, 30) as two_truths_submit_seconds,
               COALESCE(es.two_truths_vote_seconds, 20) as two_truths_vote_seconds,
               COALESCE(es.coffee_chat_duration_minutes, 30) as coffee_chat_duration_minutes,
-              COALESCE(es.strategic_discussion_duration_minutes, 45) as strategic_discussion_duration_minutes
+              COALESCE(es.strategic_discussion_duration_minutes, 45) as strategic_discussion_duration_minutes,
+              es.game_id
        FROM events e LEFT JOIN event_settings es ON es.event_id = e.id
        WHERE e.id = $1`,
       [eventId]
@@ -134,6 +137,7 @@ export class EventsService {
       `SELECT e.id, e.organization_id, e.title, e.description, e.event_mode, e.visibility,
               e.max_participants, e.start_time, e.end_time, e.status,
               e.created_at, COALESCE(es.allow_guests, true) as allow_guests,
+              es.game_id,
               o.name as organization_name, o.logo_url as organization_logo,
               om_creator.user_id as created_by_user_id
        FROM events e
@@ -220,7 +224,7 @@ export class EventsService {
     if (orgId) {
       const [data, [{ count }]] = await Promise.all([
         query<EventRow>(
-          `SELECT * FROM events WHERE organization_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
+          `SELECT e.*, es.game_id FROM events e LEFT JOIN event_settings es ON es.event_id = e.id WHERE e.organization_id = $1 ORDER BY e.created_at DESC LIMIT $2 OFFSET $3`,
           [orgId, limit, offset]
         ),
         query<{ count: string }>(`SELECT COUNT(*) as count FROM events WHERE organization_id = $1`, [orgId]),
@@ -231,7 +235,8 @@ export class EventsService {
     if (userId) {
       const [data, [{ count }]] = await Promise.all([
         query<EventRow>(
-          `SELECT e.* FROM events e
+          `SELECT e.*, es.game_id FROM events e
+           LEFT JOIN event_settings es ON es.event_id = e.id
            JOIN organization_members om ON om.organization_id = e.organization_id
            WHERE om.user_id = $1 AND om.status IN ('active', 'pending')
            ORDER BY e.created_at DESC LIMIT $2 OFFSET $3`,

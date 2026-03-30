@@ -221,16 +221,24 @@ export class EventInvitationsService {
 
       const participantId = uuid();
 
+      // Exclude any existing participant with the same guest_identity_key (self on refresh)
+      const selfExcludeId = normalizedIdentityKey && hasIdentityCol
+        ? (await client.query<{ id: string }>(
+            `SELECT id FROM participants WHERE event_id = $1 AND guest_identity_key = $2 AND left_at IS NULL LIMIT 1`,
+            [eventId, normalizedIdentityKey]
+          )).rows[0]?.id
+        : null;
+
       const conflict = await client.query(
         `SELECT id FROM (
-          SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL
+          SELECT id FROM participants WHERE event_id = $1 AND LOWER(guest_name) = LOWER($2) AND left_at IS NULL AND ($3::uuid IS NULL OR id != $3)
           UNION ALL
           SELECT ep.participant_id as id
           FROM event_profiles ep
           JOIN participants p ON p.id = ep.participant_id
-          WHERE ep.event_id = $1 AND LOWER(ep.display_name) = LOWER($2) AND p.left_at IS NULL
+          WHERE ep.event_id = $1 AND LOWER(ep.display_name) = LOWER($2) AND p.left_at IS NULL AND ($3::uuid IS NULL OR ep.participant_id != $3)
         ) combined LIMIT 1`,
-        [eventId, sanitizedName]
+        [eventId, sanitizedName, selfExcludeId]
       );
 
       if (conflict.rows.length > 0) {

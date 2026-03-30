@@ -288,7 +288,8 @@ CREATE TABLE "event_settings" (
 	"two_truths_submit_seconds" integer DEFAULT 30 NOT NULL,
 	"two_truths_vote_seconds" integer DEFAULT 20 NOT NULL,
 	"coffee_chat_duration_minutes" integer DEFAULT 30 NOT NULL,
-	"strategic_discussion_duration_minutes" integer DEFAULT 45 NOT NULL
+	"strategic_discussion_duration_minutes" integer DEFAULT 45 NOT NULL,
+	"game_id" varchar(50) DEFAULT NULL
 );
 CREATE TABLE "events" (
 	"id" uuid PRIMARY KEY DEFAULT uuid_generate_v4(),
