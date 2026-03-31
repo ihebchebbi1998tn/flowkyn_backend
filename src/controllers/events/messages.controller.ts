@@ -73,7 +73,7 @@ export class EventsMessagesController {
       const auth = getEventAuthPayload(req);
       if (!auth) throw new AppError('Authentication required', 401, 'AUTH_TOKEN_INVALID');
       await verifyParticipantOwnership(req.body.participant_id, auth);
-      const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content, req.body.parent_post_id);
+      const result = await messagesService.createPost(req.params.eventId, req.body.participant_id, req.body.content, req.body.parent_post_id, req.body.category);
       await audit.create(null, auth.userId ?? null, 'EVENT_CREATE_POST', { eventId: req.params.eventId, postId: result.id });
       emitEventNotification(req.params.eventId, 'post:created', { postId: result.id, authorId: auth.userId || auth.participantId });
       res.status(201).json(result);

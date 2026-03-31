@@ -178,6 +178,7 @@ export class EventMessagesService {
       author_participant_id: p.author_participant_id,
       content: p.content,
       parent_post_id: p.parent_post_id || null,
+      category: p.category || null,
       created_at: p.created_at,
       author_name: p.author_name,
       author_avatar: p.author_avatar,
@@ -204,7 +205,7 @@ export class EventMessagesService {
    * @param parentPostId - Optional parent post ID for threaded replies
    * @throws {AppError} 403 if participant doesn't belong to this event
    */
-  async createPost(eventId: string, participantId: string, content: string, parentPostId?: string) {
+  async createPost(eventId: string, participantId: string, content: string, parentPostId?: string, category?: string) {
     await this.requireEventOpenForPosts(eventId);
 
     const participant = await queryOne(
@@ -238,9 +239,9 @@ export class EventMessagesService {
     await this.ensurePostsTables();
 
     const [post] = await query(
-      `INSERT INTO activity_posts (id, event_id, author_participant_id, content, parent_post_id, created_at)
-       VALUES ($1, $2, $3, $4, $5, NOW()) RETURNING *`,
-      [uuid(), eventId, participantId, sanitizedContent, parentPostId || null]
+      `INSERT INTO activity_posts (id, event_id, author_participant_id, content, parent_post_id, category, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, NOW()) RETURNING *`,
+      [uuid(), eventId, participantId, sanitizedContent, parentPostId || null, category || null]
     );
     return post;
   }
@@ -254,10 +255,16 @@ export class EventMessagesService {
           author_participant_id UUID NOT NULL,
           content TEXT NOT NULL,
           parent_post_id UUID,
+          category VARCHAR(100),
           created_at TIMESTAMPTZ DEFAULT NOW()
         )`,
         []
       );
+      // Add category column if table already exists without it
+      await query(
+        `ALTER TABLE activity_posts ADD COLUMN IF NOT EXISTS category VARCHAR(100)`,
+        []
+      ).catch(() => { /* column may already exist */ });
     } catch { /* table likely exists or no DDL permission */ }
 
     try {

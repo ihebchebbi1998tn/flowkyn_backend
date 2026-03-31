@@ -77,6 +77,8 @@ export const sendMessageSchema = z.object({
 export const createPostSchema = z.object({
   content: z.string().trim().min(1).max(5000),
   participant_id: z.string().uuid(),
+  category: z.string().trim().max(100).optional(),
+  parent_post_id: z.string().uuid().optional(),
 });
 
 export const reactToPostSchema = z.object({
