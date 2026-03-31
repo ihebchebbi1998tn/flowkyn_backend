@@ -152,7 +152,7 @@ export function registerCoffeeWebRTCHandlers(ctx: GameHandlerContext): void {
 
       const cacheKey = `${validation.data.sessionId}:${validation.data.pairId}`;
       const cached = voiceCaches.coffeeVoiceOfferCache.get(cacheKey);
-      if (!cached) { rejectVoice(ack, 'OFFER_NOT_READY', 'Voice offer not ready yet'); return; }
+      if (!cached) { ack?.({ ok: false, error: 'OFFER_NOT_READY' }); return; }
 
       if (Date.now() - cached.createdAt > voiceCaches.COFFEE_VOICE_OFFER_TTL_MS) {
         voiceCaches.coffeeVoiceOfferCache.delete(cacheKey);

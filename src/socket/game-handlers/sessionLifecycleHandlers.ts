@@ -55,6 +55,13 @@ export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void 
         gamesService.getLatestSnapshot(data.sessionId),
         canControlGameFlow(data.sessionId, user.userId, socket).catch(() => false),
       ]);
+      // Prevent joining a finished session
+      if (session?.status === 'finished') {
+        socket.emit('error', { message: 'This game session has ended', code: 'SESSION_FINISHED' });
+        ack?.({ ok: false, error: 'This game session has ended', code: 'SESSION_FINISHED' });
+        return;
+      }
+
       let snapshot = snapshotRaw;
 
       // Backfill legacy sessions that do not yet have a snapshot
