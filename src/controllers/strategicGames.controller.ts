@@ -131,14 +131,15 @@ export class StrategicGamesController {
       const participantId = await this.resolveParticipantIdForSession(req.params.sessionId, req);
       const sessionId = req.params.sessionId;
 
-      const result = await query(
+      const updated = await queryOne(
         `UPDATE strategic_roles
          SET revealed_at = COALESCE(revealed_at, NOW())
-         WHERE game_session_id = $1 AND participant_id = $2`,
+         WHERE game_session_id = $1 AND participant_id = $2
+         RETURNING id`,
         [sessionId, participantId]
       );
 
-      if ((result as any)?.rowCount === 0) {
+      if (!updated) {
         throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
       }
 
@@ -198,36 +199,43 @@ export class StrategicGamesController {
       const participantId = await this.resolveParticipantIdForSession(req.params.sessionId, req);
       const sessionId = req.params.sessionId;
 
-      const result = await query(
+      const updated = await queryOne(
         `UPDATE strategic_roles
          SET ready_at = COALESCE(ready_at, NOW())
-         WHERE game_session_id = $1 AND participant_id = $2`,
+         WHERE game_session_id = $1 AND participant_id = $2
+         RETURNING id`,
         [sessionId, participantId]
       );
 
-      if ((result as any)?.rowCount === 0) {
+      if (!updated) {
         throw new AppError('Role has not been assigned for this session', 409, 'STRATEGIC_ROLE_NOT_ASSIGNED');
       }
 
-      // Emit updated ready status to all players in the session
-      const row = await queryOne<{ total: string; ready: string }>(
-        `WITH assigned AS (
-           SELECT sr.participant_id, sr.ready_at
-           FROM strategic_roles sr
-           WHERE sr.game_session_id = $1
-         )
-         SELECT
-           (SELECT COUNT(*)::text FROM assigned) as total,
-           (SELECT COUNT(*)::text FROM assigned WHERE ready_at IS NOT NULL) as ready`,
+      // Emit updated ready status (with per-participant details) to all players
+      const rows = await query(
+        `SELECT sr.participant_id, sr.ready_at,
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as display_name
+         FROM strategic_roles sr
+         LEFT JOIN participants p ON p.id = sr.participant_id
+         LEFT JOIN event_profiles ep ON ep.participant_id = sr.participant_id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE sr.game_session_id = $1`,
         [sessionId]
       );
-      const total = Number(row?.total || 0);
-      const ready = Number(row?.ready || 0);
+      const total = rows.length;
+      const readyCount = rows.filter((r: any) => !!r.ready_at).length;
+      const readyParticipants = rows.map((r: any) => ({
+        participantId: r.participant_id,
+        displayName: r.display_name,
+        isReady: !!r.ready_at,
+      }));
       emitGameUpdate(sessionId, 'strategic:ready_status', {
         sessionId,
         total,
-        ready,
-        allReady: total > 0 && ready >= total,
+        ready: readyCount,
+        allReady: total > 0 && readyCount >= total,
+        participants: readyParticipants,
       });
 
       res.status(204).send();
@@ -240,21 +248,26 @@ export class StrategicGamesController {
     try {
       await this.resolveParticipantIdForSession(req.params.sessionId, req);
 
-      const row = await queryOne<{ total: string; ready: string }>(
-        `WITH assigned AS (
-           SELECT sr.participant_id, sr.ready_at
-           FROM strategic_roles sr
-           WHERE sr.game_session_id = $1
-         )
-         SELECT
-           (SELECT COUNT(*)::text FROM assigned) as total,
-           (SELECT COUNT(*)::text FROM assigned WHERE ready_at IS NOT NULL) as ready`,
+      const rows = await query(
+        `SELECT sr.participant_id, sr.ready_at,
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as display_name
+         FROM strategic_roles sr
+         LEFT JOIN participants p ON p.id = sr.participant_id
+         LEFT JOIN event_profiles ep ON ep.participant_id = sr.participant_id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE sr.game_session_id = $1`,
         [req.params.sessionId]
       );
+      const total = rows.length;
+      const readyCount = rows.filter((r: any) => !!r.ready_at).length;
+      const participants = rows.map((r: any) => ({
+        participantId: r.participant_id,
+        displayName: r.display_name,
+        isReady: !!r.ready_at,
+      }));
 
-      const total = Number(row?.total || 0);
-      const ready = Number(row?.ready || 0);
-      res.json({ total, ready, allReady: total > 0 && ready >= total });
+      res.json({ total, ready: readyCount, allReady: total > 0 && readyCount >= total, participants });
     } catch (err) {
       next(err);
     }
@@ -342,8 +355,10 @@ export class StrategicGamesController {
     try {
       const session = await gamesService.getSession(req.params.sessionId);
 
+      // Any participant in the event can view debrief results
       if (req.user) {
-        await assertIsEventAdmin(session.event_id, req.user.userId);
+        const participantId = await resolveCallerParticipantId(session.event_id, req);
+        if (!participantId) throw new AppError('Not a participant in this event', 403, 'NOT_PARTICIPANT');
       } else if (req.guest) {
         if (req.guest.eventId !== session.event_id) throw new AppError('Forbidden', 403, 'FORBIDDEN');
       } else {
@@ -361,8 +376,8 @@ export class StrategicGamesController {
     try {
       const session = await gamesService.getSession(req.params.sessionId);
 
-      if (session.status !== 'in_progress') {
-        throw new AppError(`Cannot start debrief — session is in '${session.status}' status (expected 'in_progress')`, 400, 'SESSION_NOT_ACTIVE');
+      if (session.status !== 'in_progress' && session.status !== 'active') {
+        throw new AppError(`Cannot start debrief — session is in '${session.status}' status (expected 'active' or 'in_progress')`, 400, 'SESSION_NOT_ACTIVE');
       }
 
       if (session.debrief_sent_at !== null && session.debrief_sent_at !== undefined) {

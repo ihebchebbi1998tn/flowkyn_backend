@@ -172,6 +172,40 @@ export class EventMessagesService {
       });
     }
 
+    // Compute win streaks for each author
+    const authorIds = [...new Set(posts.map((p: any) => p.author_participant_id))];
+    const streakMap = new Map<string, number>();
+    if (authorIds.length > 0) {
+      try {
+        const streakRows = await query<{ author_participant_id: string; streak: string }>(
+          `WITH weekly_posts AS (
+            SELECT DISTINCT author_participant_id,
+                   date_trunc('week', created_at) AS week
+            FROM activity_posts
+            WHERE author_participant_id = ANY($1::uuid[])
+              AND parent_post_id IS NULL
+          ),
+          numbered AS (
+            SELECT author_participant_id, week,
+                   ROW_NUMBER() OVER (PARTITION BY author_participant_id ORDER BY week DESC) AS rn
+            FROM weekly_posts
+          ),
+          streaks AS (
+            SELECT author_participant_id,
+                   COUNT(*) AS streak
+            FROM numbered
+            WHERE week = date_trunc('week', NOW()) - (rn - 1) * INTERVAL '1 week'
+            GROUP BY author_participant_id
+          )
+          SELECT author_participant_id, streak::text FROM streaks`,
+          [authorIds]
+        );
+        for (const row of streakRows) {
+          streakMap.set(row.author_participant_id, parseInt(row.streak, 10));
+        }
+      } catch { /* streak calculation is best-effort */ }
+    }
+
     const dataWithReactions = posts.map((p: any) => ({
       id: p.id,
       event_id: p.event_id,
@@ -182,6 +216,7 @@ export class EventMessagesService {
       created_at: p.created_at,
       author_name: p.author_name,
       author_avatar: p.author_avatar,
+      win_streak: streakMap.get(p.author_participant_id) || 0,
       reactions: (reactionsByPost.get(p.id) || []).map(r => ({
         ...r,
         reacted: currentParticipantId ? reactedSet.has(`${p.id}:${r.type}`) : false,

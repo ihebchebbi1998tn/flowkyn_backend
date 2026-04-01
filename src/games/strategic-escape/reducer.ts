@@ -75,15 +75,17 @@ export async function reduceStrategicState(args: {
       if (base.phase === 'discussion' && base.discussionEndsAt) return base;
       if (base.phase !== 'discussion') return base;
     }
-    const minutes =
+    const rawMinutes =
       typeof payload?.durationMinutes === 'number'
         ? payload.durationMinutes
         : Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes ?? 45);
+    const minutes = Number.isFinite(rawMinutes) ? rawMinutes : (base.discussionDurationMinutes ?? 45);
+    const safeDuration = Math.max(1, minutes);
     return {
       ...base,
       phase: 'discussion',
-      discussionDurationMinutes: Math.max(1, Number(minutes ?? base.discussionDurationMinutes ?? 45)),
-      discussionEndsAt: new Date(Date.now() + (minutes ?? base.discussionDurationMinutes ?? 45) * 60000).toISOString(),
+      discussionDurationMinutes: safeDuration,
+      discussionEndsAt: new Date(Date.now() + safeDuration * 60000).toISOString(),
       gameStatus: 'in_progress',
     };
   }

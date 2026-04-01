@@ -74,6 +74,15 @@ export async function handleStrategicAction({
       payload: JSON.stringify(data.payload).slice(0, 200),
     });
 
+    // Side-effect: actually assign roles in the DB before updating snapshot
+    if (data.actionType === 'strategic:assign_roles') {
+      const alreadyAssigned = prevState?.rolesAssigned && prevState?.phase === 'roles_assignment';
+      if (!alreadyAssigned) {
+        console.log('[Strategic] Calling gamesService.assignStrategicRoles for', data.sessionId);
+        await gamesService.assignStrategicRoles(data.sessionId);
+      }
+    }
+
     const next = await reduceStrategicState({
       eventId: session.event_id,
       actionType: data.actionType,

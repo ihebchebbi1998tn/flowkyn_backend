@@ -29,16 +29,6 @@ export class StrategicEscapeService extends GameSessionCoreService {
     const resolvedTiming = (session as any)?.resolved_timing as any;
     const sessionStrategicDefault = Number(resolvedTiming?.strategicEscape?.discussionDurationMinutes || 45);
     const durationMinutes = config.discussionDurationMinutes || sessionStrategicDefault;
-    const discussionEndsAtRaw = new Date(Date.now() + durationMinutes * 60 * 1000);
-    const discussionEndsAt = this.clampToEventEnd(
-      this.clampToEventEnd(discussionEndsAtRaw, (session as any)?.session_deadline_at || null),
-      (await queryOne<{ end_time: string | null }>('SELECT end_time FROM events WHERE id = $1', [eventId]))?.end_time || null
-    ) || discussionEndsAtRaw;
-
-    await query(
-      `UPDATE game_sessions SET discussion_ends_at = $1 WHERE id = $2`,
-      [discussionEndsAt, session.id]
-    );
 
     const initialState = {
       kind: 'strategic-escape',
@@ -51,7 +41,7 @@ export class StrategicEscapeService extends GameSessionCoreService {
       difficultyLabel: config.difficultyLabel || config.difficulty,
       rolesAssigned: false,
       discussionDurationMinutes: durationMinutes,
-      discussionEndsAt: discussionEndsAt.toISOString(),
+      // discussionEndsAt is set by the reducer when discussion actually starts
     };
 
     await this.saveSnapshot(session.id, initialState);
@@ -178,13 +168,24 @@ export class StrategicEscapeService extends GameSessionCoreService {
       const assignments = await query<{
         participant_id: string;
         role_key: string;
+        display_name: string;
+        avatar_url: string | null;
       }>(
-        `SELECT participant_id, role_key FROM strategic_roles
-         WHERE game_session_id = $1`,
+        `SELECT sr.participant_id, sr.role_key,
+                COALESCE(ep.display_name, u.name, p.guest_name, 'Unknown') as display_name,
+                COALESCE(ep.avatar_url, u.avatar_url) as avatar_url
+         FROM strategic_roles sr
+         LEFT JOIN participants p ON p.id = sr.participant_id
+         LEFT JOIN event_profiles ep ON ep.participant_id = sr.participant_id
+         LEFT JOIN organization_members om ON om.id = p.organization_member_id
+         LEFT JOIN users u ON u.id = om.user_id
+         WHERE sr.game_session_id = $1`,
         [sessionId]
       );
 
       const roleByParticipant = new Map(assignments.map(a => [a.participant_id, a.role_key]));
+      const nameByParticipant = new Map(assignments.map(a => [a.participant_id, a.display_name]));
+      const avatarByParticipant = new Map(assignments.map(a => [a.participant_id, a.avatar_url]));
       const scoreByParticipant = new Map<string, number>();
       const actionsByRole = new Map<string, number>();
 
@@ -196,9 +197,18 @@ export class StrategicEscapeService extends GameSessionCoreService {
         }
       }
 
+      // Include all assigned participants (even those with 0 actions)
+      for (const a of assignments) {
+        if (!scoreByParticipant.has(a.participant_id)) {
+          scoreByParticipant.set(a.participant_id, 0);
+        }
+      }
+
       const rankings = Array.from(scoreByParticipant.entries())
         .map(([participantId, score]) => ({
           participantId,
+          name: nameByParticipant.get(participantId) || 'Unknown',
+          avatar: avatarByParticipant.get(participantId) || null,
           roleKey: roleByParticipant.get(participantId) || 'unknown',
           actionCount: score,
           score,
