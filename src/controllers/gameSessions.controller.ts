@@ -27,6 +27,22 @@ async function getSessionEventId(sessionId: string): Promise<string> {
 
 export class GameSessionsController {
   /**
+   * GET /events/:eventId/game-sessions/history
+   * List finished sessions for an event (accessible to participants)
+   */
+  async getSessionHistory(req: AuthRequest, res: Response, next: NextFunction) {
+    try {
+      const { eventId } = req.params;
+      if (!eventId) throw new AppError('Event ID is required', 400, 'VALIDATION_FAILED');
+      const limit = Math.min(parseInt(req.query.limit as string) || 10, 50);
+      const history = await sessionDetailsService.getFinishedSessionsForEvent(eventId, limit);
+      res.json(history);
+    } catch (err) {
+      next(err);
+    }
+  }
+
+  /**
    * GET /game-sessions/:sessionId/details
    * Retrieve comprehensive details for a game session
    */

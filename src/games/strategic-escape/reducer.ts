@@ -10,6 +10,7 @@ export type StrategicState = {
   rolesAssigned: boolean;
   discussionDurationMinutes?: number;
   discussionEndsAt?: string;
+  _serverNow?: string;
   gameStatus?: 'waiting' | 'in_progress' | 'finished';
 };
 
@@ -85,7 +86,8 @@ export async function reduceStrategicState(args: {
       ...base,
       phase: 'discussion',
       discussionDurationMinutes: safeDuration,
-      discussionEndsAt: new Date(Date.now() + safeDuration * 60000).toISOString(),
+      discussionEndsAt: new Date((payload?._now ?? Date.now()) + safeDuration * 60000).toISOString(),
+      _serverNow: new Date(payload?._now ?? Date.now()).toISOString(),
       gameStatus: 'in_progress',
     };
   }

@@ -492,4 +492,53 @@ export class SessionDetailsService {
 
     return result;
   }
+
+  /**
+   * Get finished (past) sessions for an event — lightweight summary for history UI
+   */
+  async getFinishedSessionsForEvent(eventId: string, limit = 10): Promise<Array<{
+    id: string;
+    game_name: string;
+    game_key: string;
+    status: string;
+    current_round: number;
+    total_rounds: number;
+    participant_count: number;
+    started_at: string;
+    ended_at: string | null;
+    duration_minutes: number | null;
+  }>> {
+    const result = await query<any>(
+      `
+      SELECT
+        gs.id,
+        gt.name as game_name,
+        gt.key as game_key,
+        gs.status,
+        gs.current_round,
+        gs.total_rounds,
+        COUNT(DISTINCT p.id) as participant_count,
+        gs.started_at,
+        gs.ended_at,
+        CASE WHEN gs.ended_at IS NOT NULL AND gs.started_at IS NOT NULL
+          THEN EXTRACT(EPOCH FROM (gs.ended_at - gs.started_at)) / 60
+          ELSE NULL
+        END as duration_minutes
+      FROM game_sessions gs
+      LEFT JOIN game_types gt ON gs.game_type_id = gt.id
+      LEFT JOIN participants p ON gs.event_id = p.event_id
+      WHERE gs.event_id = $1 AND gs.status IN ('finished', 'closed')
+      GROUP BY gs.id, gt.name, gt.key, gs.status, gs.current_round, gs.total_rounds, gs.started_at, gs.ended_at
+      ORDER BY gs.ended_at DESC NULLS LAST
+      LIMIT $2
+      `,
+      [eventId, limit]
+    );
+
+    return result.map((r: any) => ({
+      ...r,
+      participant_count: parseInt(r.participant_count) || 0,
+      duration_minutes: r.duration_minutes ? Math.round(parseFloat(r.duration_minutes)) : null,
+    }));
+  }
 }

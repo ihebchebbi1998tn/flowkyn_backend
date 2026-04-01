@@ -30,3 +30,9 @@ export const strategicAssignRolesSchema = z.object({
     .optional()
     .default({}),
 });
+
+export const strategicStartDiscussionSchema = z.object({
+  durationMinutes: z.number().int().min(1).max(480).optional(),
+}).optional().default({});
+
+export const strategicEndDiscussionSchema = z.object({}).optional().default({});

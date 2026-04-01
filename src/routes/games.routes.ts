@@ -48,6 +48,7 @@ const sessionCtrl = {
   closeSession: _sessionCtrl.closeSession.bind(_sessionCtrl),
   deleteSession: _sessionCtrl.deleteSession.bind(_sessionCtrl),
   getActiveSessionsForEvent: _sessionCtrl.getActiveSessionsForEvent.bind(_sessionCtrl),
+  getSessionHistory: _sessionCtrl.getSessionHistory.bind(_sessionCtrl),
 };
 
 // Game types — allow guests to see available games
@@ -110,5 +111,7 @@ router.post('/game-sessions/:sessionId/close', authenticate, validate(sessionIdP
 router.delete('/game-sessions/:sessionId', authenticate, validate(sessionIdParam, 'params'), sessionCtrl.deleteSession);
 // List ALL active sessions for an event (returns array) — used by admin session management
 router.get('/events/:eventId/game-sessions/active-list', authenticate, validate(eventIdParam, 'params'), sessionCtrl.getActiveSessionsForEvent);
+// Session history — past/finished sessions (accessible to participants via guest auth)
+router.get('/events/:eventId/game-sessions/history', authenticateOrGuest, validate(eventIdParam, 'params'), sessionCtrl.getSessionHistory);
 
 export { router as gamesRoutes };

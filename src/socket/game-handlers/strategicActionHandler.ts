@@ -5,7 +5,7 @@
 import type { GameHandlerContext } from './handlerContext';
 import { toSnapshotCreatedAt } from './snapshotUtils';
 import { canControlGameFlow } from './participantAccess';
-import { strategicConfigureSchema, strategicAssignRolesSchema } from './schemas';
+import { strategicConfigureSchema, strategicAssignRolesSchema, strategicStartDiscussionSchema, strategicEndDiscussionSchema } from './schemas';
 import { isStrategicAction } from '../../games/actionPredicates';
 import { reduceStrategicState } from '../../games/strategic-escape/reducer';
 import { emitToRoomAndActor } from './reliableEmit';
@@ -60,6 +60,26 @@ export async function handleStrategicAction({
     data.payload = v.data;
   }
 
+  if (data.actionType === 'strategic:start_discussion') {
+    const v = strategicStartDiscussionSchema.safeParse(data.payload);
+    if (!v.success) {
+      socket.emit('error', { message: 'Invalid start discussion payload: ' + v.error.issues[0].message, code: 'VALIDATION' });
+      ack?.({ ok: false, error: v.error.issues[0].message, code: 'VALIDATION' });
+      return;
+    }
+    data.payload = v.data;
+  }
+
+  if (data.actionType === 'strategic:end_discussion') {
+    const v = strategicEndDiscussionSchema.safeParse(data.payload);
+    if (!v.success) {
+      socket.emit('error', { message: 'Invalid end discussion payload: ' + v.error.issues[0].message, code: 'VALIDATION' });
+      ack?.({ ok: false, error: v.error.issues[0].message, code: 'VALIDATION' });
+      return;
+    }
+    data.payload = v.data;
+  }
+
   const strPrev = actionQueues.strategicActionQueue.get(data.sessionId) ?? Promise.resolve();
   const strRun = strPrev.then(async () => {
     const freshLatest = await gamesService.getLatestSnapshot(data.sessionId);
@@ -100,10 +120,34 @@ export async function handleStrategicAction({
     });
 
     let savedSnapshot: any = null;
+    let snapshotSaveFailed = false;
     try {
       savedSnapshot = await gamesService.saveSnapshot(data.sessionId, next);
     } catch (snapErr: any) {
-      console.error('[Strategic] Snapshot save failed, broadcasting anyway', { error: snapErr?.message });
+      snapshotSaveFailed = true;
+      console.error('[Strategic] Snapshot save failed — rolling back to last known state', {
+        error: snapErr?.message,
+        actionType: data.actionType,
+        sessionId: data.sessionId,
+      });
+
+      // Broadcast the previous (known-good) state back to clients to prevent divergence
+      const rollbackState = prevState || next;
+      const rollbackPayload = {
+        sessionId: data.sessionId,
+        gameData: rollbackState,
+        actionType: data.actionType,
+        snapshotRevisionId: freshLatest?.id || null,
+        snapshotCreatedAt: toSnapshotCreatedAt(freshLatest?.created_at),
+        snapshotSaveError: true,
+      };
+      emitToRoomAndActor(gamesNs, socket, `game:${data.sessionId}`, 'game:data', rollbackPayload);
+      socket.emit('error', {
+        message: 'Game state could not be saved. Please retry your action.',
+        code: 'SNAPSHOT_SAVE_FAILED',
+      });
+      ack?.({ ok: false, error: 'Snapshot save failed — state not persisted', code: 'SNAPSHOT_SAVE_FAILED', data: rollbackState });
+      return;
     }
 
     const broadcastPayload = {
