@@ -266,7 +266,7 @@ export class StrategicEscapeService extends GameSessionCoreService {
     };
 
     await this.saveSnapshot(sessionId, debriefState);
-    await query(`UPDATE game_sessions SET debrief_sent_at = NOW() WHERE id = $1`, [sessionId]);
+    await query(`UPDATE game_sessions SET debrief_sent_at = NOW(), status = 'finished' WHERE id = $1`, [sessionId]);
 
     return {
       sessionId,

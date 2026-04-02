@@ -94,6 +94,26 @@ export async function handleStrategicAction({
       payload: JSON.stringify(data.payload).slice(0, 200),
     });
 
+    // Record the action in game_actions for debrief scoring/analytics
+    try {
+      const roundId = await gamesService.getActiveRound(data.sessionId).then(r => r?.id || null).catch(() => null);
+      if (roundId) {
+        await gamesService.submitAction(
+          data.sessionId,
+          roundId,
+          participant.participantId,
+          data.actionType,
+          data.payload || {},
+        );
+      }
+    } catch (recordErr: any) {
+      // Non-fatal: don't block game flow if action recording fails
+      console.warn('[Strategic] Failed to record action in game_actions (non-fatal)', {
+        actionType: data.actionType,
+        error: recordErr?.message,
+      });
+    }
+
     // Side-effect: actually assign roles in the DB before updating snapshot
     if (data.actionType === 'strategic:assign_roles') {
       const alreadyAssigned = prevState?.rolesAssigned && prevState?.phase === 'roles_assignment';
