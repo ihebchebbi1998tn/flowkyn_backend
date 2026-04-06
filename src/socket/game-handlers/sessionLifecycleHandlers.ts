@@ -362,17 +362,9 @@ export function registerSessionLifecycleHandlers(ctx: GameHandlerContext): void 
       );
 
       if (session?.status === 'finished') {
-        console.info('[Games] Game already finished, returning cached results', { sessionId: data.sessionId });
-        const results = await query(
-          `SELECT participant_id, final_score FROM game_results WHERE game_session_id = $1`,
-          [data.sessionId],
-        );
-        gamesNs.to(`game:${data.sessionId}`).emit('game:ended', {
-          sessionId: data.sessionId,
-          results: results.map((r: any) => ({ participantId: r.participant_id, score: r.final_score })),
-          isRetry: true,
-          timestamp: new Date().toISOString(),
-        });
+        console.info('[Games] Game already finished, skipping duplicate end', { sessionId: data.sessionId });
+        // Don't re-broadcast game:ended — it causes unnecessary state sync loops on all clients.
+        // The original game:ended was already sent when the session was first finished.
         return;
       }
 

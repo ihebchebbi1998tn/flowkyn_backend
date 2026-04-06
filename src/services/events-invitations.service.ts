@@ -301,22 +301,14 @@ export class EventInvitationsService {
       [uuid(), eventId, email, invitedByMemberId, hashedToken]
     );
 
-    // Use the provided gameId; if missing, look up the event's active game session; never default to '1'
-    let gameParam = gameId && String(gameId).trim() ? String(gameId).trim() : '';
-    if (!gameParam) {
-      const activeGame = await queryOne<{ key: string }>(
-        `SELECT gt.key FROM game_sessions gs JOIN game_types gt ON gs.game_type_id = gt.id
-         WHERE gs.event_id = $1 AND gs.status != 'finished' ORDER BY gs.created_at DESC LIMIT 1`,
-        [eventId]
-      );
-      gameParam = activeGame?.key || '';
-    }
+    // Use the provided gameId (config ID like '1','2') for the ?activity= param in the join link
+    const activityParam = gameId && String(gameId).trim() ? String(gameId).trim() : '';
     await sendEmail({
       to: email,
       type: 'event_invitation',
       data: { 
         eventTitle, 
-        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${gameParam ? `&game=${gameParam}` : ''}`,
+        link: `${env.frontendUrl}/join/${eventId}?token=${rawToken}${activityParam ? `&activity=${activityParam}` : ''}`,
         startTime: startTime ? String(startTime) : undefined,
         endTime: endTime ? String(endTime) : undefined
       },

@@ -61,6 +61,20 @@ async function getDynamicTopic(eventId: string): Promise<{ text: string; id?: st
     'gamePlay.coffeeRoulette.fallbackTopics.t9',
     'gamePlay.coffeeRoulette.fallbackTopics.t10',
     'gamePlay.coffeeRoulette.fallbackTopics.t11',
+    'gamePlay.coffeeRoulette.fallbackTopics.t12',
+    'gamePlay.coffeeRoulette.fallbackTopics.t13',
+    'gamePlay.coffeeRoulette.fallbackTopics.t14',
+    'gamePlay.coffeeRoulette.fallbackTopics.t15',
+    'gamePlay.coffeeRoulette.fallbackTopics.t16',
+    'gamePlay.coffeeRoulette.fallbackTopics.t17',
+    'gamePlay.coffeeRoulette.fallbackTopics.t18',
+    'gamePlay.coffeeRoulette.fallbackTopics.t19',
+    'gamePlay.coffeeRoulette.fallbackTopics.t20',
+    'gamePlay.coffeeRoulette.fallbackTopics.t21',
+    'gamePlay.coffeeRoulette.fallbackTopics.t22',
+    'gamePlay.coffeeRoulette.fallbackTopics.t23',
+    'gamePlay.coffeeRoulette.fallbackTopics.t24',
+    'gamePlay.coffeeRoulette.fallbackTopics.t25',
   ];
 
   const randomKey = FALLBACK_TOPIC_KEYS[Math.floor(Math.random() * FALLBACK_TOPIC_KEYS.length)];
