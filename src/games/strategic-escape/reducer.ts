@@ -14,6 +14,18 @@ export type StrategicState = {
   gameStatus?: 'waiting' | 'in_progress' | 'finished';
 };
 
+/** Admin/lifecycle actions that should not count toward participant scoring */
+const ADMIN_ACTION_TYPES = new Set([
+  'strategic:configure',
+  'strategic:assign_roles',
+  'strategic:start_discussion',
+  'strategic:end_discussion',
+]);
+
+export function isAdminAction(actionType: string): boolean {
+  return ADMIN_ACTION_TYPES.has(actionType);
+}
+
 export async function reduceStrategicState(args: {
   eventId: string;
   actionType: string;
@@ -72,7 +84,9 @@ export async function reduceStrategicState(args: {
   }
 
   if (actionType === 'strategic:start_discussion') {
+    // Only allow from roles_assignment phase — prevent re-entering from discussion (which would reset the timer)
     if (base.phase !== 'roles_assignment') {
+      // If already in discussion with a timer, don't allow restarting
       if (base.phase === 'discussion' && base.discussionEndsAt) return base;
       if (base.phase !== 'discussion') return base;
     }
@@ -82,12 +96,14 @@ export async function reduceStrategicState(args: {
         : Number(session?.resolved_timing?.strategicEscape?.discussionDurationMinutes ?? 45);
     const minutes = Number.isFinite(rawMinutes) ? rawMinutes : (base.discussionDurationMinutes ?? 45);
     const safeDuration = Math.max(1, minutes);
+    // Always use server time — never trust client-provided _now
+    const serverNow = Date.now();
     return {
       ...base,
       phase: 'discussion',
       discussionDurationMinutes: safeDuration,
-      discussionEndsAt: new Date((payload?._now ?? Date.now()) + safeDuration * 60000).toISOString(),
-      _serverNow: new Date(payload?._now ?? Date.now()).toISOString(),
+      discussionEndsAt: new Date(serverNow + safeDuration * 60000).toISOString(),
+      _serverNow: new Date(serverNow).toISOString(),
       gameStatus: 'in_progress',
     };
   }

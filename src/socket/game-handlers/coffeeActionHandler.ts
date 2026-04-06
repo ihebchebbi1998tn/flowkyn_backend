@@ -140,7 +140,7 @@ export async function handleCoffeeAction({
     }
 
     // If requested, also close the DB session and broadcast game:ended
-    if (data.actionType === 'coffee:end_and_finish') {
+    if (data.actionType === 'coffee:end_and_finish' || data.actionType === 'coffee:reset') {
       const existingEnd = await queryOne(
         `SELECT id FROM game_sessions WHERE id = $1 AND status = 'finished'`,
         [data.sessionId],
@@ -241,6 +241,14 @@ export async function handleCoffeeRematchOnLeave(
         prev: (latestSnapshot?.state as any) || null,
         session,
       });
+
+      // Preserve the existing chatEndsAt timer if we were in chatting phase
+      const prevState = latestSnapshot?.state as any;
+      if (prevState?.phase === 'chatting' && prevState?.chatEndsAt && (next as any)?.phase === 'matching') {
+        (next as any).chatEndsAt = prevState.chatEndsAt;
+        (next as any).startedChatAt = prevState.startedChatAt;
+        (next as any).chatDurationMinutes = prevState.chatDurationMinutes;
+      }
 
       const savedSnapshot = await gamesService.saveSnapshot(sessionId, next);
       gamesNs.to(`game:${sessionId}`).emit('game:data', {

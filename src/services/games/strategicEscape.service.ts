@@ -4,6 +4,7 @@
 import { query, queryOne, transaction } from '../../config/database';
 import { AppError } from '../../middleware/errorHandler';
 import { GameSessionCoreService } from './sessionCore.service';
+import { isAdminAction } from '../../games/strategic-escape/reducer';
 
 export class StrategicEscapeService extends GameSessionCoreService {
   /**
@@ -190,6 +191,8 @@ export class StrategicEscapeService extends GameSessionCoreService {
       const actionsByRole = new Map<string, number>();
 
       for (const action of actions) {
+        // Skip admin/lifecycle actions from scoring (configure, assign_roles, etc.)
+        if (isAdminAction(action.action_type)) continue;
         scoreByParticipant.set(action.participant_id, (scoreByParticipant.get(action.participant_id) || 0) + 1);
         const role = roleByParticipant.get(action.participant_id);
         if (role) {

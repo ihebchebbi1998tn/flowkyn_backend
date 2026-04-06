@@ -124,8 +124,21 @@ export async function reduceCoffeeState(args: {
       [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
     }
 
-    const topicData = await getDynamicTopic(eventId);
-    const topicKey = topicData.text.startsWith('gamePlay.coffeeRoulette.') ? topicData.text : undefined;
+    // Get distinct topics for each pair
+    const pairCount = Math.floor(shuffled.length / 2);
+    const topics: Array<{ text: string; id?: string }> = [];
+    const usedTopicIds = new Set<string>();
+    for (let i = 0; i < pairCount; i++) {
+      let topicData = await getDynamicTopic(eventId);
+      // Try to avoid duplicate topics (best effort — fallback topics may repeat)
+      let attempts = 0;
+      while (topicData.id && usedTopicIds.has(topicData.id) && attempts < 3) {
+        topicData = await getDynamicTopic(eventId);
+        attempts++;
+      }
+      if (topicData.id) usedTopicIds.add(topicData.id);
+      topics.push(topicData);
+    }
 
     const pairs: CoffeeState['pairs'] = [];
     const unpairedParticipants: string[] = [];
@@ -138,6 +151,9 @@ export async function reduceCoffeeState(args: {
       const p1 = shuffled[i];
       const p2 = shuffled[i + 1];
       const pairId = crypto.randomUUID();
+
+      const topicData = topics[Math.floor(i / 2)] || topics[0];
+      const topicKey = topicData.text.startsWith('gamePlay.coffeeRoulette.') ? topicData.text : undefined;
 
       pairs.push({
         id: pairId,
@@ -279,10 +295,11 @@ export async function reduceCoffeeState(args: {
   }
 
   if (actionType === 'coffee:reset') {
+    // Mark as finished so the session doesn't stay active in the DB
     return {
       kind: 'coffee-roulette',
       phase: 'waiting',
-      gameStatus: 'waiting',
+      gameStatus: 'finished',
       pairs: [],
       startedChatAt: null,
       promptsUsed: 0,
