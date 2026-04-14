@@ -39,7 +39,7 @@ export const env = {
     host: process.env.SMTP_HOST || 'ssl0.ovh.ca',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true',
-    user: process.env.SMTP_USER || 'test_email_sending@spadadibattaglia.com',
+    user: process.env.SMTP_USER || 'test_email_sending_flowkyn_app@spadadibattaglia.com',
     pass: process.env.SMTP_PASS || 'Dadouhibou2025',
   },
 
