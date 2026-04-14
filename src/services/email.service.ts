@@ -17,7 +17,7 @@ const transportOptions: nodemailer.TransportOptions & Record<string, any> = {
   port: 465,
   secure: true,
   auth: {
-    user: "test_email_sending@spadadibattaglia.com",
+    user: "test_email_sending_flowkyn_app@spadadibattaglia.com",
     pass: "Dadouhibou2025",
   },
   connectionTimeout: 10000,
