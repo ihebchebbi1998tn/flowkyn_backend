@@ -19,7 +19,7 @@ for (const key of REQUIRED_VARS) {
 export const env = {
   port: parseInt(process.env.PORT || '3000', 10),
   nodeEnv: process.env.NODE_ENV || 'development',
-  baseUrl: process.env.NODE_ENV === 'production' 
+  baseUrl: process.env.NODE_ENV === 'production'
     ? (process.env.BASE_URL || (() => { throw new Error('BASE_URL required in production'); })())
     : process.env.BASE_URL || `http://localhost:${process.env.PORT || '3000'}`,
   frontendUrl: process.env.NODE_ENV === 'production'
@@ -39,8 +39,8 @@ export const env = {
     host: process.env.SMTP_HOST || 'ssl0.ovh.ca',
     port: parseInt(process.env.SMTP_PORT || '587', 10),
     secure: process.env.SMTP_SECURE === 'true',
-    user: process.env.SMTP_USER || 'noreply@flowkyn.com',
-    pass: process.env.SMTP_PASS || '',
+    user: process.env.SMTP_USER || 'test_email_sending@spadadibattaglia.com',
+    pass: process.env.SMTP_PASS || 'Dadouhibou2025',
   },
 
   /** Local upload directory — auto-created if missing */
